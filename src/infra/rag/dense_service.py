@@ -1,20 +1,8 @@
 #!/usr/bin/env python3
 # src/infra/rag/dense_service.py
-# Deterministic generator for Dense embedder Kubernetes manifests.
-# Writes manifests to src/infra/manifests/dense_service/
-#
-# Features:
-# - Strong, sensible defaults for prod vs non-prod
-# - Idempotent generation: stores inputs hash and skips writes when nothing changed
-# - Atomic file writes
-# - Safe kubectl apply wrapper and rollout wait
-# - Clear validation and early failures
-# - Type hints and robust subprocess handling
-
 from __future__ import annotations
 
 import argparse
-import datetime
 import hashlib
 import json
 import logging
@@ -27,29 +15,31 @@ from typing import Any
 
 import yaml
 
-# -------------------- logging --------------------
 LOG_LEVEL = os.environ.get("GEN_DENSE_LOGLEVEL", "INFO").upper()
 logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO), format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("gen_dense")
 
-# -------------------- defaults & constants --------------------
 DEFAULT_MANIFESTS_DIR = Path("src/infra/manifests/dense_service")
 DEFAULT_STATE_DIRNAME = ".state"
 DEFAULTS: dict[str, Any] = {
-    "ENV": "PROD",
-    "IMAGE": "docker.io/athithya5354/dense:amd64-arm64-v1",
+    "DEPLOY_ENV": "NONPROD",
+    "IMAGE": "ghcr.io/athithya-sakthivel/dense:2026-04-24-14-35--50d1ff9@sha256:92a1d23be33e69ed84cfb787764a2176167eb0dcd94396354f3fc4da94ae517c",
     "NAMESPACE": "models",
     "SERVICE_NAME": "dense",
     "CONTAINER_PORT": 8200,
     "HOST": "0.0.0.0",
     "LOGLEVEL": "INFO",
-    # production vs staging defaults
+    "DENSE_MODEL_NAME": "BAAI/bge-small-en-v1.5",
+    "DENSE_DIM": 384,
+    "DENSE_BATCH_SIZE": 16,
+    "DENSE_NORMALIZE": True,
+    "DENSE_CUDA": False,
     "PROD": {
-        "REPLICAS": 3,
+        "REPLICAS": 2,
         "CPU_REQUEST": "1000m",
         "CPU_LIMIT": "4000m",
         "MEMORY_REQUEST": "1Gi",
-        "MEMORY_LIMIT": "4Gi",
+        "MEMORY_LIMIT": "2Gi",
         "STARTUP_FAILURE_THRESHOLD": 24,
     },
     "NONPROD": {
@@ -82,8 +72,6 @@ DEFAULTS: dict[str, Any] = {
     "STATE_DIRNAME": DEFAULT_STATE_DIRNAME,
 }
 
-# -------------------- helpers --------------------
-
 
 def ensure_dir(p: Path) -> None:
     p.mkdir(parents=True, exist_ok=True)
@@ -103,10 +91,6 @@ def run_cmd(
     timeout: int | None = None,
     input_text: str | None = None,
 ) -> tuple[int, str, str]:
-    """
-    Run a subprocess and return (rc, stdout, stderr).
-    Uses text mode consistently and capture_output when requested.
-    """
     try:
         proc = subprocess.run(
             cmd,
@@ -124,10 +108,6 @@ def run_cmd(
 
 
 def canonical_inputs_hash(cfg: dict[str, Any]) -> str:
-    """
-    Create a stable hash of the configuration inputs that matter for manifest generation.
-    Excludes transient keys like file paths to state.
-    """
     serial: dict[str, Any] = {}
     for k in sorted(cfg.keys()):
         if k in ("INPUTS_HASH_PATH", "MANIFESTS_DIR", "STATE_DIRNAME"):
@@ -160,14 +140,13 @@ def kubectl_apply_yaml(yaml_str: str, dry_run: bool = False, timeout: int = 120)
         return {"applied": False, "stderr": f"timeout: {e}"}
 
 
-# -------------------- config loader --------------------
-
-
 def load_config() -> dict[str, Any]:
     cfg: dict[str, Any] = {}
 
-    env = os.environ.get("DENSE_ENV", os.environ.get("ENV", DEFAULTS["ENV"])).upper()
-    cfg["ENV"] = env
+    deploy_env = os.environ.get("DEPLOY_ENV") or os.environ.get("DENSE_ENV") or os.environ.get("ENV") or DEFAULTS["DEPLOY_ENV"]
+    env = str(deploy_env).upper()
+    cfg["DEPLOY_ENV"] = env
+
     cfg["MANIFESTS_DIR"] = Path(os.environ.get("MANIFESTS_DIR", DEFAULTS["MANIFESTS_DIR"]))
     cfg["STATE_DIRNAME"] = os.environ.get("STATE_DIRNAME", DEFAULTS["STATE_DIRNAME"])
     cfg["INPUTS_HASH_PATH"] = cfg["MANIFESTS_DIR"] / cfg["STATE_DIRNAME"] / "inputs.sha256"
@@ -183,15 +162,7 @@ def load_config() -> dict[str, Any]:
     cfg["ROLE_NAME"] = os.environ.get("DENSE_ROLE_NAME", f"{cfg['SERVICE_NAME']}-role")
     cfg["ROLEBIND_NAME"] = os.environ.get("DENSE_ROLEBIND_NAME", f"{cfg['SERVICE_NAME']}-rb")
 
-    if env == "STAGING":
-        prod = DEFAULTS["NONPROD"]
-        cfg["REPLICAS"] = int(os.environ.get("DENSE_REPLICAS", str(prod["REPLICAS"])))
-        cfg["CPU_REQUEST"] = os.environ.get("DENSE_CPU_REQUEST", prod["CPU_REQUEST"])
-        cfg["CPU_LIMIT"] = os.environ.get("DENSE_CPU_LIMIT", prod["CPU_LIMIT"])
-        cfg["MEMORY_REQUEST"] = os.environ.get("DENSE_MEMORY_REQUEST", prod["MEMORY_REQUEST"])
-        cfg["MEMORY_LIMIT"] = os.environ.get("DENSE_MEMORY_LIMIT", prod["MEMORY_LIMIT"])
-        cfg["STARTUP_FAILURE_THRESHOLD"] = int(os.environ.get("DENSE_STARTUP_FAILURE_THRESHOLD", str(prod["STARTUP_FAILURE_THRESHOLD"])))
-    else:
+    if env in ("PROD", "PRODUCTION"):
         prod = DEFAULTS["PROD"]
         cfg["REPLICAS"] = int(os.environ.get("DENSE_REPLICAS", str(prod["REPLICAS"])))
         cfg["CPU_REQUEST"] = os.environ.get("DENSE_CPU_REQUEST", prod["CPU_REQUEST"])
@@ -199,6 +170,14 @@ def load_config() -> dict[str, Any]:
         cfg["MEMORY_REQUEST"] = os.environ.get("DENSE_MEMORY_REQUEST", prod["MEMORY_REQUEST"])
         cfg["MEMORY_LIMIT"] = os.environ.get("DENSE_MEMORY_LIMIT", prod["MEMORY_LIMIT"])
         cfg["STARTUP_FAILURE_THRESHOLD"] = int(os.environ.get("DENSE_STARTUP_FAILURE_THRESHOLD", str(prod["STARTUP_FAILURE_THRESHOLD"])))
+    else:
+        nonprod = DEFAULTS["NONPROD"]
+        cfg["REPLICAS"] = int(os.environ.get("DENSE_REPLICAS", str(nonprod["REPLICAS"])))
+        cfg["CPU_REQUEST"] = os.environ.get("DENSE_CPU_REQUEST", nonprod["CPU_REQUEST"])
+        cfg["CPU_LIMIT"] = os.environ.get("DENSE_CPU_LIMIT", nonprod["CPU_LIMIT"])
+        cfg["MEMORY_REQUEST"] = os.environ.get("DENSE_MEMORY_REQUEST", nonprod["MEMORY_REQUEST"])
+        cfg["MEMORY_LIMIT"] = os.environ.get("DENSE_MEMORY_LIMIT", nonprod["MEMORY_LIMIT"])
+        cfg["STARTUP_FAILURE_THRESHOLD"] = int(os.environ.get("DENSE_STARTUP_FAILURE_THRESHOLD", str(nonprod["STARTUP_FAILURE_THRESHOLD"])))
 
     cfg["PROBE_PERIOD_SECONDS"] = int(os.environ.get("DENSE_PROBE_PERIOD_SECONDS", str(DEFAULTS["PROBE_PERIOD_SECONDS"])))
     cfg["READINESS_INITIAL_DELAY"] = int(os.environ.get("DENSE_READINESS_INITIAL_DELAY", str(DEFAULTS["READINESS_INITIAL_DELAY"])))
@@ -215,12 +194,25 @@ def load_config() -> dict[str, Any]:
     cfg["HPA_MAX"] = int(os.environ.get("DENSE_HPA_MAX_REPLICAS", str(DEFAULTS["HPA_MAX"])))
     cfg["HPA_TARGET_CPU"] = int(os.environ.get("DENSE_HPA_TARGET_CPU", str(DEFAULTS["HPA_TARGET_CPU"])))
 
+    cfg["DENSE_MODEL_NAME"] = os.environ.get("DENSE_MODEL_NAME", DEFAULTS["DENSE_MODEL_NAME"])
+    try:
+        cfg["DENSE_DIM"] = int(os.environ.get("DENSE_DIM", str(DEFAULTS["DENSE_DIM"])))
+    except Exception:
+        cfg["DENSE_DIM"] = DEFAULTS["DENSE_DIM"]
+    try:
+        cfg["DENSE_BATCH_SIZE"] = int(os.environ.get("DENSE_BATCH_SIZE", str(DEFAULTS["DENSE_BATCH_SIZE"])))
+    except Exception:
+        cfg["DENSE_BATCH_SIZE"] = DEFAULTS["DENSE_BATCH_SIZE"]
+    cfg["DENSE_NORMALIZE"] = os.environ.get("DENSE_NORMALIZE", str(DEFAULTS["DENSE_NORMALIZE"])).lower() in ("1", "true", "yes")
+    cfg["DENSE_CUDA"] = os.environ.get("DENSE_CUDA", str(DEFAULTS["DENSE_CUDA"])).lower() in ("1", "true", "yes")
+    cfg["PRELOAD_MODEL"] = os.environ.get("DENSE_PRELOAD_MODEL", "0").lower() in ("1", "true", "yes")
+
     cfg["LABELS"] = {
         "app.kubernetes.io/name": cfg["SERVICE_NAME"],
         "app.kubernetes.io/component": "embedder",
         "app.kubernetes.io/managed-by": "gen_dense",
         "app.kubernetes.io/instance": cfg["SERVICE_NAME"],
-        "env": cfg["ENV"].lower(),
+        "env": cfg["DEPLOY_ENV"].lower(),
     }
     cfg["MAX_UNAVAILABLE"] = os.environ.get("DENSE_MAX_UNAVAILABLE", DEFAULTS["MAX_UNAVAILABLE"])
     cfg["MAX_SURGE"] = os.environ.get("DENSE_MAX_SURGE", DEFAULTS["MAX_SURGE"])
@@ -236,10 +228,8 @@ def load_config() -> dict[str, Any]:
     }
 
     cfg["UUID_SHORT"] = str(uuid.uuid4())[:8]
+    log.info("Loaded config: DEPLOY_ENV=%s replicas=%d image=%s", cfg["DEPLOY_ENV"], cfg["REPLICAS"], cfg["IMAGE"])
     return cfg
-
-
-# -------------------- renderers --------------------
 
 
 def render_namespace(cfg: dict[str, Any]) -> str:
@@ -284,8 +274,14 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
         "ports": [{"containerPort": cfg["CONTAINER_PORT"]}],
         "env": [
             {"name": "DENSE_PORT", "value": str(cfg["CONTAINER_PORT"])},
-            {"name": "ENV", "value": cfg["ENV"]},
+            {"name": "DEPLOY_ENV", "value": cfg["DEPLOY_ENV"]},
             {"name": "DENSE_LOGLEVEL", "value": cfg["LOGLEVEL"]},
+            {"name": "DENSE_MODEL_NAME", "value": str(cfg["DENSE_MODEL_NAME"])},
+            {"name": "DENSE_DIM", "value": str(cfg["DENSE_DIM"])},
+            {"name": "DENSE_BATCH_SIZE", "value": str(cfg["DENSE_BATCH_SIZE"])},
+            {"name": "DENSE_NORMALIZE", "value": "1" if cfg.get("DENSE_NORMALIZE", False) else "0"},
+            {"name": "DENSE_CUDA", "value": "1" if cfg.get("DENSE_CUDA", False) else "0"},
+            {"name": "PRELOAD_MODEL", "value": "1" if cfg.get("PRELOAD_MODEL", False) else "0"},
         ],
         "livenessProbe": {
             "httpGet": {"path": "/health", "port": cfg["CONTAINER_PORT"]},
@@ -390,14 +386,7 @@ def render_hpa(cfg: dict[str, Any]) -> str:
     return yaml.safe_dump(hpa, sort_keys=False)
 
 
-# -------------------- generate / rollout / delete --------------------
-
-
 def generate_manifests(cfg: dict[str, Any], dry_run: bool = False, verbose: bool = False) -> str | None:
-    """
-    Generate manifests to MANIFESTS_DIR.
-    Returns inputs_hash if generation occurred or was written; returns None if skipped.
-    """
     manifests_dir: Path = cfg["MANIFESTS_DIR"]
     ensure_dir(manifests_dir)
     inputs_hash = canonical_inputs_hash(cfg)
@@ -413,7 +402,7 @@ def generate_manifests(cfg: dict[str, Any], dry_run: bool = False, verbose: bool
         existing = None
 
     if existing == inputs_hash and not dry_run:
-        log.info("No non-secret changes detected; generation skipped.")
+        log.info("No changes detected; skipping manifest generation.")
         return None
 
     ns_yaml = render_namespace(cfg)
@@ -431,26 +420,26 @@ def generate_manifests(cfg: dict[str, Any], dry_run: bool = False, verbose: bool
 
     (state_dir / "inputs.sha256").write_text(inputs_hash + "\n", encoding="utf-8")
 
-    log.info("Wrote manifests to %s", str(manifests_dir))
+    log.info("Manifests written to %s (inputs_hash=%s)", str(manifests_dir), inputs_hash)
     if verbose:
-        log.info("Namespace (head):\n%s", "\n".join(ns_yaml.splitlines()[:20]))
-        log.info("Deployment (head):\n%s", "\n".join(deploy_yaml.splitlines()[:60]))
+        log.debug("Namespace manifest head:\n%s", "\n".join(ns_yaml.splitlines()[:20]))
+        log.debug("Deployment manifest head:\n%s", "\n".join(deploy_yaml.splitlines()[:60]))
     return inputs_hash
 
 
 def apply_to_cluster(cfg: dict[str, Any], dry_run: bool = False, verbose: bool = False, mode_label: str = "rollout") -> None:
     kubectl = shutil.which("kubectl")
     if not kubectl:
-        log.error("kubectl not found in PATH; cannot apply")
+        log.error("kubectl not found; aborting apply.")
         raise SystemExit(2) from None
 
     inputs_hash = generate_manifests(cfg, dry_run=dry_run, verbose=verbose)
     if dry_run:
-        log.info("Dry-run: skipping kubectl apply")
+        log.info("Dry-run requested; skipping kubectl apply.")
         return
 
     if inputs_hash is None:
-        log.info("No manifest changes detected; skipping kubectl apply.")
+        log.info("No manifest changes; skipping kubectl apply.")
         return
 
     files = [cfg["FILES"]["namespace"], cfg["FILES"]["sa_role"], cfg["FILES"]["deployment"], cfg["FILES"]["service"]]
@@ -460,42 +449,31 @@ def apply_to_cluster(cfg: dict[str, Any], dry_run: bool = False, verbose: bool =
     combined = ""
     for p in files:
         if not p.exists():
-            log.warning("Expected manifest missing: %s (skipping)", str(p))
+            log.warning("Manifest missing, skipping: %s", str(p))
             continue
         combined += f"---\n# source: {p.name}\n" + p.read_text(encoding="utf-8") + "\n"
 
     res = kubectl_apply_yaml(combined, dry_run=False)
     if not res.get("applied", False):
-        log.error("%s failed: %s", mode_label, res.get("stderr") or res.get("error"))
+        log.error("%s apply failed: %s", mode_label, res.get("stderr") or res.get("error"))
         raise SystemExit(2) from None
 
     deployment_name = f"{cfg['SERVICE_NAME']}-deployment"
-    rc, _, _ = run_cmd([shutil.which("kubectl") or "kubectl", "rollout", "status", f"deployment/{deployment_name}", "-n", cfg["NAMESPACE"], f"--timeout={cfg.get('ROLLOUT_TIMEOUT', 300)}s"], timeout=cfg.get("ROLLOUT_TIMEOUT", 300) + 10)
+    log.info("Applied manifests; waiting for rollout of %s/%s", cfg["NAMESPACE"], deployment_name)
+    rc, out, err = run_cmd([shutil.which("kubectl") or "kubectl", "rollout", "status", f"deployment/{deployment_name}", "-n", cfg["NAMESPACE"], f"--timeout={cfg.get('ROLLOUT_TIMEOUT', 300)}s"], timeout=cfg.get("ROLLOUT_TIMEOUT", 300) + 10)
     if rc != 0:
-        log.error("Rollout failed or timed out; gathering diagnostics...")
+        log.error("Rollout failed or timed out (rc=%d). Gathering diagnostics.", rc)
         cmds: list[tuple[list[str], str]] = [
             ([shutil.which("kubectl") or "kubectl", "get", "pods", "-n", cfg["NAMESPACE"]], "get pods"),
             ([shutil.which("kubectl") or "kubectl", "describe", "pod", "-l", f"app.kubernetes.io/name={cfg['SERVICE_NAME']}", "-n", cfg["NAMESPACE"]], "describe pods"),
             ([shutil.which("kubectl") or "kubectl", "logs", "-l", f"app.kubernetes.io/name={cfg['SERVICE_NAME']}", "-n", cfg["NAMESPACE"], "--tail=200"], "logs"),
         ]
         for cmd, tag in cmds:
-            if not cmd or not cmd[0]:
-                continue
             rcout, out, err = run_cmd(cmd, timeout=30)
             log.error("=== %s (rc=%d) ===\n%s\n%s", tag, rcout, (out or "").strip(), (err or "").strip())
-        log.error("Deployment %s failed to rollout", deployment_name)
         raise SystemExit(2) from None
 
-    summary = {
-        "generated_at": datetime.datetime.utcnow().isoformat() + "Z",
-        "image": cfg["IMAGE"],
-        "namespace": cfg["NAMESPACE"],
-        "replicas": cfg["REPLICAS"],
-        "inputs_hash": inputs_hash,
-        "files": {k: str(v) for k, v in cfg["FILES"].items()},
-    }
-    atomic_write(cfg["MANIFESTS_DIR"] / "last_deploy_summary.json", json.dumps(summary, indent=2))
-    log.info("%s complete; wrote deploy summary", mode_label)
+    log.info("Rollout successful for %s/%s", cfg["NAMESPACE"], deployment_name)
 
 
 def delete_manifests(cfg: dict[str, Any]) -> None:
@@ -517,18 +495,14 @@ def delete_manifests(cfg: dict[str, Any]) -> None:
                 log.debug("Failed to remove state dir %s", state_dir, exc_info=True)
         log.info("Deleted manifests at %s", str(manifests_dir))
     else:
-        log.info("Manifests dir not present: %s", str(manifests_dir))
-
-
-# -------------------- CLI --------------------
+        log.info("No manifests found at %s", str(manifests_dir))
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Generate/rollout/delete Dense embedder Kubernetes manifests.")
     grp = p.add_mutually_exclusive_group(required=True)
     grp.add_argument("--generate", action="store_true", help="Generate manifests to MANIFESTS_DIR.")
-    grp.add_argument("--rollout", action="store_true", help="Create or converge resources to desired state (preferred over --apply).")
-    grp.add_argument("--apply", action="store_true", help="Legacy alias for --rollout (deprecated).")
+    grp.add_argument("--rollout", action="store_true", help="Create or converge resources to desired state.")
     grp.add_argument("--delete", action="store_true", help="Delete generated manifests.")
     p.add_argument("--dry-run", action="store_true", help="Render and validate but do not write or apply.")
     p.add_argument("--verbose", action="store_true", help="Print extra debug info.")
@@ -539,17 +513,16 @@ def main() -> None:
     args = parse_args()
     cfg = load_config()
     if args.delete:
+        log.info("Delete requested.")
         delete_manifests(cfg)
         return
     if args.generate:
+        log.info("Generate requested.")
         generate_manifests(cfg, dry_run=args.dry_run, verbose=args.verbose)
         return
     if args.rollout:
+        log.info("Rollout requested.")
         apply_to_cluster(cfg, dry_run=args.dry_run, verbose=args.verbose, mode_label="rollout")
-        return
-    if args.apply:
-        log.warning("--apply is deprecated; use --rollout")
-        apply_to_cluster(cfg, dry_run=args.dry_run, verbose=args.verbose, mode_label="apply")
         return
 
 
