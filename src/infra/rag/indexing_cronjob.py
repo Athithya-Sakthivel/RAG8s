@@ -1,819 +1,467 @@
 #!/usr/bin/env python3
-# Generates CronJob + RBAC + supporting manifests for the indexing pipeline.
-# This variant enhances idempotent rollout behavior (render/hash/state) and
-# cluster-aware AWS auth (IRSA for EKS, static creds for kind).
-
 from __future__ import annotations
 
-import hashlib
+import argparse
 import os
-import shutil
 import subprocess
 import sys
+import tempfile
 import time
-import traceback
 from pathlib import Path
 from typing import Any
 
-import yaml
+try:
+    import yaml
+except Exception:  # pragma: no cover
+    print("ERROR: PyYAML required. Install with: pip install pyyaml", file=sys.stderr)
+    raise SystemExit(2) from None
 
-# --- Defaults and runtime keys ------------------------------------------------
 
 DEFAULTS: dict[str, str] = {
     "NAMESPACE": "indexing",
     "CRONJOB_NAME": "indexing-backup-cronjob",
-    "INDEXING_BACKUP_CRON_EXPRESSION": "0 */6 * * *",
     "CRON_SCHEDULE": "0 */6 * * *",
     "CRONJOB_CONCURRENCY": "Allow",
     "CRONJOB_BACKOFF_LIMIT": "1",
-    "CRONJOB_PARALLELISM": "3",
-    "CRONJOB_COMPLETIONS": "1",
-    "CRONJOB_DEBUG_KEEP_POD": "false",
+    "CRONJOB_SUCCESSFUL_JOBS_HISTORY_LIMIT": "3",
+    "CRONJOB_FAILED_JOBS_HISTORY_LIMIT": "1",
     "CRONJOB_TIMEZONE": "",
-    "SUCCESSFUL_JOBS_HISTORY_LIMIT": "3",
-    "FAILED_JOBS_HISTORY_LIMIT": "1",
     "SERVICE_ACCOUNT_NAME": "indexer-cron-sa",
-    "ROLE_NAME": "indexer-cron-role",
-    "ROLEBINDING_NAME": "indexer-cron-rb",
-    "INDEXING_PIPELINE_CPU_IMAGE_REPO": "athithya5354/indexing_pipeline_cpu",
-    "INDEXING_PIPELINE_CPU_IMAGE_TAG": "v12",
+    "MANIFESTS_DIR": "src/manifests/indexing_cronjob",
+    "INDEXING_PIPELINE_CPU_IMAGE_REPO": "ghcr.io/athithya-sakthivel/indexing-pipeline",
+    "INDEXING_PIPELINE_CPU_IMAGE_TAG": "2026-04-24-11-24--324996b",
     "INDEXING_BACKUP_CRONJOB_CPU_REQUEST": "2",
-    "INDEXING_BACKUP_CRONJOB_CPU_LIMIT": "4",
+    "INDEXING_BACKUP_CRONJOB_CPU_LIMIT": "6",
     "INDEXING_BACKUP_CRONJOB_MEMORY_REQUEST": "1Gi",
     "INDEXING_BACKUP_CRONJOB_MEMORY_LIMIT": "2Gi",
     "LOG_LEVEL": "INFO",
     "HTTP_TIMEOUT": "60",
+    "INDEXING_STRICT": "1",
+    "RUN_PRE_CONVERSIONS": "0",
+    "PYTHONUNBUFFERED": "1",
     "QDRANT_URL": "http://qdrant.qdrant.svc.cluster.local:6333",
     "DENSE_URL": "http://dense-svc.models.svc.cluster.local:8200",
     "SPARSE_URL": "http://sparse-svc.models.svc.cluster.local:8201",
-    "PYTHONUNBUFFERED": "1",
-    "MANIFESTS_DIR": "src/manifests/indexing_cronjob",
-    # AWS-specific defaults
     "DATA_S3_BUCKET": "",
-    "AWS_REGION": "us-east-1",
+    "DATA_S3_PREFIX": "qdrant/backups",
+    "AWS_REGION": "",
+    "AWS_DEFAULT_REGION": "",
     "STORAGE_RAW_PREFIX": "data/raw/",
     "STORAGE_CHUNKED_PREFIX": "data/chunked/",
-    # IRSA role annotation key default (empty unless provided)
+    "QDRANT_API_KEY": "",
+    "QDRANT_SECRET_NAME": "qdrant-api-key",
+    "AWS_CREDENTIALS_SECRET_NAME": "indexer-aws-creds",
+    "EXTRA_SECRET_NAME": "indexer-extra-secrets",
+    "USE_IRSA": "",
     "IRSA_ROLE_ARN": "",
-    # state dir for idempotency
-    "STATE_DIR": ".state",
+    "K8S_CLUSTER": "",
 }
 
-SENSITIVE_KEYS = {
-    "QDRANT_API_KEY",
-    "AWS_SECRET_ACCESS_KEY",
-    "AWS_SESSION_TOKEN",
-    "AWS_ACCESS_KEY_ID",
-}
-
-NAMED_SECRET_MAP = {
-    "QDRANT_API_KEY": "qdrant-api-key",
-    "AWS_SECRET_ACCESS_KEY": "indexer-aws-creds",
-    "AWS_SESSION_TOKEN": "indexer-aws-creds",
-    "AWS_ACCESS_KEY_ID": "indexer-aws-creds",
-}
-
-RUNTIME_KEYS = set(DEFAULTS.keys()).union(
-    {
-        "DATA_S3_BUCKET",
-        "AWS_REGION",
-        "AWS_ACCESS_KEY_ID",
-        "AWS_SECRET_ACCESS_KEY",
-        "AWS_SESSION_TOKEN",
-        "IRSA_ROLE_ARN",
-        "QDRANT_API_KEY",
-        "QDRANT_SECRET_NAME",
-        "BATCH_SIZE",
-        "MAX_TOKENS_PER_CHUNK",
-        "MIN_TOKENS_PER_CHUNK",
-        "CSV_TARGET_TOKENS_PER_CHUNK",
-        "JSONL_TARGET_TOKENS_PER_CHUNK",
-        "UPSERT_CHUNK",
-        "DENSE_DIM",
-        "SPARSE_BATCH_FALLBACK",
-        "OVERWRITE_DOC_DOCX_TO_PDF",
-        "OVERWRITE_ALL_AUDIO_FILES",
-        "OVERWRITE_SPREADSHEETS_WITH_CSV",
-        "OVERWRITE_PPT_WITH_PPTS",
-        "USE_IRSA",
-        "ENV",
-        "STORAGE_RAW_PREFIX",
-        "STORAGE_CHUNKED_PREFIX",
-    }
-)
-
-# --- Utilities ----------------------------------------------------------------
+RUNTIME_KEYS = set(DEFAULTS.keys())
 
 
-def run_cmd(cmd: list[str],
-            input_bytes: bytes | None = None,
-            timeout: int = 120) -> tuple[int, str, str]:
+def log(msg: str, /, *args: object) -> None:
+    if args:
+        msg = msg % args
+    print(msg, flush=True)
+
+
+def fatal(msg: str, code: int = 2) -> None:
+    print(f"ERROR: {msg}", file=sys.stderr)
+    raise SystemExit(code)
+
+
+def run_cmd(
+    cmd: list[str],
+    *,
+    input_text: str | None = None,
+    timeout: int = 120,
+    env: dict[str, str] | None = None,
+) -> tuple[int, str, str]:
+    merged_env = os.environ.copy()
+    if env:
+        merged_env.update(env)
     try:
         proc = subprocess.run(
             cmd,
-            input=input_bytes,
+            input=input_text,
+            text=True,
             capture_output=True,
             check=False,
             timeout=timeout,
+            env=merged_env,
         )
-        out = (proc.stdout or b"").decode("utf-8", errors="replace").strip()
-        err = (proc.stderr or b"").decode("utf-8", errors="replace").strip()
-        return proc.returncode, out, err
-    except subprocess.TimeoutExpired as e:
-        return 124, getattr(e, "stdout", "") or "", getattr(e, "stderr",
-                                                             "") or f"timeout after {timeout}s"
+        return proc.returncode, proc.stdout or "", proc.stderr or ""
+    except subprocess.TimeoutExpired as exc:
+        return 124, getattr(exc, "stdout", "") or "", getattr(exc, "stderr", "") or f"timeout after {timeout}s"
 
 
-def ensure_kubectl_available():
-    rc, out, err = run_cmd(["kubectl", "version", "--client=true"])
+def ensure_kubectl_available() -> None:
+    rc, out, err = run_cmd(["kubectl", "version", "--client=true"], timeout=20)
     if rc != 0:
-        print("ERROR: kubectl not available or not in PATH. details:",
-              err or out,
-              file=sys.stderr)
-        raise SystemExit(2)
+        fatal(f"kubectl not available or not in PATH: {err or out}")
 
 
-def sha256_text(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+def yaml_dump(data: Any) -> str:
+    return yaml.safe_dump(data, sort_keys=False, default_flow_style=False, allow_unicode=True)
 
 
-def ensure_state_dir(manifests_dir: Path, state_dir_name: str = DEFAULTS["STATE_DIR"]) -> Path:
-    state_dir = manifests_dir / state_dir_name
-    state_dir.mkdir(parents=True, exist_ok=True)
-    return state_dir
+def write_text(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+    os.close(fd)
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(content)
+        os.replace(tmp, path)
+    finally:
+        try:
+            Path(tmp).unlink(missing_ok=True)
+        except Exception:
+            pass
 
 
-def read_previous_hash(state_dir: Path) -> str | None:
-    hpath = state_dir / "rendered.sha256"
-    if not hpath.exists():
-        return None
-    return hpath.read_text(encoding="utf-8").strip()
+def as_bool(value: str | None, default: bool = False) -> bool:
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
-def write_state_files(state_dir: Path, rendered_yaml: str, digest: str) -> None:
-    (state_dir / "rendered.yaml").write_text(rendered_yaml, encoding="utf-8")
-    (state_dir / "rendered.sha256").write_text(digest + "\n", encoding="utf-8")
+def as_int(value: str | None, default: int) -> int:
+    if value is None or str(value).strip() == "":
+        return default
+    try:
+        return int(str(value))
+    except Exception:
+        return default
 
 
-# --- Manifest builders -------------------------------------------------------
+def pick_env(*names: str, default: str = "") -> str:
+    for name in names:
+        value = os.environ.get(name)
+        if value is not None and str(value).strip() != "":
+            return str(value).strip()
+    return default
 
 
-def is_cron_key(k: str) -> bool:
-    up = k.upper()
-    for p in ("CRON", "CRONJOB", "INDEXING_BACKUP_CRON",
-              "SUCCESSFUL_JOBS_HISTORY_LIMIT",
-              "FAILED_JOBS_HISTORY_LIMIT"):
-        if p in up:
-            return True
-    return False
+def detect_mode(cfg: dict[str, str]) -> str:
+    explicit = cfg.get("K8S_CLUSTER", "").strip().lower()
+    if explicit in {"kind", "eks", "eks-auto"}:
+        return explicit
+    if as_bool(cfg.get("USE_IRSA")) or cfg.get("IRSA_ROLE_ARN"):
+        return "eks"
+    return "kind"
 
 
-def collect_runtime_env_map() -> dict[str, str]:
-    out: dict[str, str] = {}
-    keys = sorted(RUNTIME_KEYS.union(DEFAULTS.keys()))
-    for k in keys:
-        if is_cron_key(k):
-            continue
-        v = os.environ.get(k)
-        if v is None:
-            v = DEFAULTS.get(k, "")
-        out[k] = "" if v is None else str(v)
-    if out.get("INDEXING_BACKUP_CRON_EXPRESSION") and not out.get("CRON_SCHEDULE"):
-        out["CRON_SCHEDULE"] = out["INDEXING_BACKUP_CRON_EXPRESSION"]
-    return out
+def validate_cfg(cfg: dict[str, str]) -> None:
+    missing = []
+    if not cfg.get("DATA_S3_BUCKET"):
+        missing.append("DATA_S3_BUCKET")
+    if not (cfg.get("AWS_REGION") or cfg.get("AWS_DEFAULT_REGION")):
+        missing.append("AWS_REGION")
+    if not cfg.get("QDRANT_URL"):
+        missing.append("QDRANT_URL")
+    if not cfg.get("DENSE_URL"):
+        missing.append("DENSE_URL")
+    if not cfg.get("SPARSE_URL"):
+        missing.append("SPARSE_URL")
+    if missing:
+        fatal("missing required env vars: " + ", ".join(missing))
+
+    mode = detect_mode(cfg)
+    if mode == "kind":
+        if not (os.environ.get("AWS_ACCESS_KEY_ID") and os.environ.get("AWS_SECRET_ACCESS_KEY")):
+            fatal("kind/static mode requires AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY")
+    else:
+        if not cfg.get("IRSA_ROLE_ARN"):
+            fatal("EKS/IRSA mode requires IRSA_ROLE_ARN")
 
 
-def ns_manifest(ns: str) -> dict[str, Any]:
-    return {"apiVersion": "v1", "kind": "Namespace",
-            "metadata": {"name": ns}}
+def namespace_manifest(ns: str) -> dict[str, Any]:
+    return {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": ns}}
 
 
-def serviceaccount_manifest(ns: str, name: str,
-                            annotate_use_irsa: bool, irsa_role_arn: str) -> dict[str, Any]:
-    meta = {"name": name, "namespace": ns}
-    if annotate_use_irsa and irsa_role_arn:
-        meta.setdefault("annotations", {})["eks.amazonaws.com/role-arn"] = irsa_role_arn
-    return {"apiVersion": "v1", "kind": "ServiceAccount",
-            "metadata": meta}
+def serviceaccount_manifest(ns: str, name: str, mode: str, irsa_role_arn: str) -> dict[str, Any]:
+    meta: dict[str, Any] = {"name": name, "namespace": ns}
+    if mode != "kind" and irsa_role_arn:
+        meta["annotations"] = {"eks.amazonaws.com/role-arn": irsa_role_arn}
+    return {"apiVersion": "v1", "kind": "ServiceAccount", "metadata": meta}
 
 
-def role_manifest(ns: str, name: str) -> dict[str, Any]:
+def build_secret_manifest(ns: str, name: str, data: dict[str, str]) -> dict[str, Any]:
     return {
-        "apiVersion": "rbac.authorization.k8s.io/v1",
-        "kind": "Role",
+        "apiVersion": "v1",
+        "kind": "Secret",
         "metadata": {"name": name, "namespace": ns},
-        "rules": [
-            {
-                "apiGroups": [""],
-                "resources": ["secrets"],
-                "verbs": ["get", "list", "watch"],
-            },
-            {
-                "apiGroups": [""],
-                "resources": ["configmaps"],
-                "verbs": ["get", "list", "watch", "create", "update", "patch"],
-            },
-        ],
+        "type": "Opaque",
+        "stringData": data,
     }
 
 
-def rolebinding_manifest(ns: str, name: str, role_name: str,
-                         sa_name: str) -> dict[str, Any]:
+def env_item(name: str, value: str) -> dict[str, Any]:
+    return {"name": name, "value": value}
+
+
+def secret_env_item(name: str, secret_name: str, secret_key: str | None = None) -> dict[str, Any]:
     return {
-        "apiVersion": "rbac.authorization.k8s.io/v1",
-        "kind": "RoleBinding",
-        "metadata": {"name": name, "namespace": ns},
-        "subjects": [{
-            "kind": "ServiceAccount",
-            "name": sa_name,
-            "namespace": ns,
-        }],
-        "roleRef": {
-            "apiGroup": "rbac.authorization.k8s.io",
-            "kind": "Role",
-            "name": role_name,
+        "name": name,
+        "valueFrom": {
+            "secretKeyRef": {
+                "name": secret_name,
+                "key": secret_key or name,
+            }
         },
     }
 
 
-def cronjob_manifest(cfg: dict[str, str],
-                     env_map: dict[str, str]) -> dict[str, Any]:
+def _image_ref(repo: str, tag: str) -> str:
+    return f"{repo}:{tag}" if tag else repo
+
+
+def build_cronjob_manifest(cfg: dict[str, str], mode: str) -> dict[str, Any]:
     ns = cfg["NAMESPACE"]
     cron_name = cfg["CRONJOB_NAME"]
-    image = (
-        f"{cfg.get('INDEXING_PIPELINE_CPU_IMAGE_REPO')}:"
-        f"{cfg.get('INDEXING_PIPELINE_CPU_IMAGE_TAG')}"
-    )
-    sa_name = cfg["SERVICE_ACCOUNT_NAME"]
-    aws_secret = cfg.get("AWS_SECRET_NAME",
-                         NAMED_SECRET_MAP.get("AWS_SECRET_ACCESS_KEY",
-                                              "indexer-aws-creds"))
-    qdrant_secret = cfg.get("QDRANT_SECRET_NAME",
-                            NAMED_SECRET_MAP.get("QDRANT_API_KEY",
-                                                 "qdrant-api-key"))
-    extra_secret = cfg.get("EXTRA_SECRET_NAME", "indexer-extra-secrets")
+    image = _image_ref(cfg["INDEXING_PIPELINE_CPU_IMAGE_REPO"], cfg["INDEXING_PIPELINE_CPU_IMAGE_TAG"])
 
-    env_list: list[dict[str, Any]] = []
-    use_irsa = cfg.get("USE_IRSA", "0") in ("1", "true", "yes")
+    aws_region = cfg["AWS_REGION"] or cfg["AWS_DEFAULT_REGION"]
 
-    # Ensure S3-related envs are present in env_map (may be empty strings)
-    for required in ("DATA_S3_BUCKET", "AWS_REGION", "STORAGE_RAW_PREFIX", "STORAGE_CHUNKED_PREFIX"):
-        env_map.setdefault(required, cfg.get(required, DEFAULTS.get(required, "")))
-
-    # Build env list; sensitive keys come from secrets if present in environment
-    for k in sorted(env_map.keys()):
-        if is_cron_key(k):
-            continue
-        v = env_map[k] or ""
-        if k in SENSITIVE_KEYS:
-            # If the sensitive value is present in the environment, create a secretRef
-            if os.environ.get(k):
-                if k == "QDRANT_API_KEY":
-                    env_list.append({
-                        "name": k,
-                        "valueFrom": {
-                            "secretKeyRef": {
-                                "name": qdrant_secret,
-                                "key": "QDRANT_API_KEY",
-                            }
-                        }
-                    })
-                elif k in ("AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_ACCESS_KEY_ID"):
-                    # For non-IRSA mode we mount AWS creds from a secret
-                    env_list.append({
-                        "name": k,
-                        "valueFrom": {
-                            "secretKeyRef": {
-                                "name": aws_secret,
-                                "key": k,
-                            }
-                        }
-                    })
-                else:
-                    env_list.append({
-                        "name": k,
-                        "valueFrom": {
-                            "secretKeyRef": {
-                                "name": extra_secret,
-                                "key": k,
-                            }
-                        }
-                    })
-                continue
-            # If not present in env, fall back to literal (could be empty)
-            env_list.append({"name": k, "value": v})
-            continue
-        env_list.append({"name": k, "value": v})
-
-    # Ensure HTTP_TIMEOUT present
-    if not any(e.get("name") == "HTTP_TIMEOUT" for e in env_list):
-        env_list.append({
-            "name": "HTTP_TIMEOUT",
-            "value": cfg.get("HTTP_TIMEOUT", DEFAULTS["HTTP_TIMEOUT"]),
-        })
-
-    pod_annotations: dict[str, str] = {}
-    if use_irsa and cfg.get("IRSA_ROLE_ARN"):
-        pod_annotations["eks.amazonaws.com/role-arn"] = cfg["IRSA_ROLE_ARN"]
-
-    # Wrapper script to override ENTRYPOINT
-    wrapper_lines = [
-        "set -e",
-        "DESIRED=\"${DESIRED_NOFILE:-262144}\"",
-        "ulimit -n \"$DESIRED\" 2>/dev/null || true",
-        "echo \"nofile limit: $(ulimit -n 2>/dev/null || echo unknown)\"",
-        "exec /opt/venv/bin/python indexing_pipeline.py",
+    env: list[dict[str, Any]] = [
+        env_item("PYTHONUNBUFFERED", "1"),
+        env_item("LOG_LEVEL", cfg["LOG_LEVEL"]),
+        env_item("HTTP_TIMEOUT", cfg["HTTP_TIMEOUT"]),
+        env_item("INDEXING_STRICT", cfg["INDEXING_STRICT"]),
+        env_item("RUN_PRE_CONVERSIONS", "0"),
+        env_item("QDRANT_URL", cfg["QDRANT_URL"]),
+        env_item("DENSE_URL", cfg["DENSE_URL"]),
+        env_item("SPARSE_URL", cfg["SPARSE_URL"]),
+        env_item("DATA_S3_BUCKET", cfg["DATA_S3_BUCKET"]),
+        env_item("DATA_S3_PREFIX", cfg["DATA_S3_PREFIX"]),
+        env_item("STORAGE_RAW_PREFIX", cfg["STORAGE_RAW_PREFIX"]),
+        env_item("STORAGE_CHUNKED_PREFIX", cfg["STORAGE_CHUNKED_PREFIX"]),
+        env_item("AWS_REGION", aws_region),
+        env_item("AWS_DEFAULT_REGION", aws_region),
+        env_item("AWS_SDK_LOAD_CONFIG", "1"),
+        env_item("AWS_EC2_METADATA_DISABLED", "true"),
     ]
-    wrapper_script = "\n".join(wrapper_lines)
 
-    container_spec: dict[str, Any] = {
-        "name": "indexer",
-        "image": image,
-        "imagePullPolicy": "IfNotPresent",
-        "command": ["/bin/sh", "-c"],
-        "args": [wrapper_script],
-        "env": env_list,
-        "resources": {
-            "requests": {
-                "cpu": cfg.get("INDEXING_BACKUP_CRONJOB_CPU_REQUEST",
-                               DEFAULTS["INDEXING_BACKUP_CRONJOB_CPU_REQUEST"]),
-                "memory": cfg.get("INDEXING_BACKUP_CRONJOB_MEMORY_REQUEST",
-                                  DEFAULTS["INDEXING_BACKUP_CRONJOB_MEMORY_REQUEST"]),
-            },
-            "limits": {
-                "cpu": cfg.get("INDEXING_BACKUP_CRONJOB_CPU_LIMIT",
-                               DEFAULTS["INDEXING_BACKUP_CRONJOB_CPU_LIMIT"]),
-                "memory": cfg.get("INDEXING_BACKUP_CRONJOB_MEMORY_LIMIT",
-                                  DEFAULTS["INDEXING_BACKUP_CRONJOB_MEMORY_LIMIT"]),
-            },
-        },
-    }
+    if cfg.get("QDRANT_API_KEY"):
+        env.append(secret_env_item("QDRANT_API_KEY", cfg["QDRANT_SECRET_NAME"], "QDRANT_API_KEY"))
 
-    job_spec: dict[str, Any] = {
-        "backoffLimit": int(cfg.get("CRONJOB_BACKOFF_LIMIT",
-                                    DEFAULTS["CRONJOB_BACKOFF_LIMIT"])),
-        "parallelism": int(cfg.get("CRONJOB_PARALLELISM",
-                                   DEFAULTS["CRONJOB_PARALLELISM"])),
-        "completions": int(cfg.get("CRONJOB_COMPLETIONS",
-                                   DEFAULTS["CRONJOB_COMPLETIONS"])),
-        "template": {
-            "metadata": {
-                "labels": {"app": cron_name},
-                **({"annotations": pod_annotations} if pod_annotations else {}),
-            },
-            "spec": {
-                "serviceAccountName": sa_name,
-                "restartPolicy": "Never",
-                "containers": [container_spec],
-            },
-        },
-    }
+    if mode == "kind":
+        env.append(secret_env_item("AWS_ACCESS_KEY_ID", cfg["AWS_CREDENTIALS_SECRET_NAME"], "AWS_ACCESS_KEY_ID"))
+        env.append(secret_env_item("AWS_SECRET_ACCESS_KEY", cfg["AWS_CREDENTIALS_SECRET_NAME"], "AWS_SECRET_ACCESS_KEY"))
+        if os.environ.get("AWS_SESSION_TOKEN"):
+            env.append(secret_env_item("AWS_SESSION_TOKEN", cfg["AWS_CREDENTIALS_SECRET_NAME"], "AWS_SESSION_TOKEN"))
 
-    cron: dict[str, Any] = {
+    cronjob: dict[str, Any] = {
         "apiVersion": "batch/v1",
         "kind": "CronJob",
         "metadata": {"name": cron_name, "namespace": ns},
         "spec": {
-            "schedule": cfg.get("CRON_SCHEDULE",
-                                DEFAULTS["INDEXING_BACKUP_CRON_EXPRESSION"]),
-            "concurrencyPolicy": cfg.get("CRONJOB_CONCURRENCY",
-                                        DEFAULTS["CRONJOB_CONCURRENCY"]),
-            "successfulJobsHistoryLimit": int(
-                cfg.get("SUCCESSFUL_JOBS_HISTORY_LIMIT",
-                        DEFAULTS["SUCCESSFUL_JOBS_HISTORY_LIMIT"])),
-            "failedJobsHistoryLimit": int(
-                cfg.get("FAILED_JOBS_HISTORY_LIMIT",
-                        DEFAULTS["FAILED_JOBS_HISTORY_LIMIT"])),
+            "schedule": cfg["CRON_SCHEDULE"],
+            "concurrencyPolicy": cfg["CRONJOB_CONCURRENCY"],
+            "successfulJobsHistoryLimit": as_int(cfg["CRONJOB_SUCCESSFUL_JOBS_HISTORY_LIMIT"], 3),
+            "failedJobsHistoryLimit": as_int(cfg["CRONJOB_FAILED_JOBS_HISTORY_LIMIT"], 1),
             "jobTemplate": {
-                "spec": job_spec
+                "spec": {
+                    "backoffLimit": as_int(cfg["CRONJOB_BACKOFF_LIMIT"], 1),
+                    "template": {
+                        "metadata": {
+                            "labels": {
+                                "app.kubernetes.io/name": cron_name,
+                                "app.kubernetes.io/component": "indexing",
+                            }
+                        },
+                        "spec": {
+                            "serviceAccountName": cfg["SERVICE_ACCOUNT_NAME"],
+                            "restartPolicy": "Never",
+                            "containers": [
+                                {
+                                    "name": "indexer",
+                                    "image": image,
+                                    "imagePullPolicy": "IfNotPresent",
+                                    "command": ["/opt/venv/bin/python", "/indexing_pipeline/indexing_pipeline.py"],
+                                    "args": ["--workdir", "/indexing_pipeline"],
+                                    "env": env,
+                                    "resources": {
+                                        "requests": {
+                                            "cpu": cfg["INDEXING_BACKUP_CRONJOB_CPU_REQUEST"],
+                                            "memory": cfg["INDEXING_BACKUP_CRONJOB_MEMORY_REQUEST"],
+                                        },
+                                        "limits": {
+                                            "cpu": cfg["INDEXING_BACKUP_CRONJOB_CPU_LIMIT"],
+                                            "memory": cfg["INDEXING_BACKUP_CRONJOB_MEMORY_LIMIT"],
+                                        },
+                                    },
+                                    "workingDir": "/indexing_pipeline",
+                                }
+                            ],
+                        },
+                    },
+                }
             },
         },
     }
 
     if cfg.get("CRONJOB_TIMEZONE"):
-        cron["spec"]["timeZone"] = cfg["CRONJOB_TIMEZONE"]
+        cronjob["spec"]["timeZone"] = cfg["CRONJOB_TIMEZONE"]
 
-    return cron
-
-
-# --- Secret helpers ----------------------------------------------------------
+    return cronjob
 
 
-def kubectl_create_secret_inline(name: str, namespace: str,
-                                 literals: dict[str, str]) -> tuple[bool, str]:
-    if not literals:
-        return False, "no-literals"
-    cmd = [
-        "kubectl", "create", "secret", "generic", name, "-n", namespace,
-        "--dry-run=client", "-o", "yaml"
-    ]
-    for k, v in literals.items():
-        if not k:
-            continue
-        cmd += ["--from-literal", f"{k}={v}"]
-    rc, out, err = run_cmd(cmd, timeout=20)
-    if rc != 0:
-        return False, err or out
-    rc2, out2, err2 = run_cmd(["kubectl", "apply", "-f", "-"],
-                              input_bytes=(out.encode("utf-8")),
-                              timeout=20)
-    if rc2 != 0:
-        return False, err2 or out2
-    return True, ""
-
-
-# --- Config load / validation -----------------------------------------------
-
-
-def validate_aws_creds_present(cfg: dict[str, str]) -> bool:
-    use_irsa = cfg.get("USE_IRSA", "0") in ("1", "true", "yes")
-    if use_irsa:
-        return bool(cfg.get("IRSA_ROLE_ARN"))
-    # Non-IRSA: require at least AWS_SECRET_ACCESS_KEY and AWS_ACCESS_KEY_ID or session token
-    if os.environ.get("AWS_SECRET_ACCESS_KEY") and os.environ.get("AWS_ACCESS_KEY_ID"):
-        return True
-    if os.environ.get("AWS_SESSION_TOKEN") and os.environ.get("AWS_ACCESS_KEY_ID"):
-        return True
-    return False
-
-
-def load_cfg() -> dict[str, str]:
+def collect_cfg() -> dict[str, str]:
     cfg: dict[str, str] = {}
-    cfg["NAMESPACE"] = os.environ.get("NAMESPACE", DEFAULTS["NAMESPACE"])
-    cfg["CRONJOB_NAME"] = os.environ.get("CRONJOB_NAME",
-                                        DEFAULTS["CRONJOB_NAME"]).lower()
-    cfg["CRON_SCHEDULE"] = os.environ.get(
-        "INDEXING_BACKUP_CRON_EXPRESSION",
-        os.environ.get("CRON_SCHEDULE",
-                       DEFAULTS["INDEXING_BACKUP_CRON_EXPRESSION"]))
-    cfg["SERVICE_ACCOUNT_NAME"] = os.environ.get("SERVICE_ACCOUNT_NAME",
-                                                DEFAULTS["SERVICE_ACCOUNT_NAME"])
-    cfg["ROLE_NAME"] = os.environ.get("ROLE_NAME", DEFAULTS["ROLE_NAME"])
-    cfg["ROLEBINDING_NAME"] = os.environ.get("ROLEBINDING_NAME",
-                                            DEFAULTS["ROLEBINDING_NAME"])
-    cfg["QDRANT_SECRET_NAME"] = os.environ.get(
-        "QDRANT_SECRET_NAME",
-        NAMED_SECRET_MAP.get("QDRANT_API_KEY", "qdrant-api-key"))
-    cfg["AWS_SECRET_NAME"] = os.environ.get(
-        "AWS_SECRET_NAME",
-        NAMED_SECRET_MAP.get("AWS_SECRET_ACCESS_KEY",
-                             "indexer-aws-creds"))
-    cfg["EXTRA_SECRET_NAME"] = os.environ.get("EXTRA_SECRET_NAME",
-                                             "indexer-extra-secrets")
-    cfg["INDEXING_PIPELINE_CPU_IMAGE_REPO"] = os.environ.get(
-        "INDEXING_PIPELINE_CPU_IMAGE_REPO",
-        DEFAULTS["INDEXING_PIPELINE_CPU_IMAGE_REPO"])
-    cfg["INDEXING_PIPELINE_CPU_IMAGE_TAG"] = os.environ.get(
-        "INDEXING_PIPELINE_CPU_IMAGE_TAG",
-        DEFAULTS["INDEXING_PIPELINE_CPU_IMAGE_TAG"])
-    cfg["CRONJOB_BACKOFF_LIMIT"] = os.environ.get(
-        "CRONJOB_BACKOFF_LIMIT", DEFAULTS["CRONJOB_BACKOFF_LIMIT"])
-    cfg["CRONJOB_CONCURRENCY"] = os.environ.get(
-        "CRONJOB_CONCURRENCY", DEFAULTS["CRONJOB_CONCURRENCY"])
-    cfg["SUCCESSFUL_JOBS_HISTORY_LIMIT"] = os.environ.get(
-        "SUCCESSFUL_JOBS_HISTORY_LIMIT",
-        DEFAULTS["SUCCESSFUL_JOBS_HISTORY_LIMIT"])
-    cfg["FAILED_JOBS_HISTORY_LIMIT"] = os.environ.get(
-        "FAILED_JOBS_HISTORY_LIMIT", DEFAULTS["FAILED_JOBS_HISTORY_LIMIT"])
-    cfg["INDEXING_BACKUP_CRONJOB_CPU_REQUEST"] = os.environ.get(
-        "INDEXING_BACKUP_CRONJOB_CPU_REQUEST",
-        DEFAULTS["INDEXING_BACKUP_CRONJOB_CPU_REQUEST"])
-    cfg["INDEXING_BACKUP_CRONJOB_CPU_LIMIT"] = os.environ.get(
-        "INDEXING_BACKUP_CRONJOB_CPU_LIMIT",
-        DEFAULTS["INDEXING_BACKUP_CRONJOB_CPU_LIMIT"])
-    cfg["INDEXING_BACKUP_CRONJOB_MEMORY_REQUEST"] = os.environ.get(
-        "INDEXING_BACKUP_CRONJOB_MEMORY_REQUEST",
-        DEFAULTS["INDEXING_BACKUP_CRONJOB_MEMORY_REQUEST"])
-    cfg["INDEXING_BACKUP_CRONJOB_MEMORY_LIMIT"] = os.environ.get(
-        "INDEXING_BACKUP_CRONJOB_MEMORY_LIMIT",
-        DEFAULTS["INDEXING_BACKUP_CRONJOB_MEMORY_LIMIT"])
-    cfg["MANIFESTS_DIR"] = os.environ.get("MANIFESTS_DIR",
-                                         DEFAULTS["MANIFESTS_DIR"])
-    use_irsa_env = os.environ.get("AWS_USE_IRSA",
-                                  os.environ.get("USE_IRSA",
-                                                 "")).strip().lower() in (
-                                                   "1", "true", "yes")
-    cfg["USE_IRSA"] = "1" if use_irsa_env else "0"
-    cfg["IRSA_ROLE_ARN"] = os.environ.get("IRSA_ROLE_ARN", "")
-    cfg["AWS_REGION"] = os.environ.get("AWS_REGION", DEFAULTS["AWS_REGION"])
-    cfg["DATA_S3_BUCKET"] = os.environ.get("DATA_S3_BUCKET", DEFAULTS.get("DATA_S3_BUCKET", ""))
-    cfg["STORAGE_RAW_PREFIX"] = os.environ.get("STORAGE_RAW_PREFIX", DEFAULTS["STORAGE_RAW_PREFIX"])
-    cfg["STORAGE_CHUNKED_PREFIX"] = os.environ.get("STORAGE_CHUNKED_PREFIX", DEFAULTS["STORAGE_CHUNKED_PREFIX"])
-    cfg["STATE_DIR"] = os.environ.get("STATE_DIR", DEFAULTS["STATE_DIR"])
-    env_map = collect_runtime_env_map()
-    for k, v in env_map.items():
-        if k not in cfg:
-            cfg[k] = v
+    for key in sorted(RUNTIME_KEYS):
+        cfg[key] = pick_env(key, default=DEFAULTS.get(key, ""))
+
+    cfg["NAMESPACE"] = pick_env("NAMESPACE", default=DEFAULTS["NAMESPACE"])
+    cfg["CRONJOB_NAME"] = pick_env("CRONJOB_NAME", default=DEFAULTS["CRONJOB_NAME"]).lower()
+    cfg["CRON_SCHEDULE"] = pick_env("CRON_SCHEDULE", "INDEXING_BACKUP_CRON_EXPRESSION", default=DEFAULTS["CRON_SCHEDULE"])
+    cfg["CRONJOB_CONCURRENCY"] = pick_env("CRONJOB_CONCURRENCY", default=DEFAULTS["CRONJOB_CONCURRENCY"])
+    cfg["CRONJOB_BACKOFF_LIMIT"] = pick_env("CRONJOB_BACKOFF_LIMIT", default=DEFAULTS["CRONJOB_BACKOFF_LIMIT"])
+    cfg["CRONJOB_SUCCESSFUL_JOBS_HISTORY_LIMIT"] = pick_env("CRONJOB_SUCCESSFUL_JOBS_HISTORY_LIMIT", default=DEFAULTS["CRONJOB_SUCCESSFUL_JOBS_HISTORY_LIMIT"])
+    cfg["CRONJOB_FAILED_JOBS_HISTORY_LIMIT"] = pick_env("CRONJOB_FAILED_JOBS_HISTORY_LIMIT", default=DEFAULTS["CRONJOB_FAILED_JOBS_HISTORY_LIMIT"])
+    cfg["CRONJOB_TIMEZONE"] = pick_env("CRONJOB_TIMEZONE", default=DEFAULTS["CRONJOB_TIMEZONE"])
+    cfg["SERVICE_ACCOUNT_NAME"] = pick_env("SERVICE_ACCOUNT_NAME", default=DEFAULTS["SERVICE_ACCOUNT_NAME"])
+    cfg["MANIFESTS_DIR"] = pick_env("MANIFESTS_DIR", default=DEFAULTS["MANIFESTS_DIR"])
+    cfg["INDEXING_PIPELINE_CPU_IMAGE_REPO"] = pick_env("INDEXING_PIPELINE_CPU_IMAGE_REPO", default=DEFAULTS["INDEXING_PIPELINE_CPU_IMAGE_REPO"])
+    cfg["INDEXING_PIPELINE_CPU_IMAGE_TAG"] = pick_env("INDEXING_PIPELINE_CPU_IMAGE_TAG", default=DEFAULTS["INDEXING_PIPELINE_CPU_IMAGE_TAG"])
+    cfg["INDEXING_BACKUP_CRONJOB_CPU_REQUEST"] = pick_env("INDEXING_BACKUP_CRONJOB_CPU_REQUEST", default=DEFAULTS["INDEXING_BACKUP_CRONJOB_CPU_REQUEST"])
+    cfg["INDEXING_BACKUP_CRONJOB_CPU_LIMIT"] = pick_env("INDEXING_BACKUP_CRONJOB_CPU_LIMIT", default=DEFAULTS["INDEXING_BACKUP_CRONJOB_CPU_LIMIT"])
+    cfg["INDEXING_BACKUP_CRONJOB_MEMORY_REQUEST"] = pick_env("INDEXING_BACKUP_CRONJOB_MEMORY_REQUEST", default=DEFAULTS["INDEXING_BACKUP_CRONJOB_MEMORY_REQUEST"])
+    cfg["INDEXING_BACKUP_CRONJOB_MEMORY_LIMIT"] = pick_env("INDEXING_BACKUP_CRONJOB_MEMORY_LIMIT", default=DEFAULTS["INDEXING_BACKUP_CRONJOB_MEMORY_LIMIT"])
+    cfg["LOG_LEVEL"] = pick_env("LOG_LEVEL", default=DEFAULTS["LOG_LEVEL"])
+    cfg["HTTP_TIMEOUT"] = pick_env("HTTP_TIMEOUT", default=DEFAULTS["HTTP_TIMEOUT"])
+    cfg["INDEXING_STRICT"] = pick_env("INDEXING_STRICT", default=DEFAULTS["INDEXING_STRICT"])
+    cfg["RUN_PRE_CONVERSIONS"] = pick_env("RUN_PRE_CONVERSIONS", default=DEFAULTS["RUN_PRE_CONVERSIONS"])
+    cfg["QDRANT_URL"] = pick_env("QDRANT_URL", default=DEFAULTS["QDRANT_URL"])
+    cfg["DENSE_URL"] = pick_env("DENSE_URL", default=DEFAULTS["DENSE_URL"])
+    cfg["SPARSE_URL"] = pick_env("SPARSE_URL", default=DEFAULTS["SPARSE_URL"])
+    cfg["DATA_S3_BUCKET"] = pick_env("DATA_S3_BUCKET", "S3_BUCKET", default=DEFAULTS["DATA_S3_BUCKET"])
+    cfg["DATA_S3_PREFIX"] = pick_env("DATA_S3_PREFIX", "BACKUP_PREFIX", default=DEFAULTS["DATA_S3_PREFIX"])
+    cfg["AWS_REGION"] = pick_env("AWS_REGION", default=DEFAULTS["AWS_REGION"])
+    cfg["AWS_DEFAULT_REGION"] = pick_env("AWS_DEFAULT_REGION", default=cfg["AWS_REGION"] or DEFAULTS["AWS_DEFAULT_REGION"])
+    if not cfg["AWS_REGION"]:
+        cfg["AWS_REGION"] = cfg["AWS_DEFAULT_REGION"]
+    if not cfg["AWS_DEFAULT_REGION"]:
+        cfg["AWS_DEFAULT_REGION"] = cfg["AWS_REGION"]
+    cfg["STORAGE_RAW_PREFIX"] = pick_env("STORAGE_RAW_PREFIX", default=DEFAULTS["STORAGE_RAW_PREFIX"])
+    cfg["STORAGE_CHUNKED_PREFIX"] = pick_env("STORAGE_CHUNKED_PREFIX", default=DEFAULTS["STORAGE_CHUNKED_PREFIX"])
+    cfg["QDRANT_API_KEY"] = pick_env("QDRANT_API_KEY", default=DEFAULTS["QDRANT_API_KEY"])
+    cfg["QDRANT_SECRET_NAME"] = pick_env("QDRANT_SECRET_NAME", default=DEFAULTS["QDRANT_SECRET_NAME"])
+    cfg["AWS_CREDENTIALS_SECRET_NAME"] = pick_env("AWS_CREDENTIALS_SECRET_NAME", default=DEFAULTS["AWS_CREDENTIALS_SECRET_NAME"])
+    cfg["EXTRA_SECRET_NAME"] = pick_env("EXTRA_SECRET_NAME", default=DEFAULTS["EXTRA_SECRET_NAME"])
+    cfg["USE_IRSA"] = pick_env("USE_IRSA", "AWS_USE_IRSA", default=DEFAULTS["USE_IRSA"])
+    cfg["IRSA_ROLE_ARN"] = pick_env("IRSA_ROLE_ARN", default=DEFAULTS["IRSA_ROLE_ARN"])
+    cfg["K8S_CLUSTER"] = pick_env("K8S_CLUSTER", default=DEFAULTS["K8S_CLUSTER"])
     return cfg
 
 
-def validate_cfg(cfg: dict[str, str]):
-    # Validate IRSA vs static creds
-    if cfg.get("USE_IRSA", "0") in ("1", "true", "yes"):
-        required: list[str] = []
-        if not cfg.get("IRSA_ROLE_ARN"):
-            required.append("IRSA_ROLE_ARN")
-        if not cfg.get("AWS_REGION"):
-            required.append("AWS_REGION")
-        if not cfg.get("DATA_S3_BUCKET"):
-            required.append("DATA_S3_BUCKET")
-        if required:
-            print("ERROR: When USE_IRSA enabled, the following envs are required:", ", ".join(required), file=sys.stderr)
-            raise SystemExit(2) from None
-    else:
-        # Non-IRSA: require AWS creds or QDRANT_API_KEY
-        if not (
-            (os.environ.get("AWS_SECRET_ACCESS_KEY") and os.environ.get("AWS_ACCESS_KEY_ID"))
-            or os.environ.get("AWS_SESSION_TOKEN")
-            or os.environ.get("QDRANT_API_KEY")
-        ):
-            print(
-                "ERROR: non-IRSA mode requires AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY or AWS_SESSION_TOKEN or QDRANT_API_KEY",
-                file=sys.stderr,
-            )
-            raise SystemExit(2) from None
-
-    for k in ("CRONJOB_PARALLELISM", "CRONJOB_COMPLETIONS"):
-        v = cfg.get(k, DEFAULTS.get(k, ""))
-        if v is None or v == "":
-            continue
-        try:
-            ival = int(str(v))
-            if ival < 1:
-                print(f"ERROR: {k} must be a positive integer",
-                      file=sys.stderr)
-                raise SystemExit(2) from None
-        except Exception:
-            print(f"ERROR: {k} must be an integer", file=sys.stderr)
-            raise SystemExit(2) from None
-
-
-# --- File helpers ------------------------------------------------------------
-
-
-def write_manifest_file(manifests_dir: Path, filename: str,
-                        manifest: dict[str, Any]) -> Path:
-    path = manifests_dir / filename
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as fh:
-        yaml.safe_dump(manifest,
-                       fh,
-                       sort_keys=False,
-                       default_flow_style=False,
-                       allow_unicode=True)
-    return path
-
-
-def recreate_manifests_dir(manifests_dir: Path):
-    if manifests_dir.exists():
-        shutil.rmtree(manifests_dir)
+def write_manifests(manifests_dir: Path, docs: list[tuple[str, dict[str, Any]]]) -> list[Path]:
     manifests_dir.mkdir(parents=True, exist_ok=True)
+    out: list[Path] = []
+    for filename, doc in docs:
+        p = manifests_dir / filename
+        write_text(p, yaml_dump(doc))
+        out.append(p)
+    return out
 
 
-# --- Apply / idempotent rollout ---------------------------------------------
+def apply_yaml(yaml_text: str, *, timeout: int = 60) -> None:
+    rc, out, err = run_cmd(["kubectl", "apply", "-f", "-"], input_text=yaml_text, timeout=timeout)
+    if rc != 0:
+        fatal(err or out or "kubectl apply failed", 4)
 
 
-def render_all_manifests(manifests: list[tuple[str, dict[str, Any]]]) -> str:
-    docs: list[dict[str, Any]] = []
-    for _, m in manifests:
-        docs.append(m)
-    return yaml.safe_dump_all(docs, sort_keys=False, default_flow_style=False, explicit_start=True)
+def apply_direct_secret(ns: str, name: str, data: dict[str, str], timeout: int = 30) -> None:
+    if not data:
+        return
+    apply_yaml(yaml_dump(build_secret_manifest(ns, name, data)), timeout=timeout)
 
 
-def apply(cfg: dict[str, str], dry_run: bool = False):
+def wait_for_namespace(ns: str, timeout: int = 30) -> None:
+    start = time.monotonic()
+    while True:
+        rc, _, _ = run_cmd(["kubectl", "get", "namespace", ns], timeout=10)
+        if rc == 0:
+            return
+        if time.monotonic() - start >= timeout:
+            fatal(f"namespace '{ns}' was not observable after creation", 5)
+        time.sleep(1)
+
+
+def render_and_apply(cfg: dict[str, str], dry_run: bool) -> None:
     ensure_kubectl_available()
-    ns = cfg["NAMESPACE"]
-    sa_name = cfg["SERVICE_ACCOUNT_NAME"]
-    role_name = cfg["ROLE_NAME"]
-    rb_name = cfg["ROLEBINDING_NAME"]
-    manifests_dir = Path(cfg.get("MANIFESTS_DIR", DEFAULTS["MANIFESTS_DIR"]))
-    state_dir_name = cfg.get("STATE_DIR", DEFAULTS["STATE_DIR"])
-    env_map = {k: v for k, v in cfg.items()}
+    mode = detect_mode(cfg)
 
-    # Optional strict runtime check
-    if os.environ.get("REQUIRE_ALL_RUNTIME_ENVS", "").lower() in ("1", "true", "yes"):
-        required_runtime = ["QDRANT_URL", "DENSE_URL", "SPARSE_URL", "DATA_S3_BUCKET", "AWS_REGION"]
-        missing = [k for k in required_runtime if not env_map.get(k) and not os.environ.get(k)]
-        if missing:
-            print("ERROR: missing required runtime envs:", ", ".join(missing), file=sys.stderr)
-            raise SystemExit(2) from None
+    manifests_dir = Path(cfg["MANIFESTS_DIR"])
+    docs: list[tuple[str, dict[str, Any]]] = [
+        ("00-namespace.yaml", namespace_manifest(cfg["NAMESPACE"])),
+        ("10-serviceaccount.yaml", serviceaccount_manifest(cfg["NAMESPACE"], cfg["SERVICE_ACCOUNT_NAME"], mode, cfg["IRSA_ROLE_ARN"])),
+        ("50-cronjob.yaml", build_cronjob_manifest(cfg, mode)),
+    ]
 
-    manifests: list[tuple[str, dict[str, Any]]] = []
-    manifests.append(("00-namespace.yaml", ns_manifest(ns)))
-    manifests.append(("10-serviceaccount.yaml",
-                      serviceaccount_manifest(ns, sa_name,
-                                              annotate_use_irsa=(cfg.get("USE_IRSA", "0") == "1"),
-                                              irsa_role_arn=cfg.get("IRSA_ROLE_ARN", ""))))
-    manifests.append(("20-role.yaml", role_manifest(ns, role_name)))
-    manifests.append(("30-rolebinding.yaml",
-                      rolebinding_manifest(ns, rb_name, role_name, sa_name)))
-
-    # Placeholder secrets for Qdrant and AWS (only placeholders written to manifests dir)
-    if os.environ.get("QDRANT_API_KEY"):
-        qname = cfg.get("QDRANT_SECRET_NAME", NAMED_SECRET_MAP.get("QDRANT_API_KEY", "qdrant-api-key"))
-        manifests.append(("41-secret-qdrant-placeholder.yaml",
-                          {
-                              "apiVersion": "v1",
-                              "kind": "Secret",
-                              "metadata": {"name": qname, "namespace": ns},
-                              "type": "Opaque",
-                              "stringData": {"QDRANT_API_KEY": "REPLACE_WITH_REAL_KEY"},
-                          }))
-
-    aws_placeholders: dict[str, str] = {}
-    if os.environ.get("AWS_ACCESS_KEY_ID"):
-        aws_placeholders["AWS_ACCESS_KEY_ID"] = os.environ["AWS_ACCESS_KEY_ID"]
-    if os.environ.get("AWS_SECRET_ACCESS_KEY"):
-        aws_placeholders["AWS_SECRET_ACCESS_KEY"] = "REPLACE_WITH_REAL_VALUE"
-    if os.environ.get("AWS_SESSION_TOKEN"):
-        aws_placeholders["AWS_SESSION_TOKEN"] = "REPLACE_WITH_REAL_VALUE"
-    if aws_placeholders:
-        aname = cfg.get("AWS_SECRET_NAME", NAMED_SECRET_MAP.get("AWS_SECRET_ACCESS_KEY", "indexer-aws-creds"))
-        manifests.append(("40-secret-aws-placeholder.yaml",
-                          {
-                              "apiVersion": "v1",
-                              "kind": "Secret",
-                              "metadata": {"name": aname, "namespace": ns},
-                              "type": "Opaque",
-                              "stringData": aws_placeholders,
-                          }))
-
-    extras: dict[str, str] = {}
-    for k in sorted(SENSITIVE_KEYS):
-        if k in ("QDRANT_API_KEY", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_ACCESS_KEY_ID"):
-            continue
-        if os.environ.get(k):
-            extras[k] = "REPLACE_WITH_REAL_VALUE"
-    if extras:
-        ename = cfg.get("EXTRA_SECRET_NAME", "indexer-extra-secrets")
-        manifests.append(("42-secret-extra-placeholder.yaml",
-                          {
-                              "apiVersion": "v1",
-                              "kind": "Secret",
-                              "metadata": {"name": ename, "namespace": ns},
-                              "type": "Opaque",
-                              "stringData": extras,
-                          }))
-
-    cron = cronjob_manifest(cfg, {k: v for k, v in cfg.items()})
-    manifests.append(("50-cronjob.yaml", cron))
-
-    # Write manifests to disk (manifests_dir)
-    recreate_manifests_dir(Path(manifests_dir))
-    written_files: list[Path] = []
-    for fname, m in manifests:
-        p = write_manifest_file(manifests_dir, fname, m)
-        written_files.append(p)
-
-    # Render combined YAML for hashing
-    rendered = render_all_manifests(manifests)
-    digest = sha256_text(rendered)
-
-    # Ensure state dir exists and read previous hash
-    state_dir = ensure_state_dir(Path(manifests_dir), state_dir_name)
-    prev_hash = read_previous_hash(state_dir)
+    rendered_files = write_manifests(manifests_dir, docs)
+    log(f"Rendered manifests to {manifests_dir}")
+    for p in rendered_files:
+        log(str(p))
 
     if dry_run:
-        print("--- DRY RUN: wrote placeholders to", str(manifests_dir))
-        for p in written_files:
-            print(p)
-        print("--- Rendered digest:", digest)
         return
 
-    # If nothing changed, skip apply (idempotent)
-    if prev_hash == digest:
-        print("No changes detected (rendered manifest hash unchanged). Skipping kubectl apply.")
-        return
+    apply_yaml(yaml_dump(namespace_manifest(cfg["NAMESPACE"])), timeout=20)
+    wait_for_namespace(cfg["NAMESPACE"], timeout=30)
 
-    # Apply namespace first (idempotent)
-    ns_file = manifests_dir / "00-namespace.yaml"
-    if ns_file.exists():
-        rc, out, err = run_cmd(["kubectl", "apply", "-f", str(ns_file)], timeout=20)
-    else:
-        ns_yaml = yaml.safe_dump(ns_manifest(ns), sort_keys=False)
-        rc, out, err = run_cmd(["kubectl", "apply", "-f", "-"],
-                               input_bytes=ns_yaml.encode("utf-8"),
-                               timeout=20)
-    if rc != 0:
-        print("ERROR: applying namespace failed:", err or out, file=sys.stderr)
-        raise SystemExit(4) from None
+    if cfg.get("QDRANT_API_KEY"):
+        apply_direct_secret(cfg["NAMESPACE"], cfg["QDRANT_SECRET_NAME"], {"QDRANT_API_KEY": cfg["QDRANT_API_KEY"]})
 
-    # Wait for namespace to be ready
-    waited = 0
-    max_wait = 30
-    while True:
-        rc2, out2, err2 = run_cmd(["kubectl", "get", "namespace", ns])
-        if rc2 == 0:
-            break
-        time.sleep(1)
-        waited += 1
-        if waited >= max_wait:
-            print(
-                f"ERROR: namespace '{ns}' not ready after {max_wait}s. kubectl get ns returned: {err2 or out2}",
-                file=sys.stderr,
-            )
-            raise SystemExit(5) from None
-
-    # Create live secrets only when static creds are present (non-IRSA)
-    created_secret_names: list[str] = []
-    if os.environ.get("QDRANT_API_KEY"):
-        qname = cfg.get("QDRANT_SECRET_NAME", NAMED_SECRET_MAP.get("QDRANT_API_KEY", "qdrant-api-key"))
-        ok, err = kubectl_create_secret_inline(qname, ns, {"QDRANT_API_KEY": os.environ["QDRANT_API_KEY"]})
-        if not ok:
-            print("ERROR creating qdrant secret:", err, file=sys.stderr)
-            raise SystemExit(3) from None
-        created_secret_names.append(qname)
-
-    # If IRSA is disabled, create AWS secret from env if present
-    use_irsa = cfg.get("USE_IRSA", "0") in ("1", "true", "yes")
-    aws_literals_live: dict[str, str] = {}
-    if not use_irsa:
+    if mode == "kind":
+        aws_data: dict[str, str] = {}
         if os.environ.get("AWS_ACCESS_KEY_ID"):
-            aws_literals_live["AWS_ACCESS_KEY_ID"] = os.environ["AWS_ACCESS_KEY_ID"]
+            aws_data["AWS_ACCESS_KEY_ID"] = os.environ["AWS_ACCESS_KEY_ID"]
         if os.environ.get("AWS_SECRET_ACCESS_KEY"):
-            aws_literals_live["AWS_SECRET_ACCESS_KEY"] = os.environ["AWS_SECRET_ACCESS_KEY"]
+            aws_data["AWS_SECRET_ACCESS_KEY"] = os.environ["AWS_SECRET_ACCESS_KEY"]
         if os.environ.get("AWS_SESSION_TOKEN"):
-            aws_literals_live["AWS_SESSION_TOKEN"] = os.environ["AWS_SESSION_TOKEN"]
-    if aws_literals_live:
-        aname = cfg.get("AWS_SECRET_NAME", NAMED_SECRET_MAP.get("AWS_SECRET_ACCESS_KEY", "indexer-aws-creds"))
-        ok, err = kubectl_create_secret_inline(aname, ns, aws_literals_live)
-        if not ok:
-            print("ERROR creating aws secret:", err, file=sys.stderr)
-            raise SystemExit(3) from None
-        created_secret_names.append(aname)
+            aws_data["AWS_SESSION_TOKEN"] = os.environ["AWS_SESSION_TOKEN"]
+        apply_direct_secret(cfg["NAMESPACE"], cfg["AWS_CREDENTIALS_SECRET_NAME"], aws_data)
 
-    # Extras
-    extras_live: dict[str, str] = {}
-    for k in sorted(SENSITIVE_KEYS):
-        if k in ("QDRANT_API_KEY", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_ACCESS_KEY_ID"):
-            continue
-        if os.environ.get(k):
-            extras_live[k] = os.environ[k]
-    if extras_live:
-        ename = cfg.get("EXTRA_SECRET_NAME", "indexer-extra-secrets")
-        ok, err = kubectl_create_secret_inline(ename, ns, extras_live)
-        if not ok:
-            print("ERROR creating extra secret:", err, file=sys.stderr)
-            raise SystemExit(3) from None
-        created_secret_names.append(ename)
+    apply_yaml(
+        "\n---\n".join(
+            yaml_dump(doc)
+            for doc in (
+                serviceaccount_manifest(cfg["NAMESPACE"], cfg["SERVICE_ACCOUNT_NAME"], mode, cfg["IRSA_ROLE_ARN"]),
+                build_cronjob_manifest(cfg, mode),
+            )
+        ),
+        timeout=60,
+    )
 
-    # Apply remaining manifests (serviceaccount, role, rolebinding, secrets placeholders, cronjob)
-    to_apply_docs = []
-    for fname, _ in manifests:
-        if fname == "00-namespace.yaml":
-            continue
-        p = manifests_dir / fname
-        if not p.exists():
-            continue
-        to_apply_docs.append(p.read_text(encoding="utf-8"))
-    if to_apply_docs:
-        docs_combined = "\n---\n".join(to_apply_docs)
-        rc3, out3, err3 = run_cmd(["kubectl", "apply", "-f", "-"],
-                                  input_bytes=docs_combined.encode("utf-8"),
-                                  timeout=60)
-        if rc3 != 0:
-            print("ERROR: applying manifests failed:", err3 or out3, file=sys.stderr)
-            raise SystemExit(6) from None
-
-    # Persist state (rendered YAML + hash) for future idempotency checks
-    write_state_files(state_dir, rendered, digest)
-
-    print("Applied manifests successfully.")
-    if created_secret_names:
-        print("Created secrets:", ", ".join(created_secret_names))
+    log("Applied manifests successfully")
 
 
-# --- CLI --------------------------------------------------------------------
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Render and apply the indexing CronJob manifests.")
+    parser.add_argument("--dry-run", action="store_true", help="Render manifests to disk only; do not apply.")
+    return parser.parse_args(argv)
 
 
-def parse_args(argv: list[str]) -> tuple[bool, bool]:
-    # Simple arg parsing: --dry-run and --force
-    dry = False
-    force = False
-    for a in argv:
-        if a in ("--dry-run", "-n"):
-            dry = True
-        if a in ("--force", "-f"):
-            force = True
-    return dry, force
+def main(argv: list[str] | None = None) -> None:
+    if argv is None:
+        argv = sys.argv[1:]
+    args = parse_args(argv)
+
+    cfg = collect_cfg()
+    validate_cfg(cfg)
+
+    render_and_apply(cfg, dry_run=args.dry_run)
+    log("Done")
 
 
 if __name__ == "__main__":
     try:
-        cfg = load_cfg()
-        validate_cfg(cfg)
-        dry, force = parse_args(sys.argv[1:])
-        # If force is provided, bypass idempotency by removing previous hash
-        manifests_dir = Path(cfg.get("MANIFESTS_DIR", DEFAULTS["MANIFESTS_DIR"]))
-        state_dir = manifests_dir / cfg.get("STATE_DIR", DEFAULTS["STATE_DIR"])
-        if force and state_dir.exists():
-            try:
-                (state_dir / "rendered.sha256").unlink(missing_ok=True)
-            except Exception:
-                pass
-        apply(cfg, dry_run=dry)
+        main()
     except SystemExit:
         raise
-    except Exception:
-        traceback.print_exc()
-        raise
+    except Exception as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        raise SystemExit(2) from None

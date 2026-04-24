@@ -1,7 +1,4 @@
-#!/usr/bin/env python3
 """
-Robust router for parse_chunk formats.
-
 Goals:
  - Deterministic startup and strict config validation.
  - Try to import user format modules; if import fails, record full traceback and
@@ -26,7 +23,7 @@ import time
 import traceback
 import urllib.parse
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -40,7 +37,7 @@ for n in ("urllib3", "requests", "httpx", "boto3", "botocore"):
 
 
 def now_ts() -> str:
-    return datetime.utcnow().isoformat(timespec="milliseconds") + "Z"
+    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def log(level: str, event: str, msg: str, **extra):
@@ -250,7 +247,7 @@ STORAGE_URL = f"s3://{DATA_S3_BUCKET.rstrip('/')}/"
 
 # ---------------- helpers ----------------
 def ts_now() -> str:
-    return datetime.utcnow().isoformat(timespec="milliseconds") + "Z"
+    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def full_path_from_key(key: str) -> str:
@@ -615,7 +612,7 @@ def main() -> None:
                 log("info", "already_processed", "skipping", file_hash=file_hash, key=key)
                 continue
 
-            ts = datetime.utcnow().isoformat() + "Z"
+            ts = datetime.now(UTC).isoformat().replace("+00:00", "Z")
             manifest = {
                 "file_hash": file_hash,
                 "s3_key": key,

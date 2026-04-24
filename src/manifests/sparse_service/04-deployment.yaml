@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sparse-deployment
+  namespace: models
+  labels: &id001
+    app.kubernetes.io/name: sparse
+    app.kubernetes.io/component: embedder
+    app.kubernetes.io/managed-by: gen_sparse
+    app.kubernetes.io/instance: sparse
+    env: nonprod
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sparse
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 25%
+      maxSurge: 25%
+  template:
+    metadata:
+      labels: *id001
+      annotations:
+        gen-sparse/inputs-hash: a919d2cf8b350c1383089270e132cf0a2855d4df0a03741a61d4e57c5bdee48e
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '8201'
+        prometheus.io/path: /metrics
+    spec:
+      serviceAccountName: sparse-sa
+      containers:
+      - name: sparse
+        image: ghcr.io/athithya-sakthivel/sparse:2026-04-24-16-22--7f601ca@sha256:c21bfaae3cb9b7399163c5a82b19521b4cd85f165261e27da522f8357de29b39
+        ports:
+        - containerPort: 8201
+        env:
+        - name: SPARSE_HOST
+          value: 0.0.0.0
+        - name: SPARSE_PORT
+          value: '8201'
+        - name: SPARSE_LOGLEVEL
+          value: INFO
+        - name: SPARSE_MODEL_NAME
+          value: Qdrant/minicoil-v1
+        - name: SPARSE_BATCH_SIZE
+          value: '64'
+        - name: SPARSE_CUDA
+          value: '0'
+        - name: PRELOAD_MODEL
+          value: '0'
+        - name: ENV
+          value: NONPROD
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8201
+          initialDelaySeconds: 30
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 6
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8201
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        startupProbe:
+          httpGet:
+            path: /readyz
+            port: 8201
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 60
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi

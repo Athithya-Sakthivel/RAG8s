@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dense-deployment
+  namespace: models
+  labels: &id001
+    app.kubernetes.io/name: dense
+    app.kubernetes.io/component: embedder
+    app.kubernetes.io/managed-by: gen_dense
+    app.kubernetes.io/instance: dense
+    env: nonprod
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dense
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 25%
+      maxSurge: 25%
+  template:
+    metadata:
+      labels: *id001
+      annotations:
+        gen-dense/inputs-hash: 696e97f2d3f9ae2e6ad4e5289a0f8cad846c42500124ae3e70da40a027a2b2f0
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '8200'
+        prometheus.io/path: /metrics
+    spec:
+      serviceAccountName: dense-sa
+      containers:
+      - name: dense
+        image: ghcr.io/athithya-sakthivel/dense:2026-04-24-16-22--7f601ca@sha256:9067914f490817a817346bfdf2afaeb3ec936f41d851763a8d25ee63cc8249ad
+        ports:
+        - containerPort: 8200
+        env:
+        - name: DENSE_HOST
+          value: 0.0.0.0
+        - name: DENSE_PORT
+          value: '8200'
+        - name: DEPLOY_ENV
+          value: NONPROD
+        - name: DENSE_LOGLEVEL
+          value: INFO
+        - name: DENSE_MODEL_NAME
+          value: BAAI/bge-small-en-v1.5
+        - name: DENSE_DIM
+          value: '384'
+        - name: DENSE_BATCH_SIZE
+          value: '64'
+        - name: DENSE_NORMALIZE
+          value: '1'
+        - name: DENSE_CUDA
+          value: '0'
+        - name: PRELOAD_MODEL
+          value: '0'
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8200
+          initialDelaySeconds: 30
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 6
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8200
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        startupProbe:
+          httpGet:
+            path: /readyz
+            port: 8200
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 60
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi

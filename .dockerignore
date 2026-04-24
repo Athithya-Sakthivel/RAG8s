@@ -1,0 +1,104 @@
+# Ignore everything not needed in Docker context
+# Speeds up builds and protects secrets
+
+# Python virtual environments
+.venv/
+.venv2/
+.venv1/
+.venv_refined/
+venv/
+myenv/
+prompts.md
+*.onnx
+*.yaml
+
+# Python cache
+__pycache__/
+*.pyc
+repos
+production-stack/
+production-stack
+# Data directories
+data/
+raw_data/
+rag8s-aws/
+rag8s-dev/
+onnx
+
+
+backups/
+tmp/
+commands.sh
+# Secrets and config
+02-secrets.yml
+commands.md
+cli.md
+tmp.md
+
+
+data_sample/
+data_sample
+
+*.pem
+
+# Git and versioning
+.git/
+.gitignore
+.dockerignore
+
+# Development files not needed in Docker image
+notebooks/
+*.zip
+
+
+.venv/
+.venv2/
+.venv1/
+.venv_refined/
+venv/
+myenv/
+temp
+tmp
+
+data_sample/
+data_sample
+pulumi-outputs.json
+pulumi-exports.sh
+backups
+infra/pulumi-aws/pulumi-exports.sh
+infra/pulumi-aws/pulumi-outputs.json
+*.pem
+
+trust-spotfleet.json
+
+# Python cache
+__pycache__/
+*.pyc
+repos
+production-stack/
+production-stack
+# Data directories
+raw_data/
+rag8s-aws/
+rag8s-dev/
+
+
+backups/
+tmp/
+
+# Secrets and config
+02-secrets.yml
+commands.md
+cli.md
+tmp.md
+
+# Git and versioning
+.git/
+.gitignore
+.dockerignore
+
+# Development files not needed in Docker image
+notebooks/
+*.zip
+commands.sh
+sglang
