@@ -21,10 +21,9 @@ import logging
 import os
 import shutil
 import subprocess
-import sys
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import yaml
 
@@ -36,7 +35,7 @@ log = logging.getLogger("gen_sparse")
 # -------------------- defaults & constants --------------------
 DEFAULT_MANIFESTS_DIR = Path("src/infra/manifests/sparse_service")
 DEFAULT_STATE_DIRNAME = ".state"
-DEFAULTS: Dict[str, Any] = {
+DEFAULTS: dict[str, Any] = {
     "ENV": "STAGING",
     "IMAGE": "ghcr.io/athithya-sakthivel/sparse:latest",
     "NAMESPACE": "models",
@@ -98,12 +97,12 @@ def atomic_write(path: Path, content: str) -> None:
 
 
 def run_cmd(
-    cmd: List[str],
+    cmd: list[str],
     capture: bool = True,
     check: bool = False,
-    timeout: Optional[int] = None,
-    input_text: Optional[str] = None,
-) -> Tuple[int, str, str]:
+    timeout: int | None = None,
+    input_text: str | None = None,
+) -> tuple[int, str, str]:
     """
     Run a subprocess and return (rc, stdout, stderr).
     Uses text mode consistently and capture_output when requested.
@@ -124,12 +123,12 @@ def run_cmd(
         return 124, getattr(e, "stdout", "") or "", getattr(e, "stderr", "") or f"timeout after {timeout}s"
 
 
-def canonical_inputs_hash(cfg: Dict[str, Any]) -> str:
+def canonical_inputs_hash(cfg: dict[str, Any]) -> str:
     """
     Create a stable hash of the configuration inputs that matter for manifest generation.
     Excludes transient keys like file paths to state.
     """
-    serial: Dict[str, Any] = {}
+    serial: dict[str, Any] = {}
     for k in sorted(cfg.keys()):
         if k in ("INPUTS_HASH_PATH", "MANIFESTS_DIR", "STATE_DIRNAME"):
             continue
@@ -143,7 +142,7 @@ def canonical_inputs_hash(cfg: Dict[str, Any]) -> str:
     return hashlib.sha256(j.encode("utf-8")).hexdigest()
 
 
-def kubectl_apply_yaml(yaml_str: str, dry_run: bool = False, timeout: int = 120) -> Dict[str, Any]:
+def kubectl_apply_yaml(yaml_str: str, dry_run: bool = False, timeout: int = 120) -> dict[str, Any]:
     kubectl = shutil.which("kubectl")
     if not kubectl:
         return {"applied": False, "error": "kubectl-not-found"}
@@ -164,8 +163,8 @@ def kubectl_apply_yaml(yaml_str: str, dry_run: bool = False, timeout: int = 120)
 # -------------------- config loader --------------------
 
 
-def load_config() -> Dict[str, Any]:
-    cfg: Dict[str, Any] = {}
+def load_config() -> dict[str, Any]:
+    cfg: dict[str, Any] = {}
 
     # base env
     env = os.environ.get("SPARSE_ENV", os.environ.get("ENV", DEFAULTS["ENV"])).upper()
@@ -252,7 +251,7 @@ def load_config() -> Dict[str, Any]:
 # -------------------- renderers --------------------
 
 
-def render_namespace(cfg: Dict[str, Any]) -> str:
+def render_namespace(cfg: dict[str, Any]) -> str:
     ns = {
         "apiVersion": "v1",
         "kind": "Namespace",
@@ -261,7 +260,7 @@ def render_namespace(cfg: Dict[str, Any]) -> str:
     return yaml.safe_dump(ns, sort_keys=False)
 
 
-def render_sa_role(cfg: Dict[str, Any]) -> str:
+def render_sa_role(cfg: dict[str, Any]) -> str:
     sa = {
         "apiVersion": "v1",
         "kind": "ServiceAccount",
@@ -286,9 +285,9 @@ def render_sa_role(cfg: Dict[str, Any]) -> str:
     return "\n---\n".join([yaml.safe_dump(x, sort_keys=False) for x in (sa, role, rb)])
 
 
-def render_deployment(cfg: Dict[str, Any]) -> str:
+def render_deployment(cfg: dict[str, Any]) -> str:
     labels = cfg["LABELS"].copy()
-    container: Dict[str, Any] = {
+    container: dict[str, Any] = {
         "name": cfg["SERVICE_NAME"],
         "image": cfg["IMAGE"],
         "ports": [{"containerPort": cfg["CONTAINER_PORT"]}],
@@ -368,7 +367,7 @@ def render_deployment(cfg: Dict[str, Any]) -> str:
     return yaml.safe_dump(deployment, sort_keys=False)
 
 
-def render_service(cfg: Dict[str, Any]) -> str:
+def render_service(cfg: dict[str, Any]) -> str:
     svc = {
         "apiVersion": "v1",
         "kind": "Service",
@@ -382,7 +381,7 @@ def render_service(cfg: Dict[str, Any]) -> str:
     return yaml.safe_dump(svc, sort_keys=False)
 
 
-def render_hpa(cfg: Dict[str, Any]) -> str:
+def render_hpa(cfg: dict[str, Any]) -> str:
     hpa = {
         "apiVersion": "autoscaling/v2",
         "kind": "HorizontalPodAutoscaler",
@@ -419,7 +418,7 @@ def wait_for_rollout(deployment_name: str, namespace: str, timeout: int = 300) -
 # -------------------- generate / apply / delete --------------------
 
 
-def generate_manifests(cfg: Dict[str, Any], dry_run: bool = False, verbose: bool = False) -> bool:
+def generate_manifests(cfg: dict[str, Any], dry_run: bool = False, verbose: bool = False) -> bool:
     """
     Generate manifests to MANIFESTS_DIR.
     Returns True if manifests were written/changed, False if skipped due to no changes.
@@ -430,7 +429,7 @@ def generate_manifests(cfg: Dict[str, Any], dry_run: bool = False, verbose: bool
 
     state_dir = manifests_dir / cfg.get("STATE_DIRNAME", DEFAULT_STATE_DIRNAME)
     ensure_dir(state_dir)
-    existing: Optional[str] = None
+    existing: str | None = None
     try:
         inputs_path = state_dir / "inputs.sha256"
         if inputs_path.exists():
@@ -465,7 +464,7 @@ def generate_manifests(cfg: Dict[str, Any], dry_run: bool = False, verbose: bool
     return True
 
 
-def apply_to_cluster(cfg: Dict[str, Any], dry_run: bool = False, verbose: bool = False) -> None:
+def apply_to_cluster(cfg: dict[str, Any], dry_run: bool = False, verbose: bool = False) -> None:
     kubectl = shutil.which("kubectl")
     if not kubectl:
         log.error("kubectl not found in PATH; cannot apply")
@@ -498,7 +497,7 @@ def apply_to_cluster(cfg: Dict[str, Any], dry_run: bool = False, verbose: bool =
     rc = wait_for_rollout(deployment_name, cfg["NAMESPACE"], timeout=cfg.get("ROLLOUT_TIMEOUT", 300))
     if rc != 0:
         log.error("Rollout failed or timed out; gathering diagnostics...")
-        cmds: List[Tuple[List[str], str]] = [
+        cmds: list[tuple[list[str], str]] = [
             ([shutil.which("kubectl") or "kubectl", "get", "pods", "-n", cfg["NAMESPACE"]], "get pods"),
             (
                 [shutil.which("kubectl") or "kubectl", "describe", "pod", "-l", f"app.kubernetes.io/name={cfg['SERVICE_NAME']}", "-n", cfg["NAMESPACE"]],
@@ -528,13 +527,13 @@ def apply_to_cluster(cfg: Dict[str, Any], dry_run: bool = False, verbose: bool =
     log.info("Applied manifests to cluster and wrote deploy summary")
 
 
-def rollout_manifests(cfg: Dict[str, Any], dry_run: bool = False, verbose: bool = False) -> None:
+def rollout_manifests(cfg: dict[str, Any], dry_run: bool = False, verbose: bool = False) -> None:
     log.info("rollout started")
     apply_to_cluster(cfg, dry_run=dry_run, verbose=verbose)
     log.info("rollout complete")
 
 
-def delete_manifests(cfg: Dict[str, Any]) -> None:
+def delete_manifests(cfg: dict[str, Any]) -> None:
     manifests_dir: Path = cfg["MANIFESTS_DIR"]
     if manifests_dir.exists():
         for p in sorted(manifests_dir.glob("*")):

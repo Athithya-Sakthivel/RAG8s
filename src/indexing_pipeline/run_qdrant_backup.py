@@ -2,14 +2,26 @@
 """
 run_qdrant_backup_service.py
 
-Service-mode Qdrant backup (data-plane / app-layer). Designed for resilient operation:
+AWS-native Qdrant backup (data-plane / app-layer).
+
+Behavior:
  - Creates snapshots via Qdrant HTTP API for each collection.
  - Downloads snapshot archive(s) via Qdrant service endpoints.
- - Uploads snapshot files + manifest.json + latest.manifest.json to Azure Blob Storage.
- - Uses AZURE_STORAGE_CONNECTION_STRING (preferred) or AZURE_STORAGE_ACCOUNT_NAME + AZURE_STORAGE_ACCOUNT_KEY,
-   or falls back to DefaultAzureCredential (managed identity) when available.
+ - Uploads snapshot files + manifest.json + latest.manifest.json to Amazon S3.
+ - Uses AWS SDK credential resolution (environment variables, profile, IAM role, etc.).
  - Retries transient network/storage failures with exponential backoff + jitter.
  - Exits 0 on success, non-zero on any fatal failure.
+
+Primary configuration:
+ - DATA_S3_BUCKET   (required)
+ - DATA_S3_PREFIX    (optional, default: qdrant/backups)
+ - QDRANT_URL       (optional, default: http://127.0.0.1:6333)
+ - QDRANT_API_KEY   (optional, sent as Qdrant api-key header)
+
+Compatibility fallbacks:
+ - BACKUP_S3_BUCKET / BACKUP_BUCKET for bucket
+ - BACKUP_PREFIX for prefix
+ - BACKUP_ENV / ENV for manifest env tag
 
 Exit codes:
  - 0: success
@@ -20,69 +32,259 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
-import datetime
+import datetime as dt
 import hashlib
 import json
 import os
 import random
+import shutil
 import sys
 import time
 import uuid
 from pathlib import Path
+from typing import Any
 
 import requests
 
 try:
-    from azure.core.exceptions import AzureError
-    from azure.storage.blob import BlobServiceClient, ContainerClient
-except Exception:
-    BlobServiceClient = None
-    AzureError = Exception
+    import boto3
+    from botocore.exceptions import BotoCoreError, ClientError
+except Exception:  # pragma: no cover
+    boto3 = None
+    BotoCoreError = Exception
+    ClientError = Exception
 
-# Configuration defaults
-DEFAULT_QDRANT_URL = os.environ.get("QDRANT_URL", "http://127.0.0.1:6333").rstrip("/")
-DEFAULT_BACKUP_PREFIX = os.environ.get("BACKUP_PREFIX", "qdrant/backups").rstrip("/")
-DEFAULT_LOCAL_DIR = os.environ.get("BACKUP_LOCAL_DIR", "tmp")
-DEFAULT_TIMEOUT = int(os.environ.get("BACKUP_TIMEOUT", "300"))
-DEFAULT_ENV_TAG = os.environ.get("BACKUP_ENV", os.environ.get("ENV", "STAGING")).upper()
-
-# Retry settings (can be tuned via environment)
-RETRY_ATTEMPTS = int(os.environ.get("BACKUP_RETRY_ATTEMPTS", "4"))
-RETRY_BASE_SECONDS = float(os.environ.get("BACKUP_RETRY_BASE", "1.5"))
-RETRY_CAP_SECONDS = float(os.environ.get("BACKUP_RETRY_CAP", "60.0"))
-CHUNK_SIZE = 8192
-
-SENSITIVE_ENVS = {"AZURE_STORAGE_CONNECTION_STRING", "AZURE_STORAGE_ACCOUNT_KEY"}
+# ----------------------------
+# Environment helpers
+# ----------------------------
+def _env_str(name: str, default: str) -> str:
+    v = os.environ.get(name)
+    if v is None:
+        return default
+    v = str(v).strip()
+    return v if v else default
 
 
+def _env_int(name: str, default: int) -> int:
+    v = os.environ.get(name)
+    if v is None or str(v).strip() == "":
+        return default
+    try:
+        return int(v)
+    except Exception:
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    v = os.environ.get(name)
+    if v is None or str(v).strip() == "":
+        return default
+    try:
+        return float(v)
+    except Exception:
+        return default
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    v = os.environ.get(name)
+    if v is None:
+        return default
+    return str(v).strip().lower() in ("1", "true", "yes", "y", "on")
+
+
+# ----------------------------
+# Configuration
+# ----------------------------
+DEFAULT_QDRANT_URL = _env_str("QDRANT_URL", "http://127.0.0.1:6333").rstrip("/")
+DEFAULT_S3_PREFIX = _env_str("DATA_S3_PREFIX", _env_str("BACKUP_PREFIX", "qdrant/backups")).strip("/")
+DEFAULT_LOCAL_DIR = _env_str("BACKUP_LOCAL_DIR", "tmp")
+DEFAULT_TIMEOUT = _env_int("BACKUP_TIMEOUT", 300)
+DEFAULT_ENV_TAG = _env_str("BACKUP_ENV", _env_str("ENV", "STAGING")).upper()
+
+RETRY_ATTEMPTS = _env_int("BACKUP_RETRY_ATTEMPTS", 4)
+RETRY_BASE_SECONDS = _env_float("BACKUP_RETRY_BASE", 1.5)
+RETRY_CAP_SECONDS = _env_float("BACKUP_RETRY_CAP", 60.0)
+CHUNK_SIZE = 1024 * 1024
+
+S3_BUCKET = (
+    _env_str("DATA_S3_BUCKET", "")
+    or _env_str("BACKUP_S3_BUCKET", "")
+    or _env_str("BACKUP_BUCKET", "")
+).strip()
+
+QDRANT_API_KEY = _env_str("QDRANT_API_KEY", "").strip()
+KEEP_LOCAL = _env_bool("BACKUP_KEEP_LOCAL", False)
+
+# ----------------------------
+# Logging
+# ----------------------------
 def log(msg: str, /, *args) -> None:
-    ts = datetime.datetime.utcnow().isoformat() + "Z"
-    print(f"{ts} {msg % args}", flush=True)
+    ts = dt.datetime.utcnow().isoformat(timespec="milliseconds") + "Z"
+    if args:
+        msg = msg % args
+    print(f"{ts} {msg}", flush=True)
 
 
+# ----------------------------
+# Retry
+# ----------------------------
 def _sleep_with_backoff(attempt: int) -> None:
     backoff = min(RETRY_CAP_SECONDS, RETRY_BASE_SECONDS * (2 ** max(0, attempt - 1)))
     jitter = backoff * (0.5 + random.random() * 0.5)
     time.sleep(jitter)
 
 
-def retry_call(func, attempts: int = RETRY_ATTEMPTS, on_except: tuple | None = None):
-    """
-    Retry helper. `on_except` is a tuple of exception types to treat as retriable;
-    if None, all exceptions are retriable.
-    """
+def retry_call(func, attempts: int = RETRY_ATTEMPTS, retriable: tuple[type, ...] = (Exception,)):
     last_exc = None
     for attempt in range(1, attempts + 1):
         try:
             return func()
-        except Exception as e:
+        except retriable as e:
             last_exc = e
-            retriable = True if on_except is None else isinstance(e, on_except)
-            if not retriable or attempt == attempts:
+            if attempt >= attempts:
                 raise
             log("Transient error (attempt %d/%d): %s", attempt, attempts, str(e))
             _sleep_with_backoff(attempt)
     raise last_exc  # pragma: no cover
+
+
+# ----------------------------
+# Qdrant client helpers
+# ----------------------------
+def qdrant_session() -> requests.Session:
+    session = requests.Session()
+    session.headers.update({"accept": "application/json"})
+    if QDRANT_API_KEY:
+        session.headers.update({"api-key": QDRANT_API_KEY})
+    return session
+
+
+def _qdrant_json(resp: requests.Response) -> Any:
+    resp.raise_for_status()
+    try:
+        return resp.json()
+    except Exception as e:
+        raise RuntimeError(f"Expected JSON response from Qdrant, got: {resp.text[:500]}") from e
+
+
+def list_collections(qdrant_url: str, timeout: int = 10) -> list[str]:
+    url = f"{qdrant_url.rstrip('/')}/collections"
+    session = qdrant_session()
+
+    def _call() -> list[str]:
+        with session.get(url, timeout=timeout) as r:
+            j = _qdrant_json(r)
+        result = j.get("result", j)
+
+        cols: list[str] = []
+        if isinstance(result, dict) and "collections" in result:
+            for c in result["collections"]:
+                if isinstance(c, dict) and "name" in c:
+                    cols.append(str(c["name"]))
+                elif isinstance(c, str):
+                    cols.append(c)
+        elif isinstance(result, list):
+            for c in result:
+                if isinstance(c, dict) and "name" in c:
+                    cols.append(str(c["name"]))
+                elif isinstance(c, str):
+                    cols.append(c)
+        return cols
+
+    return retry_call(_call, attempts=RETRY_ATTEMPTS, retriable=(requests.RequestException,))
+
+
+def request_snapshot_name(qdrant_url: str, collection: str, timeout: int = DEFAULT_TIMEOUT) -> str:
+    url = f"{qdrant_url.rstrip('/')}/collections/{collection}/snapshots"
+    session = qdrant_session()
+
+    def _call() -> str:
+        with session.post(url, params={"wait": "true"}, timeout=timeout) as r:
+            j = _qdrant_json(r)
+
+        cand = j.get("result", j)
+        if isinstance(cand, dict):
+            for key in ("name", "snapshot", "snapshot_name"):
+                if cand.get(key):
+                    return str(cand[key])
+        if isinstance(cand, str) and cand.strip():
+            return cand.strip()
+        for key in ("name", "snapshot", "snapshot_name"):
+            if j.get(key):
+                return str(j[key])
+
+        raise RuntimeError(f"Unable to determine snapshot name from Qdrant response: {j}")
+
+    return retry_call(_call, attempts=RETRY_ATTEMPTS, retriable=(requests.RequestException,))
+
+
+def download_snapshot(
+    qdrant_url: str,
+    collection: str,
+    snapshot_name: str,
+    dest: Path,
+    timeout: int = DEFAULT_TIMEOUT,
+) -> None:
+    """
+    Download via the current collection snapshot endpoint:
+      GET /collections/:collection_name/snapshots/:snapshot_name
+    """
+    url = f"{qdrant_url.rstrip('/')}/collections/{collection}/snapshots/{snapshot_name}"
+    session = qdrant_session()
+
+    def _call() -> None:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp_dest = dest.with_suffix(dest.suffix + ".part")
+
+        if tmp_dest.exists():
+            try:
+                tmp_dest.unlink()
+            except Exception:
+                pass
+
+        try:
+            with session.get(url, stream=True, timeout=timeout) as r:
+                r.raise_for_status()
+                with tmp_dest.open("wb") as f:
+                    for chunk in r.iter_content(chunk_size=CHUNK_SIZE):
+                        if chunk:
+                            f.write(chunk)
+            tmp_dest.replace(dest)
+        except Exception:
+            try:
+                if tmp_dest.exists():
+                    tmp_dest.unlink()
+            except Exception:
+                pass
+            raise
+
+    retry_call(_call, attempts=RETRY_ATTEMPTS, retriable=(requests.RequestException,))
+
+
+# ----------------------------
+# S3 helpers
+# ----------------------------
+def s3_client():
+    if boto3 is None:
+        raise RuntimeError(
+            "boto3 and botocore are required. Install them in the runtime before running backups."
+        )
+    return boto3.client("s3")
+
+
+def _join_s3_key(*parts: str) -> str:
+    cleaned: list[str] = []
+    for part in parts:
+        if part is None:
+            continue
+        s = str(part).strip("/")
+        if s:
+            cleaned.append(s)
+    return "/".join(cleaned)
+
+
+def _safe_fs_name(name: str) -> str:
+    return name.replace("/", "_").replace("\\", "_").replace(":", "_")
 
 
 def sha256_of_file(path: Path) -> str:
@@ -95,252 +297,159 @@ def sha256_of_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def azure_client_from_env(allow_managed_identity: bool = True):
-    """
-    Build an Azure BlobServiceClient from env:
-     - AZURE_STORAGE_CONNECTION_STRING
-     - or AZURE_STORAGE_ACCOUNT_NAME + AZURE_STORAGE_ACCOUNT_KEY
-     - or managed identity (DefaultAzureCredential) if allow_managed_identity=True
-    """
-    if BlobServiceClient is None:
-        raise RuntimeError("azure-storage-blob (and azure-core) packages are required; install them in the runtime.")
-
-    conn = os.environ.get("AZURE_STORAGE_CONNECTION_STRING", "").strip()
-    account = os.environ.get("AZURE_STORAGE_ACCOUNT_NAME", "").strip()
-    key = os.environ.get("AZURE_STORAGE_ACCOUNT_KEY", "").strip()
-
-    if conn:
-        return BlobServiceClient.from_connection_string(conn)
-
-    if account and key:
-        url = f"https://{account}.blob.core.windows.net"
-        return BlobServiceClient(account_url=url, credential=key)
-
-    if allow_managed_identity:
-        try:
-            from azure.identity import DefaultAzureCredential  # type: ignore
-            cred = DefaultAzureCredential()
-            if not account:
-                # if account name not set use env var AZURE_STORAGE_ACCOUNT_NAME (required for account_url)
-                raise RuntimeError("AZURE_STORAGE_ACCOUNT_NAME required for managed identity mode")
-            url = f"https://{account}.blob.core.windows.net"
-            return BlobServiceClient(account_url=url, credential=cred)
-        except Exception as e:
-            raise RuntimeError("Managed identity fallback failed or not configured: " + str(e)) from e
-
-    raise RuntimeError("No Azure storage credentials found (set AZURE_STORAGE_CONNECTION_STRING or AZURE_STORAGE_ACCOUNT_NAME+AZURE_STORAGE_ACCOUNT_KEY)")
-
-
-def ensure_container(client: BlobServiceClient, container_name: str) -> ContainerClient:
-    """
-    Ensure the container exists. If not able to create due to permissions but it exists, proceed.
-    """
-    container_client = client.get_container_client(container_name)
-    try:
-        # create_container will fail if container exists; that's fine
-        container_client.create_container()
-        log("Created container '%s' (or it did not exist).", container_name)
-    except Exception:
-        # if access denied or already exists, do not fail immediately — verify existence
-        try:
-            container_client.get_container_properties()
-            log("Using existing container '%s'.", container_name)
-        except Exception as e2:
-            raise RuntimeError(f"Cannot access or create Azure container '{container_name}': {e2}") from e2
-    return container_client
-
-
-def list_collections(qdrant_url: str, timeout: int = 10) -> list[str]:
-    url = f"{qdrant_url.rstrip('/')}/collections"
-    def _call():
-        r = requests.get(url, timeout=timeout)
-        r.raise_for_status()
-        j = r.json()
-        result = j.get("result", j)
-        cols: list[str] = []
-        if isinstance(result, dict) and "collections" in result:
-            for c in result["collections"]:
-                if isinstance(c, dict) and "name" in c:
-                    cols.append(c["name"])
-                elif isinstance(c, str):
-                    cols.append(c)
-        elif isinstance(result, list):
-            for c in result:
-                if isinstance(c, dict) and "name" in c:
-                    cols.append(c["name"])
-                elif isinstance(c, str):
-                    cols.append(c)
-        return cols
-
-    return retry_call(lambda: _call(), attempts=RETRY_ATTEMPTS, on_except=(requests.RequestException,))
-
-
-def request_snapshot_and_get_name(qdrant_url: str, collection: str, wait: bool = True, timeout: int = DEFAULT_TIMEOUT) -> str:
-    url = f"{qdrant_url.rstrip('/')}/collections/{collection}/snapshots"
-    params = {"wait": "true"} if wait else {}
-    def _call():
-        r = requests.post(url, params=params, timeout=timeout)
-        r.raise_for_status()
-        j = r.json()
-        cand = j.get("result", j)
-        if isinstance(cand, dict):
-            for key in ("name", "snapshot", "snapshot_name"):
-                if key in cand:
-                    return str(cand[key])
-        if isinstance(cand, str):
-            return cand
-        for key in ("snapshot", "snapshot_name", "name"):
-            if key in j:
-                return str(j[key])
-        raise RuntimeError(f"Unable to determine snapshot name from Qdrant response: {j}")
-    return retry_call(_call, attempts=RETRY_ATTEMPTS, on_except=(requests.RequestException,))
-
-
-def download_snapshot(qdrant_url: str, collection: str, snapshot_name: str, dest: Path, timeout: int = DEFAULT_TIMEOUT) -> None:
-    """
-    Attempt to download the snapshot via the service endpoints. Retries internally.
-    """
-    urls = [
-        f"{qdrant_url.rstrip('/')}/collections/{collection}/snapshots/{snapshot_name}/download",
-        f"{qdrant_url.rstrip('/')}/collections/{collection}/snapshots/{snapshot_name}",
-    ]
-    def _try_download():
-        last_err = None
-        for u in urls:
-            try:
-                with requests.get(u, stream=True, timeout=timeout) as r:
-                    if r.status_code == 200:
-                        dest.parent.mkdir(parents=True, exist_ok=True)
-                        with dest.open("wb") as f:
-                            for chunk in r.iter_content(chunk_size=CHUNK_SIZE):
-                                if chunk:
-                                    f.write(chunk)
-                        return
-                    else:
-                        last_err = f"{r.status_code} {r.text[:200]}"
-            except Exception as e:
-                last_err = str(e)
-        raise RuntimeError(f"Failed to download snapshot via service endpoints: {last_err}")
-
-    return retry_call(_try_download, attempts=RETRY_ATTEMPTS, on_except=(requests.RequestException,))
-
-
-def azure_upload_file_with_retries(container_client: ContainerClient, blob_path: str, local_file: str, attempts: int = RETRY_ATTEMPTS) -> None:
-    """
-    Upload a file to Azure with retries. Overwrites if exists.
-    """
-    blob_client = container_client.get_blob_client(blob_path)
+def upload_file_with_retries(
+    client,
+    bucket: str,
+    key: str,
+    filename: str,
+    attempts: int = RETRY_ATTEMPTS,
+    content_type: str | None = None,
+) -> None:
     last_exc = None
+
     for attempt in range(1, attempts + 1):
         try:
-            with open(local_file, "rb") as data:
-                blob_client.upload_blob(data, overwrite=True)
+            extra_args = {}
+            if content_type:
+                extra_args["ContentType"] = content_type
+
+            if extra_args:
+                client.upload_file(filename, bucket, key, ExtraArgs=extra_args)
+            else:
+                client.upload_file(filename, bucket, key)
             return
-        except AzureError as ae:
-            last_exc = ae
-            log("Azure upload transient error (attempt %d/%d): %s", attempt, attempts, str(ae))
-            if attempt < attempts:
-                _sleep_with_backoff(attempt)
-                continue
-            raise RuntimeError(f"Azure upload failed for {local_file}: {ae}") from ae
-        except Exception as e:
+        except (ClientError, BotoCoreError, OSError, Exception) as e:
             last_exc = e
-            log("Azure upload error (attempt %d/%d): %s", attempt, attempts, str(e))
-            if attempt < attempts:
-                _sleep_with_backoff(attempt)
-                continue
-            raise
-    raise RuntimeError(f"Azure upload failed for {local_file}: {last_exc}")
+            if attempt >= attempts:
+                raise RuntimeError(f"Upload failed for s3://{bucket}/{key}: {e}") from e
+            log("S3 upload transient error (attempt %d/%d): %s", attempt, attempts, str(e))
+            _sleep_with_backoff(attempt)
+
+    raise RuntimeError(f"Upload failed for s3://{bucket}/{key}: {last_exc}")
 
 
-def run_service_backup(qdrant_url: str, azure_container: str, azure_prefix: str, local_dir: str | None, timeout: int, env_tag: str) -> tuple[str, str]:
+# ----------------------------
+# Backup workflow
+# ----------------------------
+def run_service_backup(
+    qdrant_url: str,
+    s3_bucket: str,
+    s3_prefix: str,
+    local_dir: str | None,
+    timeout: int,
+    env_tag: str,
+) -> tuple[str, str]:
     """
     Main orchestration:
      - enumerate collections
      - request snapshot for each collection
      - download snapshot files
-     - upload snapshot files to Azure under <azure_prefix>/<backup_id>/
+     - upload snapshot files to S3 under <s3_prefix>/<backup_id>/
      - write manifest.json and latest.manifest.json
     Returns (backup_id, local_tmp_dir)
     """
-    timestamp = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
-    backup_id = f"{timestamp}-{str(uuid.uuid4())[:8]}"
-    local_tmp = Path(local_dir or DEFAULT_LOCAL_DIR) / backup_id
+    timestamp = dt.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    backup_id = f"{timestamp}-{uuid.uuid4().hex[:8]}"
+    local_tmp = Path(local_dir or DEFAULT_LOCAL_DIR).resolve() / backup_id
     local_tmp.mkdir(parents=True, exist_ok=True)
 
-    log("Starting service-mode backup: id=%s qdrant=%s", backup_id, qdrant_url)
+    log("Starting AWS-native backup: id=%s qdrant=%s bucket=%s prefix=%s", backup_id, qdrant_url, s3_bucket, s3_prefix)
 
-    # build azure client and ensure container
-    client = azure_client_from_env(allow_managed_identity=True)
-    try:
-        # quick service check
-        client.get_service_properties()
-    except Exception:
-        log("Warning: unable to query blob service properties; will still attempt uploads (permissions may fail).")
+    s3 = s3_client()
 
-    container_client = ensure_container(client, azure_container)
-
-    # list collections
     collections = list_collections(qdrant_url, timeout=min(10, timeout))
     if not collections:
         raise RuntimeError("No collections found to backup from Qdrant")
 
-    manifest: dict = {
+    manifest: dict[str, Any] = {
         "backup_id": backup_id,
-        "created_at": datetime.datetime.utcnow().isoformat() + "Z",
+        "created_at": dt.datetime.utcnow().isoformat(timespec="seconds") + "Z",
         "env": env_tag,
-        "qdrant_url": qdrant_url,
-        "collections": {},
         "mode": "service",
+        "qdrant_url": qdrant_url,
+        "storage": {
+            "provider": "aws_s3",
+            "bucket": s3_bucket,
+            "prefix": s3_prefix,
+        },
+        "collections": {},
     }
 
-    for col in collections:
-        log("[%s] requesting snapshot...", col)
-        snap_name = request_snapshot_and_get_name(qdrant_url, col, wait=True, timeout=timeout)
-        log("[%s] snapshot name: %s", col, snap_name)
-        fname = f"{col}-{snap_name}.snapshot"
-        local_path = local_tmp / fname
-        log("[%s] downloading snapshot to: %s", col, local_path)
-        download_snapshot(qdrant_url, col, snap_name, local_path, timeout=timeout)
-        sha = sha256_of_file(local_path)
-        size = local_path.stat().st_size
-        blob_path = f"{azure_prefix.rstrip('/')}/{backup_id}/{local_path.name}"
-        log("[%s] uploading to azure container=%s blob=%s", col, azure_container, blob_path)
-        azure_upload_file_with_retries(container_client, blob_path, str(local_path))
-        manifest["collections"][col] = {
-            "snapshot_name": snap_name,
-            "azure_container": azure_container,
-            "blob_path": blob_path,
+    for collection in collections:
+        safe_collection = _safe_fs_name(collection)
+        log("[%s] requesting snapshot...", collection)
+        snapshot_name = request_snapshot_name(qdrant_url, collection, timeout=timeout)
+        log("[%s] snapshot name: %s", collection, snapshot_name)
+
+        collection_dir = local_tmp / safe_collection
+        local_snapshot_path = collection_dir / snapshot_name
+
+        log("[%s] downloading snapshot to: %s", collection, local_snapshot_path)
+        download_snapshot(qdrant_url, collection, snapshot_name, local_snapshot_path, timeout=timeout)
+
+        sha = sha256_of_file(local_snapshot_path)
+        size = local_snapshot_path.stat().st_size
+
+        s3_key = _join_s3_key(s3_prefix, backup_id, collection, snapshot_name)
+        log("[%s] uploading to s3 bucket=%s key=%s", collection, s3_bucket, s3_key)
+        upload_file_with_retries(
+            s3,
+            s3_bucket,
+            s3_key,
+            str(local_snapshot_path),
+            content_type="application/octet-stream",
+        )
+
+        manifest["collections"][collection] = {
+            "snapshot_name": snapshot_name,
+            "s3_bucket": s3_bucket,
+            "s3_key": s3_key,
+            "s3_uri": f"s3://{s3_bucket}/{s3_key}",
             "sha256": sha,
-            "size": size,
-            "local_path": str(local_path),
+            "size_bytes": size,
+            "local_path": str(local_snapshot_path),
         }
-        log("[%s] uploaded (size=%d sha256=%s)", col, size, sha)
+        log("[%s] uploaded (size=%d sha256=%s)", collection, size, sha)
 
-    # write manifest files
-    manifest_json = json.dumps(manifest, indent=2)
+    manifest_json = json.dumps(manifest, indent=2, sort_keys=True)
     manifest_local = local_tmp / "manifest.json"
-    manifest_local.write_text(manifest_json)
     latest_local = local_tmp / "latest.manifest.json"
-    latest_local.write_text(manifest_json)
+    manifest_local.write_text(manifest_json, encoding="utf-8")
+    latest_local.write_text(manifest_json, encoding="utf-8")
 
-    manifest_blob_path = f"{azure_prefix.rstrip('/')}/{backup_id}/manifest.json"
-    latest_blob_path = f"{azure_prefix.rstrip('/')}/latest.manifest.json"
+    manifest_key = _join_s3_key(s3_prefix, backup_id, "manifest.json")
+    latest_key = _join_s3_key(s3_prefix, "latest.manifest.json")
 
-    log("Uploading manifest -> azure://%s/%s", azure_container, manifest_blob_path)
-    azure_upload_file_with_retries(container_client, manifest_blob_path, str(manifest_local))
-    log("Uploading latest manifest -> azure://%s/%s", azure_container, latest_blob_path)
-    azure_upload_file_with_retries(container_client, latest_blob_path, str(latest_local))
+    log("Uploading manifest -> s3://%s/%s", s3_bucket, manifest_key)
+    upload_file_with_retries(
+        s3,
+        s3_bucket,
+        manifest_key,
+        str(manifest_local),
+        content_type="application/json",
+    )
+
+    log("Uploading latest manifest -> s3://%s/%s", s3_bucket, latest_key)
+    upload_file_with_retries(
+        s3,
+        s3_bucket,
+        latest_key,
+        str(latest_local),
+        content_type="application/json",
+    )
 
     log("Backup manifest: %s", manifest_json)
-    log("Backup finished. backup_id: %s local: %s", backup_id, str(local_tmp))
+    log("Backup finished. backup_id=%s local=%s", backup_id, str(local_tmp))
     return backup_id, str(local_tmp)
 
 
+# ----------------------------
+# CLI / main
+# ----------------------------
 def parse_args():
-    p = argparse.ArgumentParser(description="Qdrant service-mode backup (Azure).")
-    p.add_argument("--azure-container", required=False, help="Azure container to store backups. Can also be set via BACKUP_AZ_CONTAINER env.")
-    p.add_argument("--azure-prefix", default=DEFAULT_BACKUP_PREFIX, help="Azure prefix for backups (default qdrant/backups).")
+    p = argparse.ArgumentParser(description="Qdrant service-mode backup (AWS S3).")
+    p.add_argument("--data-s3-bucket", default=S3_BUCKET, help="S3 bucket for backups. Can also be set via DATA_S3_BUCKET env.")
+    p.add_argument("--data-s3-prefix", default=DEFAULT_S3_PREFIX, help="S3 prefix for backups (default qdrant/backups).")
     p.add_argument("--local-dir", default=DEFAULT_LOCAL_DIR, help="Local directory to store temporary backup files.")
     p.add_argument("--qdrant-url", default=DEFAULT_QDRANT_URL, help="Qdrant service URL.")
     p.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, help="Timeout seconds for HTTP/storage operations.")
@@ -350,24 +459,45 @@ def parse_args():
 
 def main():
     args = parse_args()
-    azure_container = args.azure_container or os.environ.get("BACKUP_AZ_CONTAINER")
-    azure_prefix = args.azure_prefix or os.environ.get("BACKUP_PREFIX", DEFAULT_BACKUP_PREFIX)
-    qdrant_url = args.qdrant_url or DEFAULT_QDRANT_URL
-    local_dir = args.local_dir or DEFAULT_LOCAL_DIR
-    timeout = int(args.timeout)
-    env_tag = (args.env or DEFAULT_ENV_TAG).upper()
 
-    if not azure_container:
-        print("ERROR: BACKUP container not specified (use --azure-container or BACKUP_AZ_CONTAINER env).", file=sys.stderr)
+    qdrant_url = str(args.qdrant_url).rstrip("/")
+    s3_bucket = str(args.data_s3_bucket or "").strip()
+    s3_prefix = str(args.data_s3_prefix or DEFAULT_S3_PREFIX).strip("/")
+    local_dir = str(args.local_dir or DEFAULT_LOCAL_DIR)
+    timeout = int(args.timeout)
+    env_tag = str(args.env or DEFAULT_ENV_TAG).upper()
+
+    if not s3_bucket:
+        print(
+            "ERROR: DATA_S3_BUCKET is required (set --data-s3-bucket or DATA_S3_BUCKET env).",
+            file=sys.stderr,
+        )
         sys.exit(2)
 
     try:
-        bid, localpath = run_service_backup(qdrant_url=qdrant_url, azure_container=azure_container, azure_prefix=azure_prefix, local_dir=local_dir, timeout=timeout, env_tag=env_tag)
-        print("SUCCESS:", bid, localpath)
+        backup_id, local_path = run_service_backup(
+            qdrant_url=qdrant_url,
+            s3_bucket=s3_bucket,
+            s3_prefix=s3_prefix,
+            local_dir=local_dir,
+            timeout=timeout,
+            env_tag=env_tag,
+        )
+
+        print("SUCCESS:", backup_id, local_path)
         sys.exit(0)
     except Exception as e:
         print("ERROR:", str(e), file=sys.stderr)
         sys.exit(3)
+    finally:
+        if not KEEP_LOCAL:
+            try:
+                backup_root = Path(local_dir).resolve()
+                if backup_root.exists():
+                    shutil.rmtree(backup_root, ignore_errors=True)
+            except Exception:
+                pass
+
 
 if __name__ == "__main__":
     main()
