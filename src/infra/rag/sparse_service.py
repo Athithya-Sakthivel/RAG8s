@@ -43,13 +43,13 @@ DEFAULT_STATE_DIRNAME = ".state"
 
 DEFAULTS: dict[str, Any] = {
     "DEPLOY_ENV": "NONPROD",
-    "IMAGE": "ghcr.io/athithya-sakthivel/sparse:2026-04-24-15-23--f9ebe8e@sha256:19901ade9d3b4729674a4425266cf37fee0e49d1403b1fa292b6e9432bd099bb",
+    "IMAGE": "ghcr.io/athithya-sakthivel/sparse:2026-04-24-16-22--7f601ca@sha256:c21bfaae3cb9b7399163c5a82b19521b4cd85f165261e27da522f8357de29b39",
     "NAMESPACE": "models",
     "SERVICE_NAME": "sparse",
     "CONTAINER_PORT": 8201,
     "HOST": "0.0.0.0",
     "LOGLEVEL": "INFO",
-    "SPARSE_MODEL_NAME": "prithivida/Splade_PP_en_v1",
+    "SPARSE_MODEL_NAME": "Qdrant/minicoil-v1",
     "SPARSE_BATCH_SIZE": 8,
     "SPARSE_CUDA": False,
     "SPARSE_PRELOAD_MODEL": False,
@@ -535,28 +535,46 @@ def apply_to_cluster(cfg: dict[str, Any], dry_run: bool = False, verbose: bool =
 
     log.info("Rollout successful for %s/%s", cfg["NAMESPACE"], deployment_name)
 
-
 def delete_manifests(cfg: dict[str, Any]) -> None:
-    manifests_dir: Path = cfg["MANIFESTS_DIR"]
-    if manifests_dir.exists():
-        for p in sorted(manifests_dir.glob("*")):
+    def _delete(dir_path: Path, state_dirname: str) -> None:
+        if not dir_path or str(dir_path).strip() in ("", "/", "."):
+            return
+        if not dir_path.exists():
+            log.info("No manifests found at %s", str(dir_path))
+            return
+
+        try:
+            subprocess.run(
+    ["kubectl", "delete", "-f", str(dir_path), "--ignore-not-found=true"],
+    check=False,
+    capture_output=True,
+    text=True,
+)
+        except Exception:
+            log.debug("kubectl delete failed for %s", dir_path, exc_info=True)
+
+        for p in sorted(dir_path.glob("*")):
             try:
-                if p.is_dir():
-                    shutil.rmtree(p)
-                else:
-                    p.unlink()
+                shutil.rmtree(p) if p.is_dir() else p.unlink()
             except Exception:
                 log.debug("Failed to remove %s", p, exc_info=True)
-        state_dir = manifests_dir / cfg.get("STATE_DIRNAME", DEFAULT_STATE_DIRNAME)
+
+        state_dir = dir_path / state_dirname
         if state_dir.exists():
             try:
                 shutil.rmtree(state_dir)
             except Exception:
                 log.debug("Failed to remove state dir %s", state_dir, exc_info=True)
-        log.info("Deleted manifests at %s", str(manifests_dir))
-    else:
-        log.info("No manifests found at %s", str(manifests_dir))
 
+        log.info("Deleted manifests + resources at %s", str(dir_path))
+
+    state_dirname = cfg.get("STATE_DIRNAME", DEFAULT_STATE_DIRNAME)
+    primary = Path(cfg["MANIFESTS_DIR"])
+    secondary = Path(DEFAULT_MANIFESTS_DIR)
+
+    _delete(primary, state_dirname)
+    if secondary.resolve() != primary.resolve():
+        _delete(secondary, state_dirname)
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Generate/rollout/delete Sparse embedder Kubernetes manifests.")

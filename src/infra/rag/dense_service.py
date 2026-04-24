@@ -42,7 +42,7 @@ DEFAULT_MANIFESTS_DIR = Path("src/manifests/dense_service")
 DEFAULT_STATE_DIRNAME = ".state"
 DEFAULTS: dict[str, Any] = {
     "DEPLOY_ENV": "NONPROD",
-    "IMAGE": "ghcr.io/athithya-sakthivel/dense:2026-04-24-14-35--50d1ff9@sha256:92a1d23be33e69ed84cfb787764a2176167eb0dcd94396354f3fc4da94ae517c",
+    "IMAGE": "ghcr.io/athithya-sakthivel/dense:2026-04-24-16-22--7f601ca@sha256:9067914f490817a817346bfdf2afaeb3ec936f41d851763a8d25ee63cc8249ad",
     "NAMESPACE": "models",
     "SERVICE_NAME": "dense",
     "CONTAINER_PORT": 8200,
@@ -524,25 +524,33 @@ def apply_to_cluster(cfg: dict[str, Any], dry_run: bool = False, verbose: bool =
 
 
 def delete_manifests(cfg: dict[str, Any]) -> None:
-    manifests_dir: Path = cfg["MANIFESTS_DIR"]
-    if manifests_dir.exists():
-        for p in sorted(manifests_dir.glob("*")):
+
+    def _rm(dir_path: Path, state_dirname: str) -> None:
+        if not dir_path or str(dir_path).strip() in ("", "/", "."):
+            return
+        if not dir_path.exists():
+            log.info("No manifests found at %s", str(dir_path))
+            return
+        for p in sorted(dir_path.glob("*")):
             try:
-                if p.is_dir():
-                    shutil.rmtree(p)
-                else:
-                    p.unlink()
+                shutil.rmtree(p) if p.is_dir() else p.unlink()
             except Exception:
                 log.debug("Failed to remove %s", p, exc_info=True)
-        state_dir = manifests_dir / cfg.get("STATE_DIRNAME", DEFAULT_STATE_DIRNAME)
+        state_dir = dir_path / state_dirname
         if state_dir.exists():
             try:
                 shutil.rmtree(state_dir)
             except Exception:
                 log.debug("Failed to remove state dir %s", state_dir, exc_info=True)
-        log.info("Deleted manifests at %s", str(manifests_dir))
-    else:
-        log.info("No manifests found at %s", str(manifests_dir))
+        log.info("Deleted manifests at %s", str(dir_path))
+
+    state_dirname = cfg.get("STATE_DIRNAME", DEFAULT_STATE_DIRNAME)
+    primary = Path(cfg["MANIFESTS_DIR"])
+    secondary = Path(DEFAULT_MANIFESTS_DIR)
+
+    _rm(primary, state_dirname)
+    if secondary.resolve() != primary.resolve():
+        _rm(secondary, state_dirname)
 
 
 def parse_args() -> argparse.Namespace:
