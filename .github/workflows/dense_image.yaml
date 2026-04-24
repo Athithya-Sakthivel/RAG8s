@@ -91,7 +91,7 @@ jobs:
             ${{ steps.image-meta.outputs.dense_image }}
             ${{ steps.image-meta.outputs.image_staging }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=min
 
       - name: Run service tests (build is loaded into local docker)
         shell: bash

@@ -97,7 +97,7 @@ jobs:
             ${{ steps.image-meta.outputs.indexing_image }}
             ${{ steps.image-meta.outputs.image_staging }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=min
 
       - name: Scan image with Trivy
         shell: bash
