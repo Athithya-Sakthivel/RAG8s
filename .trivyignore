@@ -1,0 +1,3 @@
+# indexing cronjob
+CVE-2023-45853 # Ignore zlib false positive (Debian marks CVE-2023-45853 as will_not_fix)
+CVE-2025-7458 # does not process untrusted SQL. CronJob is internal, the attack surface is limited.
