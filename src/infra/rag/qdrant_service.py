@@ -29,6 +29,10 @@ except Exception:
 DEFAULT_RELEASE = "qdrant"
 DEFAULT_NAMESPACE = "qdrant"
 DEFAULT_IMAGE_REF = "docker.io/qdrant/qdrant:v1.17.1@sha256:94728574965d17c6485dd361aa3c0818b325b9016dac5ea6afec7b4b2700865f"
+# Fallback defaults for repo/tag/digest (can be overridden via env)
+DEFAULT_IMAGE_REPO = ""
+DEFAULT_IMAGE_TAG = ""
+DEFAULT_IMAGE_DIGEST = ""
 DEFAULT_CHART_REPO_NAME = "qdrant"
 DEFAULT_CHART_REPO_URL = "https://qdrant.github.io/qdrant-helm"
 DEFAULT_CHART_NAME = "qdrant"
@@ -165,6 +169,7 @@ def load_config() -> Config:
     raw_image_ref = _env("QDRANT_IMAGE_REF", DEFAULT_IMAGE_REF)
     repo, tag, digest = parse_image_ref(raw_image_ref)
 
+    # If any piece is missing, allow explicit env overrides; fall back to top-level defaults.
     if not repo:
         repo = _env("QDRANT_IMAGE_REPO", DEFAULT_IMAGE_REPO)
     if not tag:
@@ -239,6 +244,7 @@ def require_bin(name: str) -> None:
 def run_cmd(
     cmd: list[str],
     *,
+
     capture: bool = False,
     timeout: int | None = None,
     input_text: str | None = None,

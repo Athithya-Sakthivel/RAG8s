@@ -60,12 +60,14 @@ jobs:
           restore-keys: |
             trivy-${{ runner.os }}-
 
-      - name: Compute image metadata (Kolkata style tag)
+      - name: Compute image metadata (Kolkata style tag, lowercase GHCR user)
         id: image-meta
         shell: bash
         run: |
           set -euo pipefail
-          GHCR_USER="${GHCR_USER:-${{ github.actor }}}"
+          # Resolve GHCR user and force lowercase to satisfy Docker tag rules
+          RAW_GHCR_USER="${GHCR_USER:-${{ github.actor }}}"
+          GHCR_USER="$(printf '%s' "${RAW_GHCR_USER}" | tr '[:upper:]' '[:lower:]')"
           IMAGE_NAME="${IMAGE_NAME:-dense}"
           IMAGE_TAG="${IMAGE_TAG:-$(TZ=Asia/Kolkata date +%Y-%m-%d-%H-%M)--$(git rev-parse --short HEAD)}"
           DENSE_IMAGE="ghcr.io/${GHCR_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
@@ -96,9 +98,9 @@ jobs:
         run: |
           set -euo pipefail
           cd src/infra/services/dense
-          # Provide required env vars for the test script
           export DENSE_MODEL_NAME="${DENSE_MODEL_NAME:-BAAI/bge-small-en-v1.5}"
           export DENSE_DIM="${DENSE_DIM:-384}"
+          # IMAGE_TAG and ghcr_user are produced by image-meta; fall back safely if missing
           export DENSE_IMAGE_TAG="${IMAGE_TAG:-${{ steps.image-meta.outputs.image_tag }}}"
           export IMAGE_REPO="${IMAGE_REPO:-${{ steps.image-meta.outputs.ghcr_user }}/${{ steps.image-meta.outputs.image_name }}}"
           chmod +x test_dense.sh

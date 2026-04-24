@@ -3,15 +3,13 @@ import os
 import threading
 import time
 from pathlib import Path
-from typing import List, Optional
 
 import numpy as np
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import ORJSONResponse, PlainTextResponse
-from pydantic import BaseModel
-from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
-
 from fastembed import TextEmbedding
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
+from pydantic import BaseModel
 
 # Logging
 logging.basicConfig(level=os.getenv("DENSE_LOGLEVEL", "INFO"))
@@ -40,18 +38,18 @@ REQUEST_DURATION = Histogram("dense_request_duration_seconds", "Embed request du
 
 # Models
 class EmbedRequest(BaseModel):
-    texts: List[str]
+    texts: list[str]
 
 class EmbedResponse(BaseModel):
-    vectors: List[List[float]]
+    vectors: list[list[float]]
 
 # Internal state
 _MODEL_LOCK = threading.Lock()
-_MODEL: Optional[TextEmbedding] = None
-_MODEL_ERROR: Optional[str] = None
-_READY_AT: Optional[float] = None
+_MODEL: TextEmbedding | None = None
+_MODEL_ERROR: str | None = None
+_READY_AT: float | None = None
 
-def _l2_normalize(v: List[float]) -> List[float]:
+def _l2_normalize(v: list[float]) -> list[float]:
     a = np.asarray(v, dtype=np.float32)
     n = np.linalg.norm(a)
     if n > 0:
@@ -134,7 +132,7 @@ def embed(req: EmbedRequest):
     except Exception as e:
         log.exception("embed failed: %s", e)
         REQUEST_COUNTER.labels(status="error").inc()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
     finally:
         _ = max(time.time() - start, 1e-6)
 
@@ -188,8 +186,8 @@ def on_startup():
         def _bg_load():
             try:
                 _load_model_if_needed()
-            except Exception:
-                log.exception("Background model preload failed")
+            except Exception as e:
+                log.exception("Background model preload failed: %s", e)
         t = threading.Thread(target=_bg_load, daemon=True)
         t.start()
 
