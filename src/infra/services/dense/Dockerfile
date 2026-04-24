@@ -1,5 +1,5 @@
 # Use a stable Python 3.13 base
-FROM python:3.13.14-slim
+FROM python:3.13.12-slim
 
 ARG FASTEMBED_GPU=0
 ARG DENSE_MODEL_NAME
