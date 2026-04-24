@@ -43,7 +43,6 @@ mdurl==0.1.2
 murmurhash==1.0.15
 numpy==2.4.4
 onnxruntime==1.25.0
-opencv-python==4.13.0.92
 opencv-python-headless==4.13.0.92
 packaging==26.1
 pdfminer.six==20251230
@@ -80,7 +79,7 @@ shellingham==1.5.4
 six==1.17.0
 smart_open==7.6.0
 soundfile==0.13.1
-spacy==3.8.14
+spacy==3.8.13
 spacy-legacy==3.0.12
 spacy-loggers==1.0.5
 srsly==2.5.3
