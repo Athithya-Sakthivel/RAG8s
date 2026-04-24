@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import ORJSONResponse, PlainTextResponse
+from fastapi.responses import PlainTextResponse
 from fastembed import TextEmbedding
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 from pydantic import BaseModel
@@ -30,7 +30,7 @@ ENV = os.getenv("ENV", "dev")
 PRELOAD_MODEL = os.getenv("PRELOAD_MODEL", "0").upper() in ("1", "TRUE", "YES")
 
 # App
-app = FastAPI(title="dense-embedder", default_response_class=ORJSONResponse)
+app = FastAPI(title="dense-embedder")
 
 # Prometheus metrics
 REQUEST_COUNTER = Counter("dense_requests_total", "Total embed requests", ["status"])

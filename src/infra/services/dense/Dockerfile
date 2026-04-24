@@ -1,5 +1,4 @@
-# Use a stable Python 3.13 base
-FROM python:3.13.12-slim
+FROM python:3.13.12-slim@sha256:f1927c75e81efd1e091dbd64b6c0ecaa5630b38635a3d1c04034ac636e1f94c8
 
 ARG FASTEMBED_GPU=0
 ARG DENSE_MODEL_NAME
@@ -12,7 +11,7 @@ ENV FASTEMBED_CACHE=/models_cache \
     PYTHONUNBUFFERED=1 \
     DENSE_MODEL_NAME=${DENSE_MODEL_NAME} \
     DENSE_DIM=${DENSE_DIM} \
-    DENSE_BATCH_SIZE=16 \
+    DENSE_BATCH_SIZE=32 \
     DENSE_NORMALIZE=TRUE \
     DENSE_CUDA=0 \
     DENSE_HOST=0.0.0.0 \
@@ -43,7 +42,7 @@ RUN if [ "$FASTEMBED_GPU" = "1" ]; then \
       python -m pip install --no-cache-dir fastembed==0.8.0 numpy==2.4.4 onnxruntime==1.25.0 huggingface-hub==1.11.0; \
     fi
 
-RUN python -m pip install --no-cache-dir fastapi==0.136.1 "uvicorn[standard]==0.46.0" orjson==3.11.8 prometheus-client==0.25.0
+RUN python -m pip install --no-cache-dir fastapi==0.136.1 "uvicorn[standard]==0.46.0" prometheus-client==0.25.0
 
 # Copy application code and entrypoint
 WORKDIR /app
