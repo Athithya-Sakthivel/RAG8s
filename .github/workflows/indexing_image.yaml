@@ -45,11 +45,15 @@ jobs:
 
       - name: Compute Trivy cache key
         id: trivy-key
+        shell: bash
         run: |
+          set -euo pipefail
           echo "key=trivy-${RUNNER_OS}-$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
 
       - name: Prepare Trivy cache
-        run: mkdir -p "${TRIVY_CACHE_DIR}"
+        shell: bash
+        run: |
+          mkdir -p "${TRIVY_CACHE_DIR}"
 
       - name: Restore Trivy cache
         uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7
@@ -61,6 +65,7 @@ jobs:
 
       - name: Compute image metadata
         id: image-meta
+        shell: bash
         run: |
           set -euo pipefail
 
@@ -83,7 +88,7 @@ jobs:
         id: build-image
         uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294
         with:
-          context: .
+          context: src/indexing_pipeline
           file: src/indexing_pipeline/Dockerfile
           load: true
           push: false
@@ -95,6 +100,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Scan image with Trivy
+        shell: bash
         run: |
           set -euo pipefail
 
@@ -102,7 +108,9 @@ jobs:
           test -n "${scan_image}"
 
           ignore_args=()
-          if [[ -f .trivyignore ]]; then
+          if [[ -f src/indexing_pipeline/.trivyignore ]]; then
+            ignore_args+=(--ignorefile /workspace/src/indexing_pipeline/.trivyignore)
+          elif [[ -f .trivyignore ]]; then
             ignore_args+=(--ignorefile /workspace/.trivyignore)
           fi
 
@@ -131,6 +139,7 @@ jobs:
 
       - name: Push image tags
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
         run: |
           set -euo pipefail
           docker push "${{ steps.image-meta.outputs.indexing_image }}"

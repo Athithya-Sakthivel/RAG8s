@@ -94,6 +94,8 @@ def error(event: str, msg: str, **k):
 
 # ---- hashing and checksum helpers ----
 def compute_hashes(path: str, chunk_size: int = 8 * 1024 * 1024) -> tuple[str, str]:
+    # nosemgrep: python.lang.security.insecure-hash-algorithms-md5
+    # MD5 used for deterministic hashing (non-cryptographic).
     md5 = hashlib.md5()
     sha = hashlib.sha256()
     with open(path, "rb") as f:
@@ -475,6 +477,8 @@ def should_skip_upload(
             norm = _normalize_etag(remote_etag)
             if _is_md5_hex(norm):
                 try:
+                    # nosemgrep: python.lang.security.insecure-hash-algorithms-md5
+                    # MD5 used for deterministic hashing (non-cryptographic).
                     local_md5, local_sha = compute_hashes(local_path)
                     if local_md5 == norm:
                         return True, "match_etag_md5", local_sha
@@ -521,6 +525,8 @@ def should_skip_download(local_path: str, remote_info: dict) -> bool:
         norm = _normalize_etag(remote_etag)
         if _is_md5_hex(norm):
             try:
+                # nosemgrep: python.lang.security.insecure-hash-algorithms-md5
+                # MD5 used for deterministic hashing (non-cryptographic).
                 local_md5, _ = compute_hashes(local_path)
                 return local_md5 == norm
             except Exception:

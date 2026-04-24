@@ -131,6 +131,8 @@ signal.signal(signal.SIGINT, handle_sigterm)
 signal.signal(signal.SIGTERM, handle_sigterm)
 
 def id_from_string(s: str) -> int:
+    # nosemgrep: python.lang.security.insecure-hash-algorithms-md5
+    # MD5 used for deterministic hashing (non-cryptographic).
     h = hashlib.md5(s.encode("utf8")).hexdigest()
     return int(h[:16], 16)
 

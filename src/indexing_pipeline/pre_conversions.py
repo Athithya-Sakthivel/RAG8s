@@ -100,6 +100,8 @@ def b64(v: str) -> str:
 
 
 def compute_hashes(path: str, chunk_size: int = 8 * 1024 * 1024) -> tuple[str, str]:
+    # nosemgrep: python.lang.security.insecure-hash-algorithms-md5
+    # MD5 used for deterministic hashing (non-cryptographic).
     md5 = hashlib.md5()
     sha = hashlib.sha256()
     with open(path, "rb") as fh:
@@ -223,6 +225,8 @@ def safe_move_object(src: str, dst: str) -> tuple[bool, str]:
     try:
         if not download_object_to_file(src, tmp):
             return False, dst
+        # nosemgrep: python.lang.security.insecure-hash-algorithms-md5
+        # MD5 used for deterministic hashing (non-cryptographic).
         _md5, sha = compute_hashes(tmp)
         meta = prepare_metadata({"sha256": sha, "original_name": PurePosixPath(src).name})
         up = upload_file_to_s3(dst, tmp, meta, content_type="application/octet-stream", overwrite=True)
@@ -366,6 +370,9 @@ def process_doc(key: str) -> None:
             return
 
         target = f"{S3_RAW_PREFIX}pdfs/{Path(name).stem}.pdf"
+        # nosemgrep: python.lang.security.insecure-hash-algorithms-md5
+
+        # MD5 used for deterministic hashing (non-cryptographic).
         _md5, sha = compute_hashes(src_local)
         src_props = get_object_props(key)
         src_etag = src_props.get("etag", "")
@@ -418,6 +425,9 @@ def process_sheet(key: str) -> None:
             log("WARN", "sheet_no_csv", "no csvs produced", blob=key)
             return
 
+        # nosemgrep: python.lang.security.insecure-hash-algorithms-md5
+
+        # MD5 used for deterministic hashing (non-cryptographic).
         _md5, sha = compute_hashes(src_local)
         src_props = get_object_props(key)
         src_etag = src_props.get("etag", "")
@@ -467,6 +477,9 @@ def process_audio(key: str) -> None:
             return
 
         target = f"{S3_RAW_PREFIX}audio/{Path(name).stem}.wav"
+        # nosemgrep: python.lang.security.insecure-hash-algorithms-md5
+
+        # MD5 used for deterministic hashing (non-cryptographic).
         _md5, sha = compute_hashes(src_local)
         src_props = get_object_props(key)
         src_etag = src_props.get("etag", "")
