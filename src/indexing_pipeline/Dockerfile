@@ -1,6 +1,9 @@
 # syntax=docker/dockerfile:1.7
+
 ########################################
 # Stage 1 — builder: build wheels and artifacts
+# Contains compilers and native dev libraries required to build Python wheels.
+# Nothing from this stage (compilers/dev headers) will be present in the final image.
 ########################################
 ARG PYTHON_IMAGE=docker.io/library/python:3.12.3-slim@sha256:afc139a0a640942491ec481ad8dda10f2c5b753f5c969393b12480155fe15a63
 FROM ${PYTHON_IMAGE} AS builder
@@ -15,12 +18,13 @@ ENV PYTHONUNBUFFERED=1 \
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# Install build-time dependencies only (no runtime -dev packages will be present in final image)
+# Update packages and install build-time dependencies required to compile wheels.
 RUN apt-get update \
  && apt-get upgrade -y --no-install-recommends \
  && apt-get install -y --no-install-recommends \
       build-essential \
       gcc \
+      libsqlite3-0 \
       libffi-dev \
       libssl-dev \
       libxml2-dev \
@@ -35,7 +39,7 @@ RUN apt-get update \
 WORKDIR /src
 
 # Copy requirements first to maximize cache reuse
-COPY src/indexing_pipeline/requirements.txt /src/requirements.txt
+COPY requirements.txt /src/requirements.txt
 
 # Create virtualenv, build wheels into /wheels, then install from that wheelhouse.
 RUN python -m venv "${VENV_PATH}" \
@@ -54,7 +58,8 @@ RUN useradd -m -u 10001 appuser \
  && chown -R appuser:appuser /indexing_pipeline "${VENV_PATH}" /wheels
 
 ########################################
-# Stage 2 — runtime: minimal final image with security upgrades
+# Stage 2 — runtime: minimal final image
+# Contains only runtime dependencies and the prebuilt virtualenv.
 ########################################
 FROM ${PYTHON_IMAGE} AS runtime
 
@@ -66,19 +71,11 @@ ENV PYTHONUNBUFFERED=1 \
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# Ensure Debian security repository is available and attempt to upgrade vulnerable system libs.
-# This will install patched libsqlite3-0 if a security update exists for the base image.
-# We avoid installing any -dev packages in runtime.
-RUN set -eux; \
-    # ensure security repo is present (Bookworm / Debian 12)
-    echo "deb http://deb.debian.org/debian bookworm main contrib non-free" > /etc/apt/sources.list.d/bookworm.list; \
-    echo "deb http://security.debian.org/debian-security bookworm-security main contrib non-free" > /etc/apt/sources.list.d/bookworm-security.list; \
-    apt-get update; \
-    # attempt to only-upgrade the system libraries of concern; if no candidate exists this is a no-op
-    apt-get install -y --only-upgrade --no-install-recommends libsqlite3-0 zlib1g || true; \
-    # install tini and minimal runtime deps
-    apt-get install -y --no-install-recommends tini ca-certificates; \
-    rm -rf /var/lib/apt/lists/*
+# Update runtime packages and install tini and minimal runtime deps.
+RUN apt-get update \
+ && apt-get upgrade -y --no-install-recommends \
+ && apt-get install -y --no-install-recommends tini ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 
 # Create the same non-root user (UID must match builder)
 RUN useradd -m -u 10001 appuser || true
