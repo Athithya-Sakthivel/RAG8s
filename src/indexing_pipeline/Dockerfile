@@ -1,6 +1,4 @@
-FROM python:3.10-slim
-
-LABEL org.opencontainers.image.title="indexing-pipeline"
+FROM python:3.12.3-slim
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
