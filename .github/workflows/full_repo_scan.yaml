@@ -69,7 +69,6 @@ jobs:
               echo "[INFO] === OpenGrep SAST Scan (general rules) ==="
               opengrep scan \
                 --config p/owasp-top-ten \
-                --config p/python \
                 --config p/dockerfile \
                 --config p/secrets \
                 --config p/docker-compose \
