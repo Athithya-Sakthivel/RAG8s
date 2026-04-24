@@ -1,5 +1,5 @@
 # Use a stable Python 3.13 base
-FROM python:3.13.12-slim
+FROM python:3.13.14-slim
 
 ARG FASTEMBED_GPU=0
 ARG DENSE_MODEL_NAME
@@ -28,9 +28,9 @@ RUN mkdir -p /models_cache /app /var/log/dense \
  && useradd -m -u 1000 -g appgroup -s /bin/sh appuser \
  && chown -R appuser:appgroup /models_cache /app /var/log/dense
 
-# Install minimal system deps
+# Install minimal system deps and update openssl to avoid CVEs
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates jq curl git \
+ && apt-get install -y --no-install-recommends ca-certificates openssl libssl3 jq curl git \
  && rm -rf /var/lib/apt/lists/*
 
 # Upgrade pip and install build-time helpers as root
