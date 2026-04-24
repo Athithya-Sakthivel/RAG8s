@@ -15,16 +15,21 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/indexing_pipeline
 
 # Install system build deps only in builder
+
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       build-essential \
       gcc \
       libffi-dev \
       libssl-dev \
+      libxml2-dev \
+      libxslt-dev \
+      zlib1g-dev \
       curl \
       ca-certificates \
       git \
  && rm -rf /var/lib/apt/lists/*
+
 
 WORKDIR /src
 
