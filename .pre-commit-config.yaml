@@ -1,0 +1,18 @@
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: 83d9cd6
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: aca6d4c
+    hooks:
+      - id: ruff-check
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json

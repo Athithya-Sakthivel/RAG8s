@@ -1,0 +1,115 @@
+name: full_repo_security_scan
+
+on:
+  push:
+    branches:
+      - "**"
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: full-repo-security-scan-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  SCANNER_IMAGE: ghcr.io/athithya-sakthivel/trivy-0.69.3-gitleaks-8.30.1-opengrep-1.16.5@sha256:2d19bd7b418692a20ae57b24620da3af648878a66d582022c0721512fff1b5e2
+  TRIVY_SEVERITY: HIGH,CRITICAL
+  REPO_ROOT: ${{ github.workspace }}
+
+jobs:
+  scan_repository:
+    name: Full Repository Security Scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository (full history)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prepare cache directories
+        run: |
+          set -euo pipefail
+          echo "[INFO] Creating cache directories"
+          install -d -m 0777 "$RUNNER_TEMP/trivy-cache"
+          install -d -m 0777 "$RUNNER_TEMP/opengrep-cache"
+
+      - name: Run security scanners
+        env:
+          PYTHONWARNINGS: ignore
+          TRIVY_CACHE_DIR: /home/appuser/.cache/trivy
+        run: |
+          set -euo pipefail
+
+          docker run --rm \
+            -e HOME=/home/appuser \
+            -e XDG_CACHE_HOME=/home/appuser/.cache \
+            -e PYTHONWARNINGS=ignore \
+            -e TRIVY_SEVERITY \
+            -e TRIVY_CACHE_DIR \
+            -v "${REPO_ROOT}:/workspace" \
+            -v "$RUNNER_TEMP/trivy-cache:/home/appuser/.cache/trivy" \
+            -v "$RUNNER_TEMP/opengrep-cache:/home/appuser/.cache/opengrep" \
+            -w /workspace \
+            --entrypoint /bin/sh \
+            "$SCANNER_IMAGE" \
+            -ec '
+              set -eu
+
+              echo "[INFO] === OpenGrep SAST Scan (general rules) ==="
+              opengrep scan \
+                --config p/owasp-top-ten \
+                --config p/python \
+                --config p/dockerfile \
+                --config p/secrets \
+                --config p/docker-compose \
+                --config p/kubernetes \
+                --error \
+                --max-target-bytes 2000000 \
+                --exclude __pycache__ \
+                --exclude .pytest_cache \
+                --exclude .mypy_cache \
+                --exclude node_modules \
+                /workspace/src/
+
+              echo "[INFO] === Gitleaks Full History Scan ==="
+              if [ -s /workspace/.gitleaks.toml ]; then
+                echo "[INFO] Using custom Gitleaks config"
+                gitleaks git \
+                  --config /workspace/.gitleaks.toml \
+                  --log-opts="--all --full-history" \
+                  --no-banner \
+                  --redact \
+                  --exit-code 1
+              else
+                echo "[WARN] No custom Gitleaks config found, using defaults"
+                gitleaks git \
+                  --log-opts="--all --full-history" \
+                  --no-banner \
+                  --redact \
+                  --exit-code 1
+              fi
+
+              echo "[INFO] === Trivy Filesystem Scan ==="
+              trivy fs \
+                --cache-dir "$TRIVY_CACHE_DIR" \
+                --ignorefile .trivyignore \
+                --scanners vuln,misconfig \
+                --severity "$TRIVY_SEVERITY" \
+                --ignore-unfixed \
+                --skip-dirs .git \
+                --skip-dirs src/opengrep \
+                --exit-code 1 \
+                /workspace
+              echo "[SUCCESS] All scans completed"
+            '

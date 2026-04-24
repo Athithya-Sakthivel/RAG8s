@@ -1,0 +1,52 @@
+{
+  "name": "E2E-RAG-System",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": "."
+  },
+  "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
+  "remoteUser": "root",
+  "forwardPorts": [
+    3000,
+    3001,
+    8000,
+    8001,
+    8080,
+    50051,
+    8005,
+    7000,
+    7001,
+    7002,
+    7003
+  ],
+  "runArgs": [
+    "--privileged",
+    "--network=host",
+    "--cap-add=SYS_PTRACE",
+    "--security-opt=seccomp=unconfined",
+    "-v",
+    "/var/run/docker.sock:/var/run/docker.sock",
+    "--shm-size=11g"
+  ],
+  "containerEnv": {
+    "DOCKER_GID": "999",
+    "DOCKER_PROXY_HOST": "",
+    "DOCKER_PROXY_PORT": ""
+  },
+  "postCreateCommand": "bash src/scripts/bootstrap.sh",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-vscode-remote.remote-containers"
+      ],
+      "settings": {
+        "files.autoSave": "afterDelay",
+        "files.autoSaveDelay": 1000,
+        "terminal.integrated.scrollback": 2500,
+        "workbench.colorTheme": "Default Dark Modern",
+        "workbench.preferredDarkColorTheme": "Default Dark Modern"
+      }
+    }
+  }
+}
