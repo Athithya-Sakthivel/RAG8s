@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import argparse
+import dataclasses
 import hashlib
 import json
 import os
@@ -8,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -20,55 +23,21 @@ except Exception:
 
 
 # =============================================================================
-# Defaults / env
+# Primary knobs
+# Keep the top-level env surface small and predictable.
 # =============================================================================
-ROOT = Path(__file__).resolve().parent.parent.parent
-MANIFESTS_DIR = Path(os.environ.get("MANIFESTS_DIR", "src/infra/manifests/qdrant"))
-VALUES_FILE = MANIFESTS_DIR / "values.yaml"
-NAMESPACE_FILE = MANIFESTS_DIR / "namespace.yaml"
+DEFAULT_RELEASE = "qdrant"
+DEFAULT_NAMESPACE = "qdrant"
+DEFAULT_IMAGE_REF = "docker.io/qdrant/qdrant:v1.17.1@sha256:94728574965d17c6485dd361aa3c0818b325b9016dac5ea6afec7b4b2700865f"
+DEFAULT_CHART_REPO_NAME = "qdrant"
+DEFAULT_CHART_REPO_URL = "https://qdrant.github.io/qdrant-helm"
+DEFAULT_CHART_NAME = "qdrant"
+DEFAULT_CHART_VERSION = "1.17.1"
+DEFAULT_HELM_TIMEOUT = "10m"
+DEFAULT_MANIFESTS_DIR = "src/infra/manifests/qdrant"
 
-QDRANT_RELEASE = os.environ.get("QDRANT_RELEASE", "qdrant")
-QDRANT_NAMESPACE = os.environ.get("QDRANT_NAMESPACE", "qdrant")
-
-QDRANT_IMAGE_REPO = os.environ.get("QDRANT_IMAGE_REPO", "docker.io/qdrant/qdrant").strip()
-QDRANT_IMAGE_TAG = os.environ.get("QDRANT_IMAGE_TAG", "").strip()
-QDRANT_IMAGE_PULL_POLICY = os.environ.get("QDRANT_IMAGE_PULL_POLICY", "IfNotPresent").strip()
-
-QDRANT_REPLICAS = int(os.environ.get("QDRANT_REPLICAS", "1"))
-QDRANT_PERSISTENCE_ENABLED = os.environ.get("QDRANT_PERSISTENCE_ENABLED", "true").lower() in ("1", "true", "yes", "y", "on")
-QDRANT_PERSISTENCE_SIZE = os.environ.get("QDRANT_PERSISTENCE_SIZE", "20Gi").strip()
-QDRANT_PERSISTENCE_STORAGE_CLASS = os.environ.get("QDRANT_PERSISTENCE_STORAGE_CLASS", "").strip()
-
-QDRANT_METRICS_SERVICE_MONITOR = os.environ.get("QDRANT_METRICS_SERVICE_MONITOR", "false").lower() in ("1", "true", "yes", "y", "on")
-QDRANT_METRICS_TARGET_PORT = os.environ.get("QDRANT_METRICS_TARGET_PORT", "http").strip()
-
-QDRANT_ONDISK = os.environ.get("QDRANT_ONDISK", "false").lower() in ("1", "true", "yes", "y", "on")
-QDRANT_LOG_LEVEL = os.environ.get("QDRANT_LOG_LEVEL", "INFO").strip()
-
-QDRANT_STORAGE_PATH = os.environ.get("QDRANT__STORAGE__STORAGE_PATH", "").strip()
-QDRANT_SNAPSHOTS_PATH = os.environ.get("QDRANT__STORAGE__SNAPSHOTS_PATH", "").strip()
-QDRANT_SERVICE_ENABLE_TLS = os.environ.get("QDRANT__SERVICE__ENABLE_TLS", "").strip().lower() in ("1", "true", "yes", "y", "on")
-QDRANT_API_KEY = os.environ.get("QDRANT__SERVICE__API_KEY", os.environ.get("QDRANT_API_KEY", "")).strip()
-
-SECRET_SERVICE_NAME = os.environ.get("SECRET_SERVICE_NAME", "qdrant-service-creds").strip()
-SECRET_API_KEY_KEY = os.environ.get("SECRET_API_KEY_KEY", "QDRANT__SERVICE__API_KEY").strip()
-
-SERVICE_VALIDATION_WAIT = int(os.environ.get("SERVICE_VALIDATION_WAIT", "180"))
-HELM_TIMEOUT = os.environ.get("HELM_TIMEOUT", "10m").strip()
-
-VENDOR_CHART_DIR = os.environ.get("VENDOR_CHART_DIR", "infra/archive/qdrant-helm-chart/qdrant").strip()
-CHART_REPO_NAME = os.environ.get("QDRANT_HELM_REPO_NAME", "qdrant").strip()
-CHART_REPO_URL = os.environ.get("QDRANT_HELM_REPO_URL", "https://qdrant.github.io/qdrant-helm").strip()
-CHART_NAME = os.environ.get("QDRANT_HELM_CHART", "qdrant").strip()
-CHART_VERSION = os.environ.get("QDRANT_CHART_VERSION", "").strip()
-
-MANAGE_DEFAULT_STORAGECLASS = os.environ.get("MANAGE_DEFAULT_STORAGECLASS", "true").lower() in ("1", "true", "yes", "y", "on")
-TARGET_STORAGECLASS = os.environ.get("TARGET_STORAGECLASS", "default-storage-class").strip()
-
-LOCAL_PATH_PROVISIONER_TAG = os.environ.get("LOCAL_PATH_PROVISIONER_TAG", "v0.0.35").strip()
-
-VERBOSE = os.environ.get("VERBOSE", "0") != "0"
-STRICT = os.environ.get("STRICT", "1").lower() in ("1", "true", "yes", "y", "on")
+VERBOSE = os.environ.get("VERBOSE", "0").strip().lower() in ("1", "true", "yes", "y", "on")
+STRICT = os.environ.get("STRICT", "1").strip().lower() in ("1", "true", "yes", "y", "on")
 
 _TMP_FILES: list[str] = []
 
@@ -89,6 +58,147 @@ def DBG(*parts: object) -> None:
 def fatal(msg: str, code: int = 2) -> None:
     LOG("ERROR:", msg)
     raise SystemExit(code)
+
+
+# =============================================================================
+# Env helpers
+# =============================================================================
+def _env(name: str, default: str) -> str:
+    v = os.environ.get(name)
+    if v is None:
+        return default
+    v = str(v).strip()
+    return v if v else default
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    v = os.environ.get(name)
+    if v is None:
+        return default
+    return str(v).strip().lower() in ("1", "true", "yes", "y", "on")
+
+
+def _env_int(name: str, default: int) -> int:
+    v = os.environ.get(name)
+    if v is None or str(v).strip() == "":
+        return default
+    try:
+        return int(v)
+    except Exception:
+        return default
+
+
+def parse_image_ref(ref: str) -> tuple[str, str, str]:
+    """
+    Supports:
+      repo:tag
+      repo@sha256:...
+      repo:tag@sha256:...
+    Returns (repo, tag, digest).
+    """
+    ref = ref.strip()
+    if not ref:
+        return "", "", ""
+
+    digest = ""
+    if "@" in ref:
+        ref, digest = ref.split("@", 1)
+        digest = digest.strip()
+
+    tag = ""
+    last_slash = ref.rfind("/")
+    last_colon = ref.rfind(":")
+    if last_colon > last_slash:
+        tag = ref[last_colon + 1 :].strip()
+        ref = ref[:last_colon].strip()
+
+    return ref, tag, digest
+
+
+def compose_image_ref(repo: str, tag: str, digest: str) -> str:
+    repo = repo.strip()
+    tag = tag.strip()
+    digest = digest.strip()
+    if digest:
+        return f"{repo}:{tag}@{digest}" if tag else f"{repo}@{digest}"
+    if tag:
+        return f"{repo}:{tag}"
+    return repo
+
+
+@dataclasses.dataclass(frozen=True)
+class Config:
+    release: str
+    namespace: str
+    manifests_dir: Path
+
+    image_repo: str
+    image_tag: str
+    image_digest: str
+    image_pull_policy: str
+    image_ref: str
+
+    replicas: int
+    persistence_enabled: bool
+    persistence_size: str
+    on_disk_payload: bool
+    log_level: str
+
+    api_key: str
+    secret_name: str
+    secret_key: str
+
+    validate_wait_seconds: int
+    helm_timeout: str
+
+    chart_repo_name: str
+    chart_repo_url: str
+    chart_name: str
+    chart_version: str
+    vendor_chart_dir: str
+
+    verbose: bool
+    strict: bool
+
+
+def load_config() -> Config:
+    raw_image_ref = _env("QDRANT_IMAGE_REF", DEFAULT_IMAGE_REF)
+    repo, tag, digest = parse_image_ref(raw_image_ref)
+
+    if not repo:
+        repo = _env("QDRANT_IMAGE_REPO", DEFAULT_IMAGE_REPO)
+    if not tag:
+        tag = _env("QDRANT_IMAGE_TAG", DEFAULT_IMAGE_TAG)
+    if not digest:
+        digest = _env("QDRANT_IMAGE_DIGEST", DEFAULT_IMAGE_DIGEST)
+
+    return Config(
+        release=_env("QDRANT_RELEASE", DEFAULT_RELEASE),
+        namespace=_env("QDRANT_NAMESPACE", DEFAULT_NAMESPACE),
+        manifests_dir=Path(_env("MANIFESTS_DIR", DEFAULT_MANIFESTS_DIR)),
+        image_repo=repo,
+        image_tag=tag,
+        image_digest=digest,
+        image_pull_policy=_env("QDRANT_IMAGE_PULL_POLICY", "IfNotPresent"),
+        image_ref=compose_image_ref(repo, tag, digest),
+        replicas=_env_int("QDRANT_REPLICAS", 1),
+        persistence_enabled=_env_bool("QDRANT_PERSISTENCE_ENABLED", True),
+        persistence_size=_env("QDRANT_PERSISTENCE_SIZE", "20Gi"),
+        on_disk_payload=_env_bool("QDRANT_ONDISK", False),
+        log_level=_env("QDRANT_LOG_LEVEL", "INFO"),
+        api_key=_env("QDRANT_API_KEY", ""),
+        secret_name="qdrant-service-creds",
+        secret_key="QDRANT__SERVICE__API_KEY",
+        validate_wait_seconds=_env_int("SERVICE_VALIDATION_WAIT", 180),
+        helm_timeout=_env("HELM_TIMEOUT", DEFAULT_HELM_TIMEOUT),
+        chart_repo_name=_env("QDRANT_HELM_REPO_NAME", DEFAULT_CHART_REPO_NAME),
+        chart_repo_url=_env("QDRANT_HELM_REPO_URL", DEFAULT_CHART_REPO_URL),
+        chart_name=_env("QDRANT_HELM_CHART", DEFAULT_CHART_NAME),
+        chart_version=_env("QDRANT_CHART_VERSION", DEFAULT_CHART_VERSION),
+        vendor_chart_dir=_env("VENDOR_CHART_DIR", "infra/archive/qdrant-helm-chart/qdrant"),
+        verbose=VERBOSE,
+        strict=STRICT,
+    )
 
 
 # =============================================================================
@@ -115,12 +225,7 @@ def atomic_write_text(path: Path, content: str) -> None:
 
 
 def safe_yaml_dump(data: Any) -> str:
-    return yaml.safe_dump(
-        data,
-        sort_keys=False,
-        default_flow_style=False,
-        width=120,
-    )
+    return yaml.safe_dump(data, sort_keys=False, default_flow_style=False, width=120)
 
 
 # =============================================================================
@@ -134,13 +239,11 @@ def require_bin(name: str) -> None:
 def run_cmd(
     cmd: list[str],
     *,
-    check: bool = False,
     capture: bool = False,
     timeout: int | None = None,
     input_text: str | None = None,
     env: dict[str, str] | None = None,
 ) -> tuple[int, str, str]:
-    DBG("run_cmd:", " ".join(cmd))
     env_used = os.environ.copy()
     if env:
         env_used.update(env)
@@ -154,87 +257,117 @@ def run_cmd(
             timeout=timeout,
             env=env_used,
         )
-        out = proc.stdout or ""
-        err = proc.stderr or ""
-        rc = proc.returncode
-        if check and rc != 0:
-            raise subprocess.CalledProcessError(rc, cmd, output=out, stderr=err)
-        return rc, out, err
+        return proc.returncode, proc.stdout or "", proc.stderr or ""
     except subprocess.TimeoutExpired as exc:
         return 124, getattr(exc, "stdout", "") or "", getattr(exc, "stderr", "") or f"timeout after {timeout}s"
-    except subprocess.CalledProcessError as exc:
-        return exc.returncode, getattr(exc, "output", "") or "", getattr(exc, "stderr", "") or ""
 
 
-def run_cmd_capture(cmd: list[str], timeout: int | None = None, env: dict[str, str] | None = None) -> tuple[int, str]:
-    rc, out, _ = run_cmd(cmd, check=False, capture=True, timeout=timeout, env=env)
-    return rc, out
+def run_streaming_cmd(
+    cmd: list[str],
+    *,
+    cwd: str | None = None,
+    env: dict[str, str] | None = None,
+    timeout: int | None = None,
+    stdin_text: str | None = None,
+    prefix: str = "",
+) -> int:
+    """
+    Stream stdout/stderr live so long-running Helm operations do not appear frozen.
+    """
+    env_used = os.environ.copy()
+    if env:
+        env_used.update(env)
 
-
-def kubectl_json(args: list[str], timeout: int | None = None) -> Any:
-    rc, out, err = run_cmd(["kubectl", *args], capture=True, timeout=timeout)
-    if rc != 0:
-        raise RuntimeError(err or out or f"kubectl {' '.join(args)} failed rc={rc}")
+    DBG("streaming cmd:", " ".join(cmd))
     try:
-        return json.loads(out)
+        proc = subprocess.Popen(
+            cmd,
+            cwd=cwd,
+            env=env_used,
+            stdin=subprocess.PIPE if stdin_text is not None else None,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            universal_newlines=True,
+        )
     except Exception as exc:
-        raise RuntimeError(f"failed to parse kubectl json for {' '.join(args)}: {exc}") from exc
+        LOG("ERROR: failed to start command:", " ".join(cmd))
+        LOG("ERROR:", str(exc))
+        return 1
+
+    if stdin_text is not None and proc.stdin is not None:
+        try:
+            proc.stdin.write(stdin_text)
+            proc.stdin.close()
+        except Exception:
+            pass
+
+    def reader(stream, is_err: bool, label: str):
+        try:
+            for line in iter(stream.readline, ""):
+                if not line:
+                    break
+                text = line.rstrip("\n")
+                if is_err:
+                    LOG(f"[{label}] {text}")
+                else:
+                    LOG(f"[{label}] {text}")
+        except Exception:
+            LOG(f"ERROR: reader failed for {label}")
+
+    base = prefix or Path(cmd[0]).name
+    t_out = threading.Thread(target=reader, args=(proc.stdout, False, base), daemon=True)
+    t_err = threading.Thread(target=reader, args=(proc.stderr, True, f"{base}:err"), daemon=True)
+    t_out.start()
+    t_err.start()
+
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        LOG(f"ERROR: command timed out after {timeout}s: {' '.join(cmd)}")
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        return 124
+
+    t_out.join(timeout=2.0)
+    t_err.join(timeout=2.0)
+    return proc.returncode
 
 
-def kubectl_apply_text(yaml_text: str) -> None:
-    rc, out, err = run_cmd(
-        ["kubectl", "apply", "-f", "-"],
-        capture=True,
-        input_text=yaml_text,
-    )
-    if rc != 0:
-        raise RuntimeError(err or out or "kubectl apply failed")
-
-
-def kubectl_wait_rollout(namespace: str, deployment: str, timeout: str = "180s") -> bool:
-    rc, _, _ = run_cmd(
-        ["kubectl", "-n", namespace, "rollout", "status", f"deployment/{deployment}", f"--timeout={timeout}"],
-        capture=True,
-    )
-    return rc == 0
+def run_capturing_cmd(cmd: list[str], timeout: int | None = None, env: dict[str, str] | None = None) -> tuple[int, str]:
+    rc, out, _ = run_cmd(cmd, capture=True, timeout=timeout, env=env)
+    return rc, out
 
 
 # =============================================================================
 # Cluster detection
 # =============================================================================
 def detect_cluster_mode() -> str:
-    """
-    Returns: kind | eks | eks-auto | unknown
-    Explicit K8S_CLUSTER overrides detection.
-    """
     explicit = os.environ.get("K8S_CLUSTER", "").strip().lower()
     if explicit in {"kind", "eks", "eks-auto"}:
         return explicit
 
     rc, _, _ = run_cmd(["kubectl", "version", "--request-timeout=5s"], capture=True)
     if rc != 0:
-        fatal("kubectl cannot reach a cluster; ensure kubeconfig is configured", 2)
+        return "unknown"
 
     node_name = ""
     provider_id = ""
     try:
-        node_name = run_cmd_capture(
-            ["kubectl", "get", "nodes", "-o", "jsonpath={.items[0].metadata.name}"],
-            timeout=10,
-        )[1].strip()
+        node_name = run_capturing_cmd(["kubectl", "get", "nodes", "-o", "jsonpath={.items[0].metadata.name}"], timeout=10)[1].strip()
     except Exception:
         node_name = ""
 
     if node_name:
         try:
-            provider_id = run_cmd_capture(
-                ["kubectl", "get", "node", node_name, "-o", "jsonpath={.spec.providerID}"],
-                timeout=10,
-            )[1].strip()
+            provider_id = run_capturing_cmd(["kubectl", "get", "node", node_name, "-o", "jsonpath={.spec.providerID}"], timeout=10)[1].strip()
         except Exception:
             provider_id = ""
 
-    csidrivers = run_cmd_capture(["kubectl", "get", "csidrivers", "-o", "name"], timeout=10)[1].splitlines()
+    csidrivers = run_capturing_cmd(["kubectl", "get", "csidrivers", "-o", "name"], timeout=10)[1].splitlines()
     csidrivers = [x.strip() for x in csidrivers if x.strip()]
 
     if any("ebs.csi.eks.amazonaws.com" in x for x in csidrivers):
@@ -251,337 +384,246 @@ def detect_cluster_mode() -> str:
 
 
 # =============================================================================
-# StorageClass validation
-# =============================================================================
-def list_storageclasses() -> list[dict[str, Any]]:
-    data = kubectl_json(["get", "storageclass", "-o", "json"])
-    return list(data.get("items", []))
-
-
-def get_default_storageclasses() -> list[dict[str, Any]]:
-    defaults: list[dict[str, Any]] = []
-    for sc in list_storageclasses():
-        md = sc.get("metadata", {}) or {}
-        ann = md.get("annotations", {}) or {}
-        if str(ann.get("storageclass.kubernetes.io/is-default-class", "")).lower() == "true":
-            defaults.append(sc)
-    return defaults
-
-
-def storageclass_exists(name: str) -> bool:
-    rc, _, _ = run_cmd(["kubectl", "get", "storageclass", name], capture=True)
-    return rc == 0
-
-
-def get_storageclass_provisioner(name: str) -> str:
-    return run_cmd_capture(["kubectl", "get", "storageclass", name, "-o", "jsonpath={.provisioner}"], timeout=10)[1].strip()
-
-
-def validate_default_storageclass(cluster_mode: str) -> None:
-    defaults = get_default_storageclasses()
-    if not defaults:
-        fatal("no default StorageClass found; Qdrant persistence will not bind without a default class", 3)
-
-    if len(defaults) > 1:
-        names = [
-            str((sc.get("metadata", {}) or {}).get("name", ""))
-            for sc in defaults
-        ]
-        fatal(f"multiple default StorageClasses found: {', '.join(n for n in names if n)}", 3)
-
-    sc = defaults[0]
-    md = sc.get("metadata", {}) or {}
-    name = str(md.get("name", ""))
-    prov = str(sc.get("provisioner", "")).strip()
-
-    LOG(f"default storageclass detected: {name} (provisioner={prov})")
-
-    if cluster_mode in {"eks", "eks-auto"}:
-        if prov not in {"ebs.csi.aws.com", "ebs.csi.eks.amazonaws.com"}:
-            fatal(
-                f"default StorageClass '{name}' uses provisioner '{prov}', expected AWS EBS CSI on EKS",
-                3,
-            )
-
-
-def ensure_local_path_provisioner(tag: str) -> None:
-    if run_cmd(["kubectl", "-n", "local-path-storage", "get", "deploy", "local-path-provisioner"], capture=True)[0] == 0:
-        LOG("local-path-provisioner already installed")
-        return
-
-    LOG(f"installing local-path-provisioner {tag}")
-    url = f"https://raw.githubusercontent.com/rancher/local-path-provisioner/{tag}/deploy/local-path-storage.yaml"
-    rc, out, err = run_cmd(["kubectl", "apply", "-f", url], capture=True)
-    if rc != 0:
-        raise RuntimeError(err or out or "failed to install local-path-provisioner")
-
-    if not kubectl_wait_rollout("local-path-storage", "local-path-provisioner", "180s"):
-        LOG("warning: local-path-provisioner rollout not ready yet; continuing")
-
-
-# =============================================================================
 # Namespace / secret
 # =============================================================================
-def ensure_namespace() -> None:
-    ns_doc = {
-        "apiVersion": "v1",
-        "kind": "Namespace",
-        "metadata": {"name": QDRANT_NAMESPACE},
-    }
-    atomic_write_text(NAMESPACE_FILE, safe_yaml_dump(ns_doc))
-    LOG("Rendered", str(NAMESPACE_FILE))
-    kubectl_apply_text(safe_yaml_dump(ns_doc))
+def ensure_namespace(cfg: Config) -> None:
+    ns_doc = {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": cfg.namespace}}
+    atomic_write_text(cfg.manifests_dir / "namespace.yaml", safe_yaml_dump(ns_doc))
+    LOG("Rendered", str(cfg.manifests_dir / "namespace.yaml"))
+    rc = run_streaming_cmd(["kubectl", "apply", "-f", "-"], stdin_text=safe_yaml_dump(ns_doc), prefix="kubectl-apply")
+    if rc != 0:
+        fatal("failed to create namespace", 3)
 
 
-def create_or_update_secret() -> bool:
-    if not QDRANT_API_KEY:
+def create_or_update_secret(cfg: Config) -> bool:
+    if not cfg.api_key:
         DBG("no QDRANT_API_KEY provided; skipping secret creation")
         return False
 
     secret_yaml = {
         "apiVersion": "v1",
         "kind": "Secret",
-        "metadata": {
-            "name": SECRET_SERVICE_NAME,
-            "namespace": QDRANT_NAMESPACE,
-        },
+        "metadata": {"name": cfg.secret_name, "namespace": cfg.namespace},
         "type": "Opaque",
-        "stringData": {
-            SECRET_API_KEY_KEY: QDRANT_API_KEY,
-        },
+        "stringData": {cfg.secret_key: cfg.api_key},
     }
-    rc, out, err = run_cmd(
-        ["kubectl", "-n", QDRANT_NAMESPACE, "apply", "-f", "-"],
-        capture=True,
-        input_text=safe_yaml_dump(secret_yaml),
-    )
+    rc, out, err = run_cmd(["kubectl", "-n", cfg.namespace, "apply", "-f", "-"], capture=True, input_text=safe_yaml_dump(secret_yaml))
     if rc != 0:
         raise RuntimeError(err or out or "failed to apply qdrant api key secret")
-    LOG("created/updated secret", SECRET_SERVICE_NAME)
+    LOG("created/updated secret", cfg.secret_name)
     return True
 
 
 # =============================================================================
-# Qdrant values
+# Values rendering
 # =============================================================================
 def _resources_from_env() -> dict[str, Any]:
     cpu_req = os.environ.get("QDRANT_CPU_REQUEST") or os.environ.get("QDRANT_CPU") or "1"
     cpu_lim = os.environ.get("QDRANT_CPU_LIMIT") or os.environ.get("QDRANT_CPU") or cpu_req
     mem_req = os.environ.get("QDRANT_MEMORY_REQUEST") or os.environ.get("QDRANT_MEMORY") or "2Gi"
     mem_lim = os.environ.get("QDRANT_MEMORY_LIMIT") or os.environ.get("QDRANT_MEMORY") or mem_req
-
     return {
-        "requests": {
-            "cpu": cpu_req,
-            "memory": mem_req,
-        },
-        "limits": {
-            "cpu": cpu_lim,
-            "memory": mem_lim,
-        },
+        "requests": {"cpu": cpu_req, "memory": mem_req},
+        "limits": {"cpu": cpu_lim, "memory": mem_lim},
     }
 
 
-def build_qdrant_values(cluster_mode: str) -> dict[str, Any]:
+def build_qdrant_values(cfg: Config) -> dict[str, Any]:
     values: dict[str, Any] = {
-        "replicaCount": QDRANT_REPLICAS,
+        "replicaCount": cfg.replicas,
         "image": {
-            "repository": QDRANT_IMAGE_REPO,
-            "pullPolicy": QDRANT_IMAGE_PULL_POLICY,
+            "repository": cfg.image_repo,
+            "tag": cfg.image_tag,
+            "pullPolicy": cfg.image_pull_policy,
         },
-        "service": {
-            "type": "ClusterIP",
-        },
+        "service": {"type": "ClusterIP"},
         "persistence": {
-            "enabled": bool(QDRANT_PERSISTENCE_ENABLED),
-            "size": QDRANT_PERSISTENCE_SIZE,
+            "enabled": bool(cfg.persistence_enabled),
+            "size": cfg.persistence_size,
             "accessModes": ["ReadWriteOnce"],
         },
-        "metrics": {
-            "serviceMonitor": {
-                "enabled": bool(QDRANT_METRICS_SERVICE_MONITOR),
-                "targetPort": QDRANT_METRICS_TARGET_PORT,
-            }
-        },
-        "podAnnotations": {
-            "app.kubernetes.io/managed-by": "qdrant_cluster.py",
-        },
-        "podLabels": {
-            "app.kubernetes.io/managed-by": "qdrant_cluster.py",
-        },
+        "podAnnotations": {"app.kubernetes.io/managed-by": "qdrant_service.py"},
+        "podLabels": {"app.kubernetes.io/managed-by": "qdrant_service.py"},
         "resources": _resources_from_env(),
         "config": {
             "cluster": {
                 "enabled": True,
-                "p2p": {
-                    "port": 6335,
-                    "enable_tls": False,
-                },
-                "consensus": {
-                    "tick_period_ms": 100,
-                },
+                "p2p": {"port": 6335, "enable_tls": False},
+                "consensus": {"tick_period_ms": 100},
             },
-            "service": {
-                "enable_tls": bool(QDRANT_SERVICE_ENABLE_TLS),
-            },
-            "log_level": QDRANT_LOG_LEVEL,
-            "on_disk_payload": bool(QDRANT_ONDISK),
+            "service": {"enable_tls": False},
+            "log_level": cfg.log_level,
+            "on_disk_payload": bool(cfg.on_disk_payload),
         },
         "updateVolumeFsOwnership": True,
         "podManagementPolicy": "Parallel",
-        "lifecycle": {
-            "preStop": {
-                "exec": {
-                    "command": ["sleep", "3"],
-                }
-            }
-        },
+        "lifecycle": {"preStop": {"exec": {"command": ["sleep", "3"]}}},
     }
 
-    if QDRANT_IMAGE_TAG:
-        values["image"]["tag"] = QDRANT_IMAGE_TAG
-
-    if QDRANT_STORAGE_PATH or QDRANT_SNAPSHOTS_PATH:
-        values["config"]["storage"] = {}
-        if QDRANT_STORAGE_PATH:
-            values["config"]["storage"]["storage_path"] = QDRANT_STORAGE_PATH
-        if QDRANT_SNAPSHOTS_PATH:
-            values["config"]["storage"]["snapshots_path"] = QDRANT_SNAPSHOTS_PATH
-
-    if QDRANT_API_KEY:
+    if cfg.api_key:
         values["env"] = [
             {
                 "name": "QDRANT__SERVICE__API_KEY",
-                "valueFrom": {
-                    "secretKeyRef": {
-                        "name": SECRET_SERVICE_NAME,
-                        "key": SECRET_API_KEY_KEY,
-                    }
-                },
+                "valueFrom": {"secretKeyRef": {"name": cfg.secret_name, "key": cfg.secret_key}},
             }
         ]
         values["podAnnotations"]["qdrant/api-key-present"] = "true"
 
-    if QDRANT_REPLICAS > 1:
-        values["podDisruptionBudget"] = {
-            "enabled": True,
-            "maxUnavailable": 1,
-        }
+    if cfg.replicas > 1:
+        values["podDisruptionBudget"] = {"enabled": True, "maxUnavailable": 1}
         values["topologySpreadConstraints"] = [
             {
                 "maxSkew": 1,
                 "topologyKey": "kubernetes.io/hostname",
                 "whenUnsatisfiable": "ScheduleAnyway",
-                "labelSelector": {
-                    "matchLabels": {
-                        "app.kubernetes.io/name": QDRANT_RELEASE,
-                    }
-                },
+                "labelSelector": {"matchLabels": {"app.kubernetes.io/name": cfg.release}},
             }
         ]
 
     checksum = hashlib.sha256(safe_yaml_dump(values).encode("utf-8")).hexdigest()
     values["podAnnotations"]["qdrant/config-checksum"] = checksum
-
-    if QDRANT_PERSISTENCE_STORAGE_CLASS:
-        values["persistence"]["storageClass"] = QDRANT_PERSISTENCE_STORAGE_CLASS
-
-    # Important: when QDRANT_PERSISTENCE_STORAGE_CLASS is not set, we intentionally
-    # omit storageClass so Kubernetes uses the cluster default StorageClass.
     return values
 
 
-def render_values_file(cluster_mode: str) -> None:
-    vals = build_qdrant_values(cluster_mode)
-    atomic_write_text(VALUES_FILE, safe_yaml_dump(vals))
-    LOG("Rendered", str(VALUES_FILE))
+def render_values_file(cfg: Config) -> None:
+    vals = build_qdrant_values(cfg)
+    atomic_write_text(cfg.manifests_dir / "values.yaml", safe_yaml_dump(vals))
+    LOG("Rendered", str(cfg.manifests_dir / "values.yaml"))
 
 
 # =============================================================================
-# Helm
+# Post-render digest pinning
 # =============================================================================
-def helm_install(cluster_mode: str) -> bool:
-    ensure_namespace()
-    create_or_update_secret()
-    render_values_file(cluster_mode)
+def render_post_renderer(cfg: Config, temp_dir: Path) -> Path | None:
+    """
+    Chart templates are tag-oriented. If a digest is configured, a post-renderer
+    rewrites the final manifest image fields to the exact image reference.
+    """
+    if not cfg.image_digest:
+        return None
 
-    vendor = Path(VENDOR_CHART_DIR)
-    helm_args_base = ["helm", "upgrade", "--install", QDRANT_RELEASE]
+    script = temp_dir / "qdrant-post-renderer.py"
+    script.write_text(
+        f"""#!/usr/bin/env python3
+from __future__ import annotations
 
-    if vendor.is_dir() and (vendor / "Chart.yaml").exists():
-        LOG("Attempting vendor chart install from", str(vendor))
-        cmd = [
-            *helm_args_base,
-            str(vendor),
-            "--namespace",
-            QDRANT_NAMESPACE,
-            "--create-namespace",
-            "-f",
-            str(VALUES_FILE),
-            "--atomic",
-            "--wait",
-            f"--timeout={HELM_TIMEOUT}",
-        ]
-        rc, out = run_cmd_capture(cmd)
+import sys
+import yaml
+
+BASE_REPO = {cfg.image_repo!r}
+DESIRED_REF = {cfg.image_ref!r}
+
+def patch(node):
+    if isinstance(node, dict):
+        img = node.get("image")
+        if isinstance(img, str) and img.startswith(BASE_REPO):
+            node["image"] = DESIRED_REF
+        for value in node.values():
+            patch(value)
+    elif isinstance(node, list):
+        for item in node:
+            patch(item)
+
+docs = [doc for doc in yaml.safe_load_all(sys.stdin) if doc is not None]
+for doc in docs:
+    patch(doc)
+
+yaml.safe_dump_all(docs, sys.stdout, sort_keys=False, explicit_start=True)
+""",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    return script
+
+
+# =============================================================================
+# Helm / rollout
+# =============================================================================
+def helm_install(cfg: Config) -> bool:
+    ensure_namespace(cfg)
+    create_or_update_secret(cfg)
+    render_values_file(cfg)
+
+    vendor = Path(cfg.vendor_chart_dir)
+    helm_base = ["helm", "upgrade", "--install", cfg.release]
+
+    with tempfile.TemporaryDirectory(prefix="qdrant-postrender-") as td:
+        post_renderer = render_post_renderer(cfg, Path(td))
+
+        def with_common(args: list[str]) -> list[str]:
+            out = [
+                *args,
+                "--namespace",
+                cfg.namespace,
+                "--create-namespace",
+                "-f",
+                str(cfg.manifests_dir / "values.yaml"),
+                "--atomic",
+                "--wait",
+                f"--timeout={cfg.helm_timeout}",
+            ]
+            if post_renderer is not None:
+                out.extend(["--post-renderer", str(post_renderer)])
+            return out
+
+        if vendor.is_dir() and (vendor / "Chart.yaml").exists():
+            LOG("Attempting vendor chart install from", str(vendor))
+            cmd = with_common([*helm_base, str(vendor)])
+            rc = run_streaming_cmd(cmd, prefix="helm")
+            if rc == 0:
+                LOG("helm vendor install succeeded")
+                return True
+            LOG("helm vendor install failed rc=", rc)
+
+        LOG("Using upstream helm repo for qdrant")
+        rc = run_streaming_cmd(["helm", "repo", "add", "--force-update", cfg.chart_repo_name, cfg.chart_repo_url], prefix="helm-repo")
+        if rc != 0:
+            LOG("helm repo add failed rc=", rc)
+            return False
+
+        rc = run_streaming_cmd(["helm", "repo", "update"], prefix="helm-repo")
+        if rc != 0:
+            LOG("helm repo update failed rc=", rc)
+            return False
+
+        chart_ref = f"{cfg.chart_repo_name}/{cfg.chart_name}"
+        cmd = with_common([*helm_base, chart_ref])
+        if cfg.chart_version:
+            cmd.extend(["--version", cfg.chart_version])
+
+        LOG("Installing/upgrading qdrant with Helm")
+        rc = run_streaming_cmd(cmd, prefix="helm")
         if rc == 0:
-            LOG("helm vendor install succeeded")
+            LOG("helm install/upgrade succeeded")
             return True
-        DBG("helm vendor install failed:", out)
 
-    LOG("Using upstream helm repo for qdrant")
-    run_cmd(["helm", "repo", "add", "--force-update", CHART_REPO_NAME, CHART_REPO_URL], check=False)
-    run_cmd(["helm", "repo", "update"], check=False)
-
-    chart_ref = f"{CHART_REPO_NAME}/{CHART_NAME}"
-    cmd = [
-        *helm_args_base,
-        chart_ref,
-        "--namespace",
-        QDRANT_NAMESPACE,
-        "--create-namespace",
-        "-f",
-        str(VALUES_FILE),
-        "--atomic",
-        "--wait",
-        f"--timeout={HELM_TIMEOUT}",
-    ]
-    if CHART_VERSION:
-        cmd.extend(["--version", CHART_VERSION])
-
-    rc, out = run_cmd_capture(cmd)
-    if rc == 0:
-        LOG("helm install/upgrade succeeded")
-        return True
-
-    DBG("helm install failed:", out)
-    return False
+        LOG("helm install/upgrade failed rc=", rc)
+        return False
 
 
-def validate_post_install() -> bool:
-    """
-    Basic post-install validation:
-      - wait for qdrant pod(s) to be Ready
-      - ensure at least one pod exists
-    """
-    selector = f"app.kubernetes.io/instance={QDRANT_RELEASE}"
-    run_cmd(
+def validate_post_install(cfg: Config) -> bool:
+    selector = f"app.kubernetes.io/instance={cfg.release}"
+    rc, out, err = run_cmd(
         [
             "kubectl",
             "-n",
-            QDRANT_NAMESPACE,
+            cfg.namespace,
             "wait",
             "--for=condition=Ready",
             "pod",
             "-l",
             selector,
-            f"--timeout={SERVICE_VALIDATION_WAIT}s",
+            f"--timeout={cfg.validate_wait_seconds}s",
         ],
         capture=True,
     )
+    if rc != 0:
+        LOG("kubectl wait stdout:\n", out.strip())
+        LOG("kubectl wait stderr:\n", err.strip())
 
-    end = time.time() + SERVICE_VALIDATION_WAIT
+    end = time.time() + cfg.validate_wait_seconds
     while time.time() < end:
-        rc, out, _ = run_cmd(["kubectl", "-n", QDRANT_NAMESPACE, "get", "pods", "-l", selector, "-o", "json"], capture=True)
+        rc, out, _ = run_cmd(["kubectl", "-n", cfg.namespace, "get", "pods", "-l", selector, "-o", "json"], capture=True)
         if rc == 0:
             try:
                 pj = json.loads(out)
@@ -603,13 +645,13 @@ def validate_post_install() -> bool:
     return False
 
 
-def delete_qdrant() -> None:
-    run_cmd(["kubectl", "delete", "ns", QDRANT_NAMESPACE, "--ignore-not-found"], capture=True)
-    if MANIFESTS_DIR.exists():
+def delete_qdrant(cfg: Config) -> None:
+    run_streaming_cmd(["kubectl", "delete", "ns", cfg.namespace, "--ignore-not-found"], prefix="kubectl")
+    if cfg.manifests_dir.exists():
         try:
-            shutil.rmtree(MANIFESTS_DIR)
+            shutil.rmtree(cfg.manifests_dir)
         except Exception:
-            DBG("failed to remove manifests dir", MANIFESTS_DIR)
+            DBG("failed to remove manifests dir", cfg.manifests_dir)
     LOG("deleted qdrant namespace and rendered manifests (best-effort)")
 
 
@@ -617,54 +659,49 @@ def delete_qdrant() -> None:
 # Main
 # =============================================================================
 def usage_and_exit() -> None:
-    print("usage: qdrant_cluster.py --rollout|--delete", file=sys.stderr)
+    print("usage: qdrant_service.py --rollout|--delete", file=sys.stderr)
     raise SystemExit(1)
 
 
 def main(argv: list[str] | None = None) -> None:
+    cfg = load_config()
+
     require_bin("kubectl")
     require_bin("helm")
 
     if argv is None:
         argv = sys.argv[1:]
 
-    if not argv:
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--rollout", action="store_true")
+    parser.add_argument("--delete", action="store_true")
+    parser.add_argument("--help", "-h", action="store_true")
+    args = parser.parse_args(argv)
+
+    if args.help or (not args.rollout and not args.delete):
+        usage_and_exit()
+    if args.rollout and args.delete:
         usage_and_exit()
 
-    cmd: str | None = None
-    for a in argv:
-        if a == "--rollout":
-            cmd = "rollout"
-        elif a == "--delete":
-            cmd = "delete"
-        elif a in ("--help", "-h"):
-            usage_and_exit()
-        else:
-            usage_and_exit()
-
     cluster_mode = detect_cluster_mode()
-    if cluster_mode == "unknown":
-        fatal("cluster type could not be detected; set K8S_CLUSTER to one of: kind, eks, eks-auto", 2)
-
     LOG(f"cluster mode: {cluster_mode}")
-    LOG(f"starting setup for release={QDRANT_RELEASE} namespace={QDRANT_NAMESPACE}")
+    LOG(f"starting setup for release={cfg.release} namespace={cfg.namespace}")
 
-    if cmd == "rollout":
-        validate_default_storageclass(cluster_mode)
-        ok = helm_install(cluster_mode)
+    if args.rollout:
+        ok = helm_install(cfg)
         if not ok:
             fatal("helm install/upgrade failed", 3)
 
-        post_ok = validate_post_install()
-        if not post_ok and STRICT:
+        post_ok = validate_post_install(cfg)
+        if not post_ok and cfg.strict:
             fatal("post-install validation failed", 3)
 
         LOG("rollout complete")
+        return
 
-    elif cmd == "delete":
-        delete_qdrant()
-    else:
-        usage_and_exit()
+    if args.delete:
+        delete_qdrant(cfg)
+        return
 
 
 if __name__ == "__main__":

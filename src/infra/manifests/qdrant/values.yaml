@@ -10,13 +10,9 @@ persistence:
   size: 20Gi
   accessModes:
   - ReadWriteOnce
-metrics:
-  serviceMonitor:
-    enabled: false
-    targetPort: http
 podAnnotations:
   app.kubernetes.io/managed-by: qdrant_service.py
-  qdrant/config-checksum: 20845295a1b9c17c2c56bbe6e07e61e8b38ca1892e480f406d23492fce4b602f
+  qdrant/config-checksum: 79095c918a3a96dfa9c0c40b7d8b8e919aa016fe11390918107265ee24771655
 podLabels:
   app.kubernetes.io/managed-by: qdrant_service.py
 resources:

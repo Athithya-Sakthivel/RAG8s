@@ -3,7 +3,7 @@
 # Supports: kind (local-path), AWS (ebs.csi.aws.com)
 # Additionally: renders the StorageClass YAML into src/manifests/storageclass/
 
-set -euo pipefailxx
+set -euo pipefail
 
 readonly K8S_CLUSTER="${K8S_CLUSTER:-kind}"
 readonly MANIFEST_DIR="src/manifests/storageclass"
