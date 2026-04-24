@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # src/infra/rag/dense_service.py
 # Deterministic generator for Dense embedder Kubernetes manifests.
-# Writes manifests to src/infra/manifests/dense_service/
+# Writes manifests to src/manifests/dense_service/
 #
 # Key changes in this rewrite:
 # - Use explicit DEPLOY_ENV (preferred) with safe fallbacks for backward compatibility.
@@ -38,7 +38,7 @@ LOG_LEVEL = os.environ.get("DENSE_GEN_LOGLEVEL", "INFO").upper()
 logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO), format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("gen_dense")
 
-DEFAULT_MANIFESTS_DIR = Path("src/infra/manifests/dense_service")
+DEFAULT_MANIFESTS_DIR = Path("src/manifests/dense_service")
 DEFAULT_STATE_DIRNAME = ".state"
 DEFAULTS: dict[str, Any] = {
     "DEPLOY_ENV": "NONPROD",

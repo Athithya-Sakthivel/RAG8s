@@ -82,8 +82,8 @@ jobs:
         id: build-image
         uses: docker/build-push-action@v4
         with:
-          context: src/infra/services/dense
-          file: src/infra/services/dense/Dockerfile
+          context: src/services/dense
+          file: src/services/dense/Dockerfile
           load: true
           push: false
           pull: true
@@ -97,7 +97,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cd src/infra/services/dense
+          cd src/services/dense
           export DENSE_MODEL_NAME="${DENSE_MODEL_NAME:-BAAI/bge-small-en-v1.5}"
           export DENSE_DIM="${DENSE_DIM:-384}"
           # IMAGE_TAG and ghcr_user are produced by image-meta; fall back safely if missing
@@ -113,8 +113,8 @@ jobs:
           scan_image="${{ steps.build-image.outputs.imageid }}"
           test -n "${scan_image}"
           ignore_args=()
-          if [[ -f src/infra/services/dense/.trivyignore ]]; then
-            ignore_args+=(--ignorefile /workspace/src/infra/services/dense/.trivyignore)
+          if [[ -f src/services/dense/.trivyignore ]]; then
+            ignore_args+=(--ignorefile /workspace/src/services/dense/.trivyignore)
           elif [[ -f .trivyignore ]]; then
             ignore_args+=(--ignorefile /workspace/.trivyignore)
           fi

@@ -4,10 +4,10 @@ on:
   push:
     branches: [ main ]
     paths:
-      - src/infra/services/reranker/**
+      - src/services/reranker/**
   pull_request:
     paths:
-      - src/infra/services/reranker/**
+      - src/services/reranker/**
 
 permissions:
   contents: read
@@ -80,8 +80,8 @@ jobs:
         id: build-image
         uses: docker/build-push-action@v4
         with:
-          context: src/infra/services/reranker
-          file: src/infra/services/reranker/Dockerfile
+          context: src/services/reranker
+          file: src/services/reranker/Dockerfile
           load: true
           push: false
           pull: true
@@ -95,7 +95,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cd src/infra/services/reranker
+          cd src/services/reranker
           export RERANKER_MODEL_NAME="${RERANKER_MODEL_NAME:-Xenova/ms-marco-MiniLM-L-6-v2}"
           export RERANKER_MAX_DOCS="${RERANKER_MAX_DOCS:-50}"
           export RERANKER_IMAGE_TAG="${IMAGE_TAG:-${{ steps.image-meta.outputs.image_tag }}}"
@@ -110,8 +110,8 @@ jobs:
           scan_image="${{ steps.build-image.outputs.imageid }}"
           test -n "${scan_image}"
           ignore_args=()
-          if [[ -f src/infra/services/reranker/.trivyignore ]]; then
-            ignore_args+=(--ignorefile /workspace/src/infra/services/reranker/.trivyignore)
+          if [[ -f src/services/reranker/.trivyignore ]]; then
+            ignore_args+=(--ignorefile /workspace/src/services/reranker/.trivyignore)
           elif [[ -f .trivyignore ]]; then
             ignore_args+=(--ignorefile /workspace/.trivyignore)
           fi

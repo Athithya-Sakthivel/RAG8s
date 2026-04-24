@@ -11,3 +11,8 @@ repos:
       - id: end-of-file-fixer
       - id: check-yaml
       - id: check-json
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: aca6d4c
+    hooks:
+      - id: ruff-check

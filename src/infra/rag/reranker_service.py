@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # src/infra/rag/reranker_service.py
 # Deterministic generator for Reranker Kubernetes manifests.
-# Writes manifests to src/infra/manifests/reranker_service/
+# Writes manifests to src/manifests/reranker_service/
 #
 # Key changes in this rewrite:
 # - Use explicit DEPLOY_ENV (preferred) with safe fallbacks for backward compatibility.
@@ -18,6 +18,8 @@
 # - Safe kubectl apply wrapper and rollout wait
 # - Clear validation and early failures
 # - Type hints and robust subprocess handling
+
+#!/usr/bin/env python3
 from __future__ import annotations
 
 import argparse

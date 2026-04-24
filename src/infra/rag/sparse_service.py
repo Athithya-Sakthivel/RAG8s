@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # src/infra/rag/sparse_service.py
 # Deterministic generator for Sparse embedder Kubernetes manifests.
-# Writes manifests to src/infra/manifests/sparse_service/
+# Writes manifests to src/manifests/sparse_service/
 #
 # Key changes in this rewrite:
 # - Use explicit DEPLOY_ENV (preferred) with safe fallbacks for backward compatibility.
@@ -38,12 +38,12 @@ LOG_LEVEL = os.environ.get("SPARSE_GEN_LOGLEVEL", "INFO").upper()
 logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO), format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("gen_sparse")
 
-DEFAULT_MANIFESTS_DIR = Path("src/infra/manifests/sparse_service")
+DEFAULT_MANIFESTS_DIR = Path("src/manifests/sparse_service")
 DEFAULT_STATE_DIRNAME = ".state"
 
 DEFAULTS: dict[str, Any] = {
     "DEPLOY_ENV": "NONPROD",
-    "IMAGE": "ghcr.io/athithya-sakthivel/sparse:staging",
+    "IMAGE": "ghcr.io/athithya-sakthivel/sparse:2026-04-24-15-23--f9ebe8e@sha256:19901ade9d3b4729674a4425266cf37fee0e49d1403b1fa292b6e9432bd099bb",
     "NAMESPACE": "models",
     "SERVICE_NAME": "sparse",
     "CONTAINER_PORT": 8201,
