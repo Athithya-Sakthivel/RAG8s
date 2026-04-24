@@ -54,7 +54,7 @@ polars==1.40.1
 polars-runtime-32==1.40.1
 portalocker==2.10.1
 preshed==3.0.13
-protobuf==7.34.1
+protobuf==5.29.6
 pyarrow==24.0.0
 pyclipper==1.4.0
 pycparser==3.0
