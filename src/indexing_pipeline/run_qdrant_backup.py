@@ -1,7 +1,4 @@
-#!/usr/bin/env python3
 """
-run_qdrant_backup_service.py
-
 AWS-native Qdrant backup (data-plane / app-layer).
 
 Behavior:
@@ -15,8 +12,6 @@ Behavior:
 Primary configuration:
  - DATA_S3_BUCKET   (required)
  - DATA_S3_PREFIX    (optional, default: qdrant/backups)
- - QDRANT_URL       (optional, default: http://127.0.0.1:6333)
- - QDRANT_API_KEY   (optional, sent as Qdrant api-key header)
 
 Compatibility fallbacks:
  - BACKUP_S3_BUCKET / BACKUP_BUCKET for bucket
