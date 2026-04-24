@@ -23,7 +23,7 @@ spec:
     metadata:
       labels: *id001
       annotations:
-        gen-dense/inputs-hash: 696e97f2d3f9ae2e6ad4e5289a0f8cad846c42500124ae3e70da40a027a2b2f0
+        gen-dense/inputs-hash: 837e43d041b6973b17d12f076f1e8a8ff6a6efac456985be718f1fc92885de8d
         prometheus.io/scrape: 'true'
         prometheus.io/port: '8200'
         prometheus.io/path: /metrics
@@ -85,3 +85,21 @@ spec:
           limits:
             cpu: 1000m
             memory: 1Gi
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+        volumeMounts:
+        - name: tmp-writable
+          mountPath: /tmp
+        - name: tmp-writable
+          mountPath: /var/tmp
+        - name: tmp-writable
+          mountPath: /usr/tmp
+      securityContext:
+        fsGroup: 1000
+        runAsNonRoot: true
+      volumes:
+      - name: tmp-writable
+        emptyDir: {}

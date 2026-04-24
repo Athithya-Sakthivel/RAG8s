@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# Generates CronJob + RBAC + supporting manifests for the indexing pipeline.
+# This variant enhances idempotent rollout behavior (render/hash/state) and
+# cluster-aware AWS auth (IRSA for EKS, static creds for kind).
+
 from __future__ import annotations
 
 import argparse
@@ -12,10 +16,9 @@ from typing import Any
 
 try:
     import yaml
-except Exception:  # pragma: no cover
+except Exception:
     print("ERROR: PyYAML required. Install with: pip install pyyaml", file=sys.stderr)
     raise SystemExit(2) from None
-
 
 DEFAULTS: dict[str, str] = {
     "NAMESPACE": "indexing",
@@ -29,7 +32,7 @@ DEFAULTS: dict[str, str] = {
     "SERVICE_ACCOUNT_NAME": "indexer-cron-sa",
     "MANIFESTS_DIR": "src/manifests/indexing_cronjob",
     "INDEXING_PIPELINE_CPU_IMAGE_REPO": "ghcr.io/athithya-sakthivel/indexing-pipeline",
-    "INDEXING_PIPELINE_CPU_IMAGE_TAG": "2026-04-24-11-24--324996b",
+    "INDEXING_PIPELINE_CPU_IMAGE_TAG": "2026-04-24-19-14--29faccb@sha256:f06d9ce7c692b891afee9626f6c3249e30b9b22183d16774c38347b2bb71a841",
     "INDEXING_BACKUP_CRONJOB_CPU_REQUEST": "2",
     "INDEXING_BACKUP_CRONJOB_CPU_LIMIT": "6",
     "INDEXING_BACKUP_CRONJOB_MEMORY_REQUEST": "1Gi",
@@ -59,17 +62,14 @@ DEFAULTS: dict[str, str] = {
 
 RUNTIME_KEYS = set(DEFAULTS.keys())
 
-
 def log(msg: str, /, *args: object) -> None:
     if args:
         msg = msg % args
     print(msg, flush=True)
 
-
 def fatal(msg: str, code: int = 2) -> None:
     print(f"ERROR: {msg}", file=sys.stderr)
     raise SystemExit(code)
-
 
 def run_cmd(
     cmd: list[str],
@@ -95,16 +95,13 @@ def run_cmd(
     except subprocess.TimeoutExpired as exc:
         return 124, getattr(exc, "stdout", "") or "", getattr(exc, "stderr", "") or f"timeout after {timeout}s"
 
-
 def ensure_kubectl_available() -> None:
     rc, out, err = run_cmd(["kubectl", "version", "--client=true"], timeout=20)
     if rc != 0:
         fatal(f"kubectl not available or not in PATH: {err or out}")
 
-
 def yaml_dump(data: Any) -> str:
     return yaml.safe_dump(data, sort_keys=False, default_flow_style=False, allow_unicode=True)
-
 
 def write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -120,14 +117,12 @@ def write_text(path: Path, content: str) -> None:
         except Exception:
             pass
 
-
 def as_bool(value: str | None, default: bool = False) -> bool:
     if value is None:
         return default
     return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
-
-def as_int(value: str | None, default: int) -> int:
+def as_int(value: str | None, default: int = 0) -> int:
     if value is None or str(value).strip() == "":
         return default
     try:
@@ -135,14 +130,12 @@ def as_int(value: str | None, default: int) -> int:
     except Exception:
         return default
 
-
 def pick_env(*names: str, default: str = "") -> str:
     for name in names:
         value = os.environ.get(name)
         if value is not None and str(value).strip() != "":
             return str(value).strip()
     return default
-
 
 def detect_mode(cfg: dict[str, str]) -> str:
     explicit = cfg.get("K8S_CLUSTER", "").strip().lower()
@@ -152,41 +145,46 @@ def detect_mode(cfg: dict[str, str]) -> str:
         return "eks"
     return "kind"
 
-
 def validate_cfg(cfg: dict[str, str]) -> None:
     missing = []
-    if not cfg.get("DATA_S3_BUCKET"):
-        missing.append("DATA_S3_BUCKET")
-    if not (cfg.get("AWS_REGION") or cfg.get("AWS_DEFAULT_REGION")):
-        missing.append("AWS_REGION")
-    if not cfg.get("QDRANT_URL"):
-        missing.append("QDRANT_URL")
-    if not cfg.get("DENSE_URL"):
-        missing.append("DENSE_URL")
-    if not cfg.get("SPARSE_URL"):
-        missing.append("SPARSE_URL")
-    if missing:
-        fatal("missing required env vars: " + ", ".join(missing))
-
     mode = detect_mode(cfg)
     if mode == "kind":
+        if not cfg.get("DATA_S3_BUCKET"):
+            missing.append("DATA_S3_BUCKET")
+        if not (cfg.get("AWS_REGION") or cfg.get("AWS_DEFAULT_REGION")):
+            missing.append("AWS_REGION")
+        if not cfg.get("QDRANT_URL"):
+            missing.append("QDRANT_URL")
+        if not cfg.get("DENSE_URL"):
+            missing.append("DENSE_URL")
+        if not cfg.get("SPARSE_URL"):
+            missing.append("SPARSE_URL")
+        if missing:
+            fatal("missing required env vars: " + ", ".join(missing))
         if not (os.environ.get("AWS_ACCESS_KEY_ID") and os.environ.get("AWS_SECRET_ACCESS_KEY")):
             fatal("kind/static mode requires AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY")
     else:
+        if not cfg.get("DATA_S3_BUCKET"):
+            missing.append("DATA_S3_BUCKET")
+        if not cfg.get("QDRANT_URL"):
+            missing.append("QDRANT_URL")
+        if not cfg.get("DENSE_URL"):
+            missing.append("DENSE_URL")
+        if not cfg.get("SPARSE_URL"):
+            missing.append("SPARSE_URL")
+        if missing:
+            fatal("missing required env vars: " + ", ".join(missing))
         if not cfg.get("IRSA_ROLE_ARN"):
             fatal("EKS/IRSA mode requires IRSA_ROLE_ARN")
 
-
 def namespace_manifest(ns: str) -> dict[str, Any]:
     return {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": ns}}
-
 
 def serviceaccount_manifest(ns: str, name: str, mode: str, irsa_role_arn: str) -> dict[str, Any]:
     meta: dict[str, Any] = {"name": name, "namespace": ns}
     if mode != "kind" and irsa_role_arn:
         meta["annotations"] = {"eks.amazonaws.com/role-arn": irsa_role_arn}
     return {"apiVersion": "v1", "kind": "ServiceAccount", "metadata": meta}
-
 
 def build_secret_manifest(ns: str, name: str, data: dict[str, str]) -> dict[str, Any]:
     return {
@@ -197,10 +195,8 @@ def build_secret_manifest(ns: str, name: str, data: dict[str, str]) -> dict[str,
         "stringData": data,
     }
 
-
 def env_item(name: str, value: str) -> dict[str, Any]:
     return {"name": name, "value": value}
-
 
 def secret_env_item(name: str, secret_name: str, secret_key: str | None = None) -> dict[str, Any]:
     return {
@@ -213,18 +209,14 @@ def secret_env_item(name: str, secret_name: str, secret_key: str | None = None) 
         },
     }
 
-
 def _image_ref(repo: str, tag: str) -> str:
     return f"{repo}:{tag}" if tag else repo
-
 
 def build_cronjob_manifest(cfg: dict[str, str], mode: str) -> dict[str, Any]:
     ns = cfg["NAMESPACE"]
     cron_name = cfg["CRONJOB_NAME"]
     image = _image_ref(cfg["INDEXING_PIPELINE_CPU_IMAGE_REPO"], cfg["INDEXING_PIPELINE_CPU_IMAGE_TAG"])
-
     aws_region = cfg["AWS_REGION"] or cfg["AWS_DEFAULT_REGION"]
-
     env: list[dict[str, Any]] = [
         env_item("PYTHONUNBUFFERED", "1"),
         env_item("LOG_LEVEL", cfg["LOG_LEVEL"]),
@@ -243,16 +235,13 @@ def build_cronjob_manifest(cfg: dict[str, str], mode: str) -> dict[str, Any]:
         env_item("AWS_SDK_LOAD_CONFIG", "1"),
         env_item("AWS_EC2_METADATA_DISABLED", "true"),
     ]
-
     if cfg.get("QDRANT_API_KEY"):
         env.append(secret_env_item("QDRANT_API_KEY", cfg["QDRANT_SECRET_NAME"], "QDRANT_API_KEY"))
-
     if mode == "kind":
         env.append(secret_env_item("AWS_ACCESS_KEY_ID", cfg["AWS_CREDENTIALS_SECRET_NAME"], "AWS_ACCESS_KEY_ID"))
         env.append(secret_env_item("AWS_SECRET_ACCESS_KEY", cfg["AWS_CREDENTIALS_SECRET_NAME"], "AWS_SECRET_ACCESS_KEY"))
         if os.environ.get("AWS_SESSION_TOKEN"):
             env.append(secret_env_item("AWS_SESSION_TOKEN", cfg["AWS_CREDENTIALS_SECRET_NAME"], "AWS_SESSION_TOKEN"))
-
     cronjob: dict[str, Any] = {
         "apiVersion": "batch/v1",
         "kind": "CronJob",
@@ -302,18 +291,14 @@ def build_cronjob_manifest(cfg: dict[str, str], mode: str) -> dict[str, Any]:
             },
         },
     }
-
     if cfg.get("CRONJOB_TIMEZONE"):
         cronjob["spec"]["timeZone"] = cfg["CRONJOB_TIMEZONE"]
-
     return cronjob
-
 
 def collect_cfg() -> dict[str, str]:
     cfg: dict[str, str] = {}
     for key in sorted(RUNTIME_KEYS):
         cfg[key] = pick_env(key, default=DEFAULTS.get(key, ""))
-
     cfg["NAMESPACE"] = pick_env("NAMESPACE", default=DEFAULTS["NAMESPACE"])
     cfg["CRONJOB_NAME"] = pick_env("CRONJOB_NAME", default=DEFAULTS["CRONJOB_NAME"]).lower()
     cfg["CRON_SCHEDULE"] = pick_env("CRON_SCHEDULE", "INDEXING_BACKUP_CRON_EXPRESSION", default=DEFAULTS["CRON_SCHEDULE"])
@@ -356,7 +341,6 @@ def collect_cfg() -> dict[str, str]:
     cfg["K8S_CLUSTER"] = pick_env("K8S_CLUSTER", default=DEFAULTS["K8S_CLUSTER"])
     return cfg
 
-
 def write_manifests(manifests_dir: Path, docs: list[tuple[str, dict[str, Any]]]) -> list[Path]:
     manifests_dir.mkdir(parents=True, exist_ok=True)
     out: list[Path] = []
@@ -366,18 +350,15 @@ def write_manifests(manifests_dir: Path, docs: list[tuple[str, dict[str, Any]]])
         out.append(p)
     return out
 
-
 def apply_yaml(yaml_text: str, *, timeout: int = 60) -> None:
     rc, out, err = run_cmd(["kubectl", "apply", "-f", "-"], input_text=yaml_text, timeout=timeout)
     if rc != 0:
         fatal(err or out or "kubectl apply failed", 4)
 
-
 def apply_direct_secret(ns: str, name: str, data: dict[str, str], timeout: int = 30) -> None:
     if not data:
         return
     apply_yaml(yaml_dump(build_secret_manifest(ns, name, data)), timeout=timeout)
-
 
 def wait_for_namespace(ns: str, timeout: int = 30) -> None:
     start = time.monotonic()
@@ -389,32 +370,25 @@ def wait_for_namespace(ns: str, timeout: int = 30) -> None:
             fatal(f"namespace '{ns}' was not observable after creation", 5)
         time.sleep(1)
 
-
 def render_and_apply(cfg: dict[str, str], dry_run: bool) -> None:
     ensure_kubectl_available()
     mode = detect_mode(cfg)
-
     manifests_dir = Path(cfg["MANIFESTS_DIR"])
     docs: list[tuple[str, dict[str, Any]]] = [
         ("00-namespace.yaml", namespace_manifest(cfg["NAMESPACE"])),
         ("10-serviceaccount.yaml", serviceaccount_manifest(cfg["NAMESPACE"], cfg["SERVICE_ACCOUNT_NAME"], mode, cfg["IRSA_ROLE_ARN"])),
         ("50-cronjob.yaml", build_cronjob_manifest(cfg, mode)),
     ]
-
     rendered_files = write_manifests(manifests_dir, docs)
     log(f"Rendered manifests to {manifests_dir}")
     for p in rendered_files:
         log(str(p))
-
     if dry_run:
         return
-
     apply_yaml(yaml_dump(namespace_manifest(cfg["NAMESPACE"])), timeout=20)
     wait_for_namespace(cfg["NAMESPACE"], timeout=30)
-
     if cfg.get("QDRANT_API_KEY"):
         apply_direct_secret(cfg["NAMESPACE"], cfg["QDRANT_SECRET_NAME"], {"QDRANT_API_KEY": cfg["QDRANT_API_KEY"]})
-
     if mode == "kind":
         aws_data: dict[str, str] = {}
         if os.environ.get("AWS_ACCESS_KEY_ID"):
@@ -424,7 +398,6 @@ def render_and_apply(cfg: dict[str, str], dry_run: bool) -> None:
         if os.environ.get("AWS_SESSION_TOKEN"):
             aws_data["AWS_SESSION_TOKEN"] = os.environ["AWS_SESSION_TOKEN"]
         apply_direct_secret(cfg["NAMESPACE"], cfg["AWS_CREDENTIALS_SECRET_NAME"], aws_data)
-
     apply_yaml(
         "\n---\n".join(
             yaml_dump(doc)
@@ -435,27 +408,21 @@ def render_and_apply(cfg: dict[str, str], dry_run: bool) -> None:
         ),
         timeout=60,
     )
-
     log("Applied manifests successfully")
-
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Render and apply the indexing CronJob manifests.")
     parser.add_argument("--dry-run", action="store_true", help="Render manifests to disk only; do not apply.")
     return parser.parse_args(argv)
 
-
 def main(argv: list[str] | None = None) -> None:
     if argv is None:
         argv = sys.argv[1:]
     args = parse_args(argv)
-
     cfg = collect_cfg()
     validate_cfg(cfg)
-
     render_and_apply(cfg, dry_run=args.dry_run)
     log("Done")
-
 
 if __name__ == "__main__":
     try:

@@ -89,6 +89,12 @@ DEFAULTS: dict[str, Any] = {
     "ROLLOUT_TIMEOUT": 300,
     "MANIFESTS_DIR": DEFAULT_MANIFESTS_DIR,
     "STATE_DIRNAME": DEFAULT_STATE_DIRNAME,
+    # Security defaults (sync with non-root Dockerfile that creates appuser uid/gid 1000)
+    "RUN_AS_NONROOT": True,
+    "RUN_AS_USER": 1000,
+    "ALLOW_PRIV_ESC": False,
+    "READONLY_ROOTFS": True,
+    "FS_GROUP": 1000,
 }
 
 
@@ -226,6 +232,20 @@ def load_config() -> dict[str, Any]:
     cfg["DENSE_CUDA"] = os.environ.get("DENSE_CUDA", str(DEFAULTS["DENSE_CUDA"])).lower() in ("1", "true", "yes")
     cfg["PRELOAD_MODEL"] = os.environ.get("DENSE_PRELOAD_MODEL", "0").lower() in ("1", "true", "yes")
 
+    # Security-related config (sync with Dockerfile non-root user)
+    cfg["RUN_AS_NONROOT"] = os.environ.get("DENSE_RUN_AS_NONROOT", str(DEFAULTS["RUN_AS_NONROOT"])).lower() in ("1", "true", "yes")
+    try:
+        cfg["RUN_AS_USER"] = int(os.environ.get("DENSE_RUN_AS_USER", str(DEFAULTS["RUN_AS_USER"])))
+    except Exception:
+        cfg["RUN_AS_USER"] = DEFAULTS["RUN_AS_USER"]
+    cfg["ALLOW_PRIV_ESC"] = os.environ.get("DENSE_ALLOW_PRIV_ESC", str(DEFAULTS["ALLOW_PRIV_ESC"])).lower() in ("1", "true", "yes")
+    cfg["READONLY_ROOTFS"] = os.environ.get("DENSE_READONLY_ROOTFS", str(DEFAULTS["READONLY_ROOTFS"])).lower() in ("1", "true", "yes")
+    try:
+        fs_group_env = os.environ.get("DENSE_FS_GROUP", "")
+        cfg["FS_GROUP"] = int(fs_group_env) if fs_group_env != "" else DEFAULTS["FS_GROUP"]
+    except Exception:
+        cfg["FS_GROUP"] = DEFAULTS["FS_GROUP"]
+
     cfg["LABELS"] = {
         "app.kubernetes.io/name": cfg["SERVICE_NAME"],
         "app.kubernetes.io/component": "embedder",
@@ -342,6 +362,20 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
     if cfg["ENABLE_GPU"]:
         container["resources"]["limits"][cfg["GPU_RESOURCE_NAME"]] = cfg["GPU_COUNT"]
 
+    # Inject container-level securityContext based on config
+    container_security: dict[str, Any] = {}
+    if cfg.get("RUN_AS_NONROOT", False):
+        container_security["runAsNonRoot"] = True
+    if cfg.get("RUN_AS_USER") is not None:
+        container_security["runAsUser"] = int(cfg["RUN_AS_USER"])
+    # disallow privilege escalation unless explicitly allowed
+    container_security["allowPrivilegeEscalation"] = bool(cfg.get("ALLOW_PRIV_ESC", False))
+    # readOnlyRootFilesystem default true unless explicitly disabled
+    container_security["readOnlyRootFilesystem"] = bool(cfg.get("READONLY_ROOTFS", True))
+
+    if container_security:
+        container["securityContext"] = container_security
+
     deployment = {
         "apiVersion": "apps/v1",
         "kind": "Deployment",
@@ -363,9 +397,23 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
         },
     }
 
+    # Pod-level security: set fsGroup if provided (helps with shared volumes)
+    pod_sec: dict[str, Any] = {}
+    if cfg.get("FS_GROUP") is not None:
+        try:
+            pod_sec["fsGroup"] = int(cfg["FS_GROUP"])
+        except Exception:
+            pod_sec["fsGroup"] = cfg["FS_GROUP"]
+    if cfg.get("RUN_AS_NONROOT", False):
+        pod_sec.setdefault("runAsNonRoot", True)
+    if pod_sec:
+        deployment["spec"]["template"]["spec"]["securityContext"] = pod_sec
+
+    # Annotate inputs hash if provided
     if inputs_hash:
         deployment["spec"]["template"]["metadata"]["annotations"]["gen-dense/inputs-hash"] = inputs_hash
 
+    # GPU node selector handling
     if cfg["ENABLE_GPU"] and cfg["GPU_NODE_SELECTOR"]:
         if "=" in cfg["GPU_NODE_SELECTOR"]:
             k, v = cfg["GPU_NODE_SELECTOR"].split("=", 1)
@@ -373,6 +421,7 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
         else:
             deployment["spec"]["template"]["spec"]["nodeSelector"] = {cfg["GPU_NODE_SELECTOR"]: "true"}
 
+    # Prometheus annotations
     deployment["spec"]["template"]["metadata"].setdefault("annotations", {})
     deployment["spec"]["template"]["metadata"]["annotations"].update(
         {
@@ -381,6 +430,36 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
             "prometheus.io/path": "/metrics",
         }
     )
+
+    # --- ensure writable tmp when readOnlyRootFilesystem is enabled ---
+    # create emptyDir volume and mount it at /tmp, /var/tmp, /usr/tmp so Python tempfile works
+    if cfg.get("READONLY_ROOTFS", True):
+        # add volumeMounts to container
+        tmp_mounts = [
+            {"name": "tmp-writable", "mountPath": "/tmp"},
+            {"name": "tmp-writable", "mountPath": "/var/tmp"},
+            {"name": "tmp-writable", "mountPath": "/usr/tmp"},
+        ]
+        existing_mounts = container.get("volumeMounts", [])
+        for m in tmp_mounts:
+            if not any(vm.get("mountPath") == m["mountPath"] for vm in existing_mounts):
+                existing_mounts.append(m)
+        container["volumeMounts"] = existing_mounts
+
+        # add the emptyDir volume at pod spec level
+        vols = deployment["spec"]["template"]["spec"].get("volumes", [])
+        if not any(v.get("name") == "tmp-writable" for v in vols):
+            vols.append({"name": "tmp-writable", "emptyDir": {}})
+        deployment["spec"]["template"]["spec"]["volumes"] = vols
+
+        # ensure pod-level securityContext has fsGroup so mounted volume is writable by appuser
+        pod_sc = deployment["spec"]["template"]["spec"].get("securityContext", {})
+        if "fsGroup" not in pod_sc and cfg.get("FS_GROUP") is not None:
+            try:
+                pod_sc["fsGroup"] = int(cfg.get("FS_GROUP", 1000))
+            except Exception:
+                pod_sc["fsGroup"] = cfg.get("FS_GROUP", 1000)
+        deployment["spec"]["template"]["spec"]["securityContext"] = pod_sc
 
     return yaml.safe_dump(deployment, sort_keys=False)
 
@@ -460,7 +539,7 @@ def generate_manifests(cfg: dict[str, Any], dry_run: bool = False, verbose: bool
     log.info("Manifests written to %s (inputs_hash=%s)", str(manifests_dir), inputs_hash)
     if verbose:
         log.debug("Namespace manifest head:\n%s", "\n".join(ns_yaml.splitlines()[:20]))
-        log.debug("Deployment manifest head:\n%s", "\n".join(deploy_yaml.splitlines()[:60]))
+        log.debug("Deployment manifest head:\n%s", "\n".join(deploy_yaml.splitlines()[:120]))
     return inputs_hash
 
 
