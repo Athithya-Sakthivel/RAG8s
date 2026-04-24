@@ -1,5 +1,24 @@
 #!/usr/bin/env python3
 # src/infra/rag/dense_service.py
+# Deterministic generator for Dense embedder Kubernetes manifests.
+# Writes manifests to src/infra/manifests/dense_service/
+#
+# Key changes in this rewrite:
+# - Use explicit DEPLOY_ENV (preferred) with safe fallbacks for backward compatibility.
+# - Clear, unambiguous mapping: PROD -> production defaults; anything else -> nonprod defaults.
+# - Ensure DENSE_MODEL_NAME, DENSE_DIM, DENSE_BATCH_SIZE, DENSE_NORMALIZE, DENSE_CUDA, PRELOAD_MODEL
+#   are injected into the container env with strong defaults.
+# - Remove deprecated --apply CLI flag (use --rollout).
+# - Replace deprecated datetime.utcnow() with timezone-aware UTC timestamp.
+#
+# Features:
+# - Strong, sensible defaults for prod vs non-prod
+# - Idempotent generation: stores inputs hash and skips writes when nothing changed
+# - Atomic file writes
+# - Safe kubectl apply wrapper and rollout wait
+# - Clear validation and early failures
+# - Type hints and robust subprocess handling
+
 from __future__ import annotations
 
 import argparse
@@ -15,7 +34,7 @@ from typing import Any
 
 import yaml
 
-LOG_LEVEL = os.environ.get("GEN_DENSE_LOGLEVEL", "INFO").upper()
+LOG_LEVEL = os.environ.get("DENSE_GEN_LOGLEVEL", "INFO").upper()
 logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO), format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("gen_dense")
 
@@ -110,7 +129,7 @@ def run_cmd(
 def canonical_inputs_hash(cfg: dict[str, Any]) -> str:
     serial: dict[str, Any] = {}
     for k in sorted(cfg.keys()):
-        if k in ("INPUTS_HASH_PATH", "MANIFESTS_DIR", "STATE_DIRNAME"):
+        if k in ("INPUTS_HASH_PATH", "MANIFESTS_DIR", "STATE_DIRNAME", "FILES"):
             continue
         v = cfg.get(k)
         try:
@@ -147,7 +166,7 @@ def load_config() -> dict[str, Any]:
     env = str(deploy_env).upper()
     cfg["DEPLOY_ENV"] = env
 
-    cfg["MANIFESTS_DIR"] = Path(os.environ.get("MANIFESTS_DIR", DEFAULTS["MANIFESTS_DIR"]))
+    cfg["MANIFESTS_DIR"] = Path(os.environ.get("MANIFESTS_DIR", str(DEFAULTS["MANIFESTS_DIR"])))
     cfg["STATE_DIRNAME"] = os.environ.get("STATE_DIRNAME", DEFAULTS["STATE_DIRNAME"])
     cfg["INPUTS_HASH_PATH"] = cfg["MANIFESTS_DIR"] / cfg["STATE_DIRNAME"] / "inputs.sha256"
 
@@ -221,10 +240,12 @@ def load_config() -> dict[str, Any]:
     manifests_dir = cfg["MANIFESTS_DIR"]
     cfg["FILES"] = {
         "namespace": manifests_dir / "00-namespace.yaml",
-        "sa_role": manifests_dir / "01-sa-role.yaml",
-        "deployment": manifests_dir / "02-deployment.yaml",
-        "service": manifests_dir / "03-service.yaml",
-        "hpa": manifests_dir / "04-hpa.yaml",
+        "serviceaccount": manifests_dir / "01-serviceaccount.yaml",
+        "role": manifests_dir / "02-role.yaml",
+        "rolebinding": manifests_dir / "03-rolebinding.yaml",
+        "deployment": manifests_dir / "04-deployment.yaml",
+        "service": manifests_dir / "05-service.yaml",
+        "hpa": manifests_dir / "06-hpa.yaml",
     }
 
     cfg["UUID_SHORT"] = str(uuid.uuid4())[:8]
@@ -241,12 +262,16 @@ def render_namespace(cfg: dict[str, Any]) -> str:
     return yaml.safe_dump(ns, sort_keys=False)
 
 
-def render_sa_role(cfg: dict[str, Any]) -> str:
+def render_serviceaccount(cfg: dict[str, Any]) -> str:
     sa = {
         "apiVersion": "v1",
         "kind": "ServiceAccount",
         "metadata": {"name": cfg["SA_NAME"], "namespace": cfg["NAMESPACE"]},
     }
+    return yaml.safe_dump(sa, sort_keys=False)
+
+
+def render_role(cfg: dict[str, Any]) -> str:
     role = {
         "apiVersion": "rbac.authorization.k8s.io/v1",
         "kind": "Role",
@@ -256,6 +281,10 @@ def render_sa_role(cfg: dict[str, Any]) -> str:
             {"apiGroups": [""], "resources": ["secrets"], "verbs": ["get"]},
         ],
     }
+    return yaml.safe_dump(role, sort_keys=False)
+
+
+def render_rolebinding(cfg: dict[str, Any]) -> str:
     rb = {
         "apiVersion": "rbac.authorization.k8s.io/v1",
         "kind": "RoleBinding",
@@ -263,7 +292,7 @@ def render_sa_role(cfg: dict[str, Any]) -> str:
         "subjects": [{"kind": "ServiceAccount", "name": cfg["SA_NAME"], "namespace": cfg["NAMESPACE"]}],
         "roleRef": {"kind": "Role", "name": cfg["ROLE_NAME"], "apiGroup": "rbac.authorization.k8s.io"},
     }
-    return "\n---\n".join([yaml.safe_dump(x, sort_keys=False) for x in (sa, role, rb)])
+    return yaml.safe_dump(rb, sort_keys=False)
 
 
 def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> str:
@@ -273,9 +302,10 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
         "image": cfg["IMAGE"],
         "ports": [{"containerPort": cfg["CONTAINER_PORT"]}],
         "env": [
+            {"name": "DENSE_HOST", "value": str(cfg["HOST"])},
             {"name": "DENSE_PORT", "value": str(cfg["CONTAINER_PORT"])},
             {"name": "DEPLOY_ENV", "value": cfg["DEPLOY_ENV"]},
-            {"name": "DENSE_LOGLEVEL", "value": cfg["LOGLEVEL"]},
+            {"name": "DENSE_LOGLEVEL", "value": str(cfg["LOGLEVEL"])},
             {"name": "DENSE_MODEL_NAME", "value": str(cfg["DENSE_MODEL_NAME"])},
             {"name": "DENSE_DIM", "value": str(cfg["DENSE_DIM"])},
             {"name": "DENSE_BATCH_SIZE", "value": str(cfg["DENSE_BATCH_SIZE"])},
@@ -291,14 +321,14 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
             "failureThreshold": 6,
         },
         "readinessProbe": {
-            "httpGet": {"path": "/health", "port": cfg["CONTAINER_PORT"]},
+            "httpGet": {"path": "/readyz", "port": cfg["CONTAINER_PORT"]},
             "initialDelaySeconds": cfg["READINESS_INITIAL_DELAY"],
             "periodSeconds": cfg["PROBE_PERIOD_SECONDS"],
             "timeoutSeconds": cfg["PROBE_TIMEOUT_SECONDS"],
             "failureThreshold": 3,
         },
         "startupProbe": {
-            "httpGet": {"path": "/health", "port": cfg["CONTAINER_PORT"]},
+            "httpGet": {"path": "/readyz", "port": cfg["CONTAINER_PORT"]},
             "periodSeconds": cfg["PROBE_PERIOD_SECONDS"],
             "timeoutSeconds": cfg["PROBE_TIMEOUT_SECONDS"],
             "failureThreshold": cfg["STARTUP_FAILURE_THRESHOLD"],
@@ -379,7 +409,10 @@ def render_hpa(cfg: dict[str, Any]) -> str:
             "minReplicas": cfg["HPA_MIN"],
             "maxReplicas": cfg["HPA_MAX"],
             "metrics": [
-                {"type": "Resource", "resource": {"name": "cpu", "target": {"type": "Utilization", "averageUtilization": cfg["HPA_TARGET_CPU"]}}}
+                {
+                    "type": "Resource",
+                    "resource": {"name": "cpu", "target": {"type": "Utilization", "averageUtilization": cfg["HPA_TARGET_CPU"]}},
+                }
             ],
         },
     }
@@ -406,12 +439,16 @@ def generate_manifests(cfg: dict[str, Any], dry_run: bool = False, verbose: bool
         return None
 
     ns_yaml = render_namespace(cfg)
-    sa_role_yaml = render_sa_role(cfg)
+    sa_yaml = render_serviceaccount(cfg)
+    role_yaml = render_role(cfg)
+    rb_yaml = render_rolebinding(cfg)
     deploy_yaml = render_deployment(cfg, inputs_hash=inputs_hash)
     svc_yaml = render_service(cfg)
 
     atomic_write(cfg["FILES"]["namespace"], ns_yaml)
-    atomic_write(cfg["FILES"]["sa_role"], sa_role_yaml)
+    atomic_write(cfg["FILES"]["serviceaccount"], sa_yaml)
+    atomic_write(cfg["FILES"]["role"], role_yaml)
+    atomic_write(cfg["FILES"]["rolebinding"], rb_yaml)
     atomic_write(cfg["FILES"]["deployment"], deploy_yaml)
     atomic_write(cfg["FILES"]["service"], svc_yaml)
     if cfg["HPA_ENABLED"]:
@@ -442,7 +479,14 @@ def apply_to_cluster(cfg: dict[str, Any], dry_run: bool = False, verbose: bool =
         log.info("No manifest changes; skipping kubectl apply.")
         return
 
-    files = [cfg["FILES"]["namespace"], cfg["FILES"]["sa_role"], cfg["FILES"]["deployment"], cfg["FILES"]["service"]]
+    files = [
+        cfg["FILES"]["namespace"],
+        cfg["FILES"]["serviceaccount"],
+        cfg["FILES"]["role"],
+        cfg["FILES"]["rolebinding"],
+        cfg["FILES"]["deployment"],
+        cfg["FILES"]["service"],
+    ]
     if cfg["HPA_ENABLED"]:
         files.append(cfg["FILES"]["hpa"])
 
@@ -460,7 +504,10 @@ def apply_to_cluster(cfg: dict[str, Any], dry_run: bool = False, verbose: bool =
 
     deployment_name = f"{cfg['SERVICE_NAME']}-deployment"
     log.info("Applied manifests; waiting for rollout of %s/%s", cfg["NAMESPACE"], deployment_name)
-    rc, out, err = run_cmd([shutil.which("kubectl") or "kubectl", "rollout", "status", f"deployment/{deployment_name}", "-n", cfg["NAMESPACE"], f"--timeout={cfg.get('ROLLOUT_TIMEOUT', 300)}s"], timeout=cfg.get("ROLLOUT_TIMEOUT", 300) + 10)
+    rc, out, err = run_cmd(
+        [shutil.which("kubectl") or "kubectl", "rollout", "status", f"deployment/{deployment_name}", "-n", cfg["NAMESPACE"], f"--timeout={cfg.get('ROLLOUT_TIMEOUT', 300)}s"],
+        timeout=cfg.get("ROLLOUT_TIMEOUT", 300) + 10,
+    )
     if rc != 0:
         log.error("Rollout failed or timed out (rc=%d). Gathering diagnostics.", rc)
         cmds: list[tuple[list[str], str]] = [

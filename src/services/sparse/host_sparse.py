@@ -8,7 +8,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import PlainTextResponse
 from fastembed import SparseTextEmbedding
@@ -106,8 +105,8 @@ def to_sparse(obj: Any) -> dict[str, Any]:
 
     if hasattr(obj, "indices") and hasattr(obj, "values"):
         return {
-            "indices": _to_int_list(getattr(obj, "indices")),
-            "values": _to_float_list(getattr(obj, "values")),
+            "indices": _to_int_list(obj.indices),
+            "values": _to_float_list(obj.values),
         }
 
     if isinstance(obj, (list, tuple)) and len(obj) == 2:

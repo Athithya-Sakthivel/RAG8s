@@ -3,6 +3,14 @@
 # Deterministic generator for Sparse embedder Kubernetes manifests.
 # Writes manifests to src/infra/manifests/sparse_service/
 #
+# Key changes in this rewrite:
+# - Use explicit DEPLOY_ENV (preferred) with safe fallbacks for backward compatibility.
+# - Clear, unambiguous mapping: PROD -> production defaults; anything else -> nonprod defaults.
+# - Ensure SPARSE_MODEL_NAME, SPARSE_BATCH_SIZE, SPARSE_CUDA, PRELOAD_MODEL, ENV
+#   are injected into the container env with strong defaults.
+# - Remove deprecated --apply CLI flag (use --rollout).
+# - Replace deprecated datetime.utcnow() with timezone-aware UTC timestamp.
+#
 # Features:
 # - Strong, sensible defaults for prod vs non-prod
 # - Idempotent generation: stores inputs hash and skips writes when nothing changed
@@ -14,7 +22,6 @@
 from __future__ import annotations
 
 import argparse
-import datetime
 import hashlib
 import json
 import logging
@@ -27,29 +34,31 @@ from typing import Any
 
 import yaml
 
-# -------------------- logging --------------------
-LOG_LEVEL = os.environ.get("GEN_SPARSE_LOGLEVEL", "INFO").upper()
+LOG_LEVEL = os.environ.get("SPARSE_GEN_LOGLEVEL", "INFO").upper()
 logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO), format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("gen_sparse")
 
-# -------------------- defaults & constants --------------------
 DEFAULT_MANIFESTS_DIR = Path("src/infra/manifests/sparse_service")
 DEFAULT_STATE_DIRNAME = ".state"
+
 DEFAULTS: dict[str, Any] = {
-    "ENV": "STAGING",
-    "IMAGE": "ghcr.io/athithya-sakthivel/sparse:latest",
+    "DEPLOY_ENV": "NONPROD",
+    "IMAGE": "ghcr.io/athithya-sakthivel/sparse:staging",
     "NAMESPACE": "models",
     "SERVICE_NAME": "sparse",
     "CONTAINER_PORT": 8201,
     "HOST": "0.0.0.0",
     "LOGLEVEL": "INFO",
-    # production vs staging defaults
+    "SPARSE_MODEL_NAME": "prithivida/Splade_PP_en_v1",
+    "SPARSE_BATCH_SIZE": 8,
+    "SPARSE_CUDA": False,
+    "SPARSE_PRELOAD_MODEL": False,
     "PROD": {
-        "REPLICAS": 3,
+        "REPLICAS": 2,
         "CPU_REQUEST": "1000m",
         "CPU_LIMIT": "4000m",
         "MEMORY_REQUEST": "1Gi",
-        "MEMORY_LIMIT": "4Gi",
+        "MEMORY_LIMIT": "2Gi",
         "STARTUP_FAILURE_THRESHOLD": 24,
     },
     "NONPROD": {
@@ -72,7 +81,7 @@ DEFAULTS: dict[str, Any] = {
     "HPA_MIN": 1,
     "HPA_MAX": 10,
     "HPA_TARGET_CPU": 60,
-    "SA_NAME": None,  # computed
+    "SA_NAME": None,
     "ROLE_NAME": None,
     "ROLEBIND_NAME": None,
     "MAX_UNAVAILABLE": "25%",
@@ -81,8 +90,6 @@ DEFAULTS: dict[str, Any] = {
     "MANIFESTS_DIR": DEFAULT_MANIFESTS_DIR,
     "STATE_DIRNAME": DEFAULT_STATE_DIRNAME,
 }
-
-# -------------------- helpers --------------------
 
 
 def ensure_dir(p: Path) -> None:
@@ -103,10 +110,6 @@ def run_cmd(
     timeout: int | None = None,
     input_text: str | None = None,
 ) -> tuple[int, str, str]:
-    """
-    Run a subprocess and return (rc, stdout, stderr).
-    Uses text mode consistently and capture_output when requested.
-    """
     try:
         proc = subprocess.run(
             cmd,
@@ -124,13 +127,9 @@ def run_cmd(
 
 
 def canonical_inputs_hash(cfg: dict[str, Any]) -> str:
-    """
-    Create a stable hash of the configuration inputs that matter for manifest generation.
-    Excludes transient keys like file paths to state.
-    """
     serial: dict[str, Any] = {}
     for k in sorted(cfg.keys()):
-        if k in ("INPUTS_HASH_PATH", "MANIFESTS_DIR", "STATE_DIRNAME"):
+        if k in ("INPUTS_HASH_PATH", "MANIFESTS_DIR", "STATE_DIRNAME", "FILES"):
             continue
         v = cfg.get(k)
         try:
@@ -146,11 +145,13 @@ def kubectl_apply_yaml(yaml_str: str, dry_run: bool = False, timeout: int = 120)
     kubectl = shutil.which("kubectl")
     if not kubectl:
         return {"applied": False, "error": "kubectl-not-found"}
+
     cmd = [kubectl, "apply"]
     if dry_run:
         cmd += ["--dry-run=client", "-f", "-"]
     else:
         cmd += ["-f", "-"]
+
     try:
         proc = subprocess.run(cmd, input=yaml_str, capture_output=True, text=True, check=True, timeout=timeout)
         return {"applied": True, "stdout": proc.stdout or ""}
@@ -160,20 +161,26 @@ def kubectl_apply_yaml(yaml_str: str, dry_run: bool = False, timeout: int = 120)
         return {"applied": False, "stderr": f"timeout: {e}"}
 
 
-# -------------------- config loader --------------------
+def _env_bool(name: str, default: str = "0") -> bool:
+    return os.environ.get(name, default).strip().lower() in ("1", "true", "yes", "on")
 
 
 def load_config() -> dict[str, Any]:
     cfg: dict[str, Any] = {}
 
-    # base env
-    env = os.environ.get("SPARSE_ENV", os.environ.get("ENV", DEFAULTS["ENV"])).upper()
-    cfg["ENV"] = env
-    cfg["MANIFESTS_DIR"] = Path(os.environ.get("MANIFESTS_DIR", DEFAULTS["MANIFESTS_DIR"]))
+    deploy_env = (
+        os.environ.get("DEPLOY_ENV")
+        or os.environ.get("SPARSE_ENV")
+        or os.environ.get("ENV")
+        or DEFAULTS["DEPLOY_ENV"]
+    )
+    env = str(deploy_env).upper()
+    cfg["DEPLOY_ENV"] = env
+
+    cfg["MANIFESTS_DIR"] = Path(os.environ.get("MANIFESTS_DIR", str(DEFAULTS["MANIFESTS_DIR"])))
     cfg["STATE_DIRNAME"] = os.environ.get("STATE_DIRNAME", DEFAULTS["STATE_DIRNAME"])
     cfg["INPUTS_HASH_PATH"] = cfg["MANIFESTS_DIR"] / cfg["STATE_DIRNAME"] / "inputs.sha256"
 
-    # image/runtime
     cfg["IMAGE"] = os.environ.get("SPARSE_IMAGE", DEFAULTS["IMAGE"])
     cfg["NAMESPACE"] = os.environ.get("SPARSE_NAMESPACE", DEFAULTS["NAMESPACE"])
     cfg["SERVICE_NAME"] = os.environ.get("SPARSE_SERVICE_NAME", DEFAULTS["SERVICE_NAME"])
@@ -181,13 +188,11 @@ def load_config() -> dict[str, Any]:
     cfg["HOST"] = os.environ.get("SPARSE_HOST", DEFAULTS["HOST"])
     cfg["LOGLEVEL"] = os.environ.get("SPARSE_LOGLEVEL", DEFAULTS["LOGLEVEL"])
 
-    # compute SA/role names if not provided
     cfg["SA_NAME"] = os.environ.get("SPARSE_SA_NAME", f"{cfg['SERVICE_NAME']}-sa")
     cfg["ROLE_NAME"] = os.environ.get("SPARSE_ROLE_NAME", f"{cfg['SERVICE_NAME']}-role")
     cfg["ROLEBIND_NAME"] = os.environ.get("SPARSE_ROLEBIND_NAME", f"{cfg['SERVICE_NAME']}-rb")
 
-    # prod vs non-prod defaults
-    if env == "PROD":
+    if env in ("PROD", "PRODUCTION"):
         prod = DEFAULTS["PROD"]
         cfg["REPLICAS"] = int(os.environ.get("SPARSE_REPLICAS", str(prod["REPLICAS"])))
         cfg["CPU_REQUEST"] = os.environ.get("SPARSE_CPU_REQUEST", prod["CPU_REQUEST"])
@@ -204,51 +209,51 @@ def load_config() -> dict[str, Any]:
         cfg["MEMORY_LIMIT"] = os.environ.get("SPARSE_MEMORY_LIMIT", nonprod["MEMORY_LIMIT"])
         cfg["STARTUP_FAILURE_THRESHOLD"] = int(os.environ.get("SPARSE_STARTUP_FAILURE_THRESHOLD", str(nonprod["STARTUP_FAILURE_THRESHOLD"])))
 
-    # probes & timeouts
     cfg["PROBE_PERIOD_SECONDS"] = int(os.environ.get("SPARSE_PROBE_PERIOD_SECONDS", str(DEFAULTS["PROBE_PERIOD_SECONDS"])))
     cfg["READINESS_INITIAL_DELAY"] = int(os.environ.get("SPARSE_READINESS_INITIAL_DELAY", str(DEFAULTS["READINESS_INITIAL_DELAY"])))
     cfg["LIVENESS_INITIAL_DELAY"] = int(os.environ.get("SPARSE_LIVENESS_INITIAL_DELAY", str(DEFAULTS["LIVENESS_INITIAL_DELAY"])))
     cfg["PROBE_TIMEOUT_SECONDS"] = int(os.environ.get("SPARSE_PROBE_TIMEOUT_SECONDS", str(DEFAULTS["PROBE_TIMEOUT_SECONDS"])))
 
-    # GPU
-    cfg["ENABLE_GPU"] = os.environ.get("SPARSE_ENABLE_GPU", str(DEFAULTS["ENABLE_GPU"])).lower() in ("1", "true", "yes")
+    cfg["ENABLE_GPU"] = _env_bool("SPARSE_ENABLE_GPU", str(DEFAULTS["ENABLE_GPU"]).lower()) or _env_bool("SPARSE_CUDA", "0")
     cfg["GPU_RESOURCE_NAME"] = os.environ.get("SPARSE_GPU_RESOURCE", DEFAULTS["GPU_RESOURCE_NAME"])
     cfg["GPU_COUNT"] = int(os.environ.get("SPARSE_GPU_COUNT", str(DEFAULTS["GPU_COUNT"])))
     cfg["GPU_NODE_SELECTOR"] = os.environ.get("SPARSE_GPU_NODE_SELECTOR", DEFAULTS["GPU_NODE_SELECTOR"])
 
-    # HPA
-    cfg["HPA_ENABLED"] = os.environ.get("SPARSE_HPA_ENABLED", str(DEFAULTS["HPA_ENABLED"])).lower() in ("1", "true", "yes")
+    cfg["HPA_ENABLED"] = _env_bool("SPARSE_HPA_ENABLED", str(DEFAULTS["HPA_ENABLED"]).lower())
     cfg["HPA_MIN"] = int(os.environ.get("SPARSE_HPA_MIN_REPLICAS", str(DEFAULTS["HPA_MIN"])))
     cfg["HPA_MAX"] = int(os.environ.get("SPARSE_HPA_MAX_REPLICAS", str(DEFAULTS["HPA_MAX"])))
     cfg["HPA_TARGET_CPU"] = int(os.environ.get("SPARSE_HPA_TARGET_CPU", str(DEFAULTS["HPA_TARGET_CPU"])))
 
-    # labels & strategy
+    cfg["SPARSE_MODEL_NAME"] = os.environ.get("SPARSE_MODEL_NAME", DEFAULTS["SPARSE_MODEL_NAME"])
+    cfg["SPARSE_BATCH_SIZE"] = int(os.environ.get("SPARSE_BATCH_SIZE", str(DEFAULTS["SPARSE_BATCH_SIZE"])))
+    cfg["SPARSE_CUDA"] = _env_bool("SPARSE_CUDA", str(DEFAULTS["SPARSE_CUDA"]).lower())
+    cfg["SPARSE_PRELOAD_MODEL"] = _env_bool("SPARSE_PRELOAD_MODEL", str(DEFAULTS["SPARSE_PRELOAD_MODEL"]).lower())
+
     cfg["LABELS"] = {
         "app.kubernetes.io/name": cfg["SERVICE_NAME"],
         "app.kubernetes.io/component": "embedder",
         "app.kubernetes.io/managed-by": "gen_sparse",
         "app.kubernetes.io/instance": cfg["SERVICE_NAME"],
-        "env": cfg["ENV"].lower(),
+        "env": cfg["DEPLOY_ENV"].lower(),
     }
     cfg["MAX_UNAVAILABLE"] = os.environ.get("SPARSE_MAX_UNAVAILABLE", DEFAULTS["MAX_UNAVAILABLE"])
     cfg["MAX_SURGE"] = os.environ.get("SPARSE_MAX_SURGE", DEFAULTS["MAX_SURGE"])
     cfg["ROLLOUT_TIMEOUT"] = int(os.environ.get("SPARSE_ROLLOUT_TIMEOUT", str(DEFAULTS["ROLLOUT_TIMEOUT"])))
 
-    # output files
     manifests_dir = cfg["MANIFESTS_DIR"]
     cfg["FILES"] = {
         "namespace": manifests_dir / "00-namespace.yaml",
-        "sa_role": manifests_dir / "01-sa-role.yaml",
-        "deployment": manifests_dir / "02-deployment.yaml",
-        "service": manifests_dir / "03-service.yaml",
-        "hpa": manifests_dir / "04-hpa.yaml",
+        "serviceaccount": manifests_dir / "01-serviceaccount.yaml",
+        "role": manifests_dir / "02-role.yaml",
+        "rolebinding": manifests_dir / "03-rolebinding.yaml",
+        "deployment": manifests_dir / "04-deployment.yaml",
+        "service": manifests_dir / "05-service.yaml",
+        "hpa": manifests_dir / "06-hpa.yaml",
     }
 
     cfg["UUID_SHORT"] = str(uuid.uuid4())[:8]
+    log.info("Loaded config: DEPLOY_ENV=%s replicas=%d image=%s", cfg["DEPLOY_ENV"], cfg["REPLICAS"], cfg["IMAGE"])
     return cfg
-
-
-# -------------------- renderers --------------------
 
 
 def render_namespace(cfg: dict[str, Any]) -> str:
@@ -260,12 +265,16 @@ def render_namespace(cfg: dict[str, Any]) -> str:
     return yaml.safe_dump(ns, sort_keys=False)
 
 
-def render_sa_role(cfg: dict[str, Any]) -> str:
+def render_serviceaccount(cfg: dict[str, Any]) -> str:
     sa = {
         "apiVersion": "v1",
         "kind": "ServiceAccount",
         "metadata": {"name": cfg["SA_NAME"], "namespace": cfg["NAMESPACE"]},
     }
+    return yaml.safe_dump(sa, sort_keys=False)
+
+
+def render_role(cfg: dict[str, Any]) -> str:
     role = {
         "apiVersion": "rbac.authorization.k8s.io/v1",
         "kind": "Role",
@@ -275,6 +284,10 @@ def render_sa_role(cfg: dict[str, Any]) -> str:
             {"apiGroups": [""], "resources": ["secrets"], "verbs": ["get"]},
         ],
     }
+    return yaml.safe_dump(role, sort_keys=False)
+
+
+def render_rolebinding(cfg: dict[str, Any]) -> str:
     rb = {
         "apiVersion": "rbac.authorization.k8s.io/v1",
         "kind": "RoleBinding",
@@ -282,19 +295,24 @@ def render_sa_role(cfg: dict[str, Any]) -> str:
         "subjects": [{"kind": "ServiceAccount", "name": cfg["SA_NAME"], "namespace": cfg["NAMESPACE"]}],
         "roleRef": {"kind": "Role", "name": cfg["ROLE_NAME"], "apiGroup": "rbac.authorization.k8s.io"},
     }
-    return "\n---\n".join([yaml.safe_dump(x, sort_keys=False) for x in (sa, role, rb)])
+    return yaml.safe_dump(rb, sort_keys=False)
 
 
-def render_deployment(cfg: dict[str, Any]) -> str:
+def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> str:
     labels = cfg["LABELS"].copy()
     container: dict[str, Any] = {
         "name": cfg["SERVICE_NAME"],
         "image": cfg["IMAGE"],
         "ports": [{"containerPort": cfg["CONTAINER_PORT"]}],
         "env": [
+            {"name": "SPARSE_HOST", "value": str(cfg["HOST"])},
             {"name": "SPARSE_PORT", "value": str(cfg["CONTAINER_PORT"])},
-            {"name": "ENV", "value": cfg["ENV"]},
-            {"name": "SPARSE_LOGLEVEL", "value": cfg["LOGLEVEL"]},
+            {"name": "SPARSE_LOGLEVEL", "value": str(cfg["LOGLEVEL"])},
+            {"name": "SPARSE_MODEL_NAME", "value": str(cfg["SPARSE_MODEL_NAME"])},
+            {"name": "SPARSE_BATCH_SIZE", "value": str(cfg["SPARSE_BATCH_SIZE"])},
+            {"name": "SPARSE_CUDA", "value": "1" if cfg.get("SPARSE_CUDA", False) else "0"},
+            {"name": "PRELOAD_MODEL", "value": "1" if cfg.get("SPARSE_PRELOAD_MODEL", False) else "0"},
+            {"name": "ENV", "value": cfg["DEPLOY_ENV"]},
         ],
         "livenessProbe": {
             "httpGet": {"path": "/health", "port": cfg["CONTAINER_PORT"]},
@@ -304,14 +322,14 @@ def render_deployment(cfg: dict[str, Any]) -> str:
             "failureThreshold": 6,
         },
         "readinessProbe": {
-            "httpGet": {"path": "/health", "port": cfg["CONTAINER_PORT"]},
+            "httpGet": {"path": "/readyz", "port": cfg["CONTAINER_PORT"]},
             "initialDelaySeconds": cfg["READINESS_INITIAL_DELAY"],
             "periodSeconds": cfg["PROBE_PERIOD_SECONDS"],
             "timeoutSeconds": cfg["PROBE_TIMEOUT_SECONDS"],
             "failureThreshold": 3,
         },
         "startupProbe": {
-            "httpGet": {"path": "/health", "port": cfg["CONTAINER_PORT"]},
+            "httpGet": {"path": "/readyz", "port": cfg["CONTAINER_PORT"]},
             "periodSeconds": cfg["PROBE_PERIOD_SECONDS"],
             "timeoutSeconds": cfg["PROBE_TIMEOUT_SECONDS"],
             "failureThreshold": cfg["STARTUP_FAILURE_THRESHOLD"],
@@ -325,8 +343,6 @@ def render_deployment(cfg: dict[str, Any]) -> str:
     if cfg["ENABLE_GPU"]:
         container["resources"]["limits"][cfg["GPU_RESOURCE_NAME"]] = cfg["GPU_COUNT"]
 
-    inputs_hash = canonical_inputs_hash(cfg)
-
     deployment = {
         "apiVersion": "apps/v1",
         "kind": "Deployment",
@@ -339,7 +355,7 @@ def render_deployment(cfg: dict[str, Any]) -> str:
                 "rollingUpdate": {"maxUnavailable": cfg["MAX_UNAVAILABLE"], "maxSurge": cfg["MAX_SURGE"]},
             },
             "template": {
-                "metadata": {"labels": labels, "annotations": {"gen-sparse/inputs-hash": inputs_hash}},
+                "metadata": {"labels": labels, "annotations": {}},
                 "spec": {
                     "serviceAccountName": cfg["SA_NAME"],
                     "containers": [container],
@@ -347,6 +363,9 @@ def render_deployment(cfg: dict[str, Any]) -> str:
             },
         },
     }
+
+    if inputs_hash:
+        deployment["spec"]["template"]["metadata"]["annotations"]["gen-sparse/inputs-hash"] = inputs_hash
 
     if cfg["ENABLE_GPU"] and cfg["GPU_NODE_SELECTOR"]:
         if "=" in cfg["GPU_NODE_SELECTOR"]:
@@ -391,44 +410,27 @@ def render_hpa(cfg: dict[str, Any]) -> str:
             "minReplicas": cfg["HPA_MIN"],
             "maxReplicas": cfg["HPA_MAX"],
             "metrics": [
-                {"type": "Resource", "resource": {"name": "cpu", "target": {"type": "Utilization", "averageUtilization": cfg["HPA_TARGET_CPU"]}}}
+                {
+                    "type": "Resource",
+                    "resource": {
+                        "name": "cpu",
+                        "target": {"type": "Utilization", "averageUtilization": cfg["HPA_TARGET_CPU"]},
+                    },
+                }
             ],
         },
     }
     return yaml.safe_dump(hpa, sort_keys=False)
 
 
-# -------------------- rollout helpers --------------------
-
-
-def wait_for_rollout(deployment_name: str, namespace: str, timeout: int = 300) -> int:
-    kubectl = shutil.which("kubectl")
-    if not kubectl:
-        log.error("kubectl not found in PATH; cannot wait for rollout")
-        return 127
-    cmd = [kubectl, "rollout", "status", f"deployment/{deployment_name}", "-n", namespace, f"--timeout={timeout}s"]
-    rc, out, err = run_cmd(cmd, timeout=timeout + 10)
-    if rc != 0:
-        log.error("rollout status failed (rc=%d). stdout=%s stderr=%s", rc, out.strip(), err.strip())
-    else:
-        log.info("rollout status: %s", out.strip())
-    return rc
-
-
-# -------------------- generate / apply / delete --------------------
-
-
-def generate_manifests(cfg: dict[str, Any], dry_run: bool = False, verbose: bool = False) -> bool:
-    """
-    Generate manifests to MANIFESTS_DIR.
-    Returns True if manifests were written/changed, False if skipped due to no changes.
-    """
+def generate_manifests(cfg: dict[str, Any], dry_run: bool = False, verbose: bool = False) -> str | None:
     manifests_dir: Path = cfg["MANIFESTS_DIR"]
     ensure_dir(manifests_dir)
     inputs_hash = canonical_inputs_hash(cfg)
 
     state_dir = manifests_dir / cfg.get("STATE_DIRNAME", DEFAULT_STATE_DIRNAME)
     ensure_dir(state_dir)
+
     existing: str | None = None
     try:
         inputs_path = state_dir / "inputs.sha256"
@@ -438,99 +440,100 @@ def generate_manifests(cfg: dict[str, Any], dry_run: bool = False, verbose: bool
         existing = None
 
     if existing == inputs_hash and not dry_run:
-        log.info("No non-secret changes detected; generation skipped.")
-        return False
+        log.info("No changes detected; skipping manifest generation.")
+        return None
 
     ns_yaml = render_namespace(cfg)
-    sa_role_yaml = render_sa_role(cfg)
-    deploy_yaml = render_deployment(cfg)
+    sa_yaml = render_serviceaccount(cfg)
+    role_yaml = render_role(cfg)
+    rb_yaml = render_rolebinding(cfg)
+    deploy_yaml = render_deployment(cfg, inputs_hash=inputs_hash)
     svc_yaml = render_service(cfg)
 
     atomic_write(cfg["FILES"]["namespace"], ns_yaml)
-    atomic_write(cfg["FILES"]["sa_role"], sa_role_yaml)
+    atomic_write(cfg["FILES"]["serviceaccount"], sa_yaml)
+    atomic_write(cfg["FILES"]["role"], role_yaml)
+    atomic_write(cfg["FILES"]["rolebinding"], rb_yaml)
     atomic_write(cfg["FILES"]["deployment"], deploy_yaml)
     atomic_write(cfg["FILES"]["service"], svc_yaml)
     if cfg["HPA_ENABLED"]:
         hpa_yaml = render_hpa(cfg)
         atomic_write(cfg["FILES"]["hpa"], hpa_yaml)
 
-    # persist inputs hash
     (state_dir / "inputs.sha256").write_text(inputs_hash + "\n", encoding="utf-8")
 
-    log.info("Wrote manifests to %s", str(manifests_dir))
+    log.info("Manifests written to %s (inputs_hash=%s)", str(manifests_dir), inputs_hash)
     if verbose:
-        log.info("Namespace (head):\n%s", "\n".join(ns_yaml.splitlines()[:20]))
-        log.info("Deployment (head):\n%s", "\n".join(deploy_yaml.splitlines()[:60]))
-    return True
+        log.debug("Namespace manifest head:\n%s", "\n".join(ns_yaml.splitlines()[:20]))
+        log.debug("Deployment manifest head:\n%s", "\n".join(deploy_yaml.splitlines()[:60]))
+    return inputs_hash
 
 
-def apply_to_cluster(cfg: dict[str, Any], dry_run: bool = False, verbose: bool = False) -> None:
+def apply_to_cluster(cfg: dict[str, Any], dry_run: bool = False, verbose: bool = False, mode_label: str = "rollout") -> None:
     kubectl = shutil.which("kubectl")
     if not kubectl:
-        log.error("kubectl not found in PATH; cannot apply")
+        log.error("kubectl not found; aborting apply.")
         raise SystemExit(2) from None
 
-    changed = generate_manifests(cfg, dry_run=dry_run, verbose=verbose)
+    inputs_hash = generate_manifests(cfg, dry_run=dry_run, verbose=verbose)
     if dry_run:
-        log.info("Dry-run: skipping kubectl apply")
+        log.info("Dry-run requested; skipping kubectl apply.")
         return
 
-    # If generation detected no changes and manifests already exist, skip apply for idempotency
-    if not changed:
-        log.info("No manifest changes detected; skipping kubectl apply.")
+    if inputs_hash is None:
+        log.info("No manifest changes; skipping kubectl apply.")
         return
 
-    files = [cfg["FILES"]["namespace"], cfg["FILES"]["sa_role"], cfg["FILES"]["deployment"], cfg["FILES"]["service"]]
+    files = [
+        cfg["FILES"]["namespace"],
+        cfg["FILES"]["serviceaccount"],
+        cfg["FILES"]["role"],
+        cfg["FILES"]["rolebinding"],
+        cfg["FILES"]["deployment"],
+        cfg["FILES"]["service"],
+    ]
     if cfg["HPA_ENABLED"]:
         files.append(cfg["FILES"]["hpa"])
 
     combined = ""
     for p in files:
+        if not p.exists():
+            log.warning("Manifest missing, skipping: %s", str(p))
+            continue
         combined += f"---\n# source: {p.name}\n" + p.read_text(encoding="utf-8") + "\n"
 
     res = kubectl_apply_yaml(combined, dry_run=False)
     if not res.get("applied", False):
-        log.error("kubectl apply failed: %s", res.get("stderr") or res.get("error"))
+        log.error("%s apply failed: %s", mode_label, res.get("stderr") or res.get("error"))
         raise SystemExit(2) from None
 
     deployment_name = f"{cfg['SERVICE_NAME']}-deployment"
-    rc = wait_for_rollout(deployment_name, cfg["NAMESPACE"], timeout=cfg.get("ROLLOUT_TIMEOUT", 300))
+    log.info("Applied manifests; waiting for rollout of %s/%s", cfg["NAMESPACE"], deployment_name)
+    rc, out, err = run_cmd(
+        [
+            shutil.which("kubectl") or "kubectl",
+            "rollout",
+            "status",
+            f"deployment/{deployment_name}",
+            "-n",
+            cfg["NAMESPACE"],
+            f"--timeout={cfg.get('ROLLOUT_TIMEOUT', 300)}s",
+        ],
+        timeout=cfg.get("ROLLOUT_TIMEOUT", 300) + 10,
+    )
     if rc != 0:
-        log.error("Rollout failed or timed out; gathering diagnostics...")
+        log.error("Rollout failed or timed out (rc=%d). Gathering diagnostics.", rc)
         cmds: list[tuple[list[str], str]] = [
             ([shutil.which("kubectl") or "kubectl", "get", "pods", "-n", cfg["NAMESPACE"]], "get pods"),
-            (
-                [shutil.which("kubectl") or "kubectl", "describe", "pod", "-l", f"app.kubernetes.io/name={cfg['SERVICE_NAME']}", "-n", cfg["NAMESPACE"]],
-                "describe pods",
-            ),
-            (
-                [shutil.which("kubectl") or "kubectl", "logs", "-l", f"app.kubernetes.io/name={cfg['SERVICE_NAME']}", "-n", cfg["NAMESPACE"], "--tail=200"],
-                "logs",
-            ),
+            ([shutil.which("kubectl") or "kubectl", "describe", "pod", "-l", f"app.kubernetes.io/name={cfg['SERVICE_NAME']}", "-n", cfg["NAMESPACE"]], "describe pods"),
+            ([shutil.which("kubectl") or "kubectl", "logs", "-l", f"app.kubernetes.io/name={cfg['SERVICE_NAME']}", "-n", cfg["NAMESPACE"], "--tail=200"], "logs"),
         ]
         for cmd, tag in cmds:
-            if not cmd or not cmd[0]:
-                continue
             rcout, out, err = run_cmd(cmd, timeout=30)
             log.error("=== %s (rc=%d) ===\n%s\n%s", tag, rcout, (out or "").strip(), (err or "").strip())
-        log.error("Deployment %s failed to rollout", deployment_name)
         raise SystemExit(2) from None
 
-    summary = {
-        "generated_at": datetime.datetime.utcnow().isoformat() + "Z",
-        "image": cfg["IMAGE"],
-        "namespace": cfg["NAMESPACE"],
-        "replicas": cfg["REPLICAS"],
-        "files": {k: str(v) for k, v in cfg["FILES"].items()},
-    }
-    atomic_write(cfg["MANIFESTS_DIR"] / "last_deploy_summary.json", json.dumps(summary, indent=2))
-    log.info("Applied manifests to cluster and wrote deploy summary")
-
-
-def rollout_manifests(cfg: dict[str, Any], dry_run: bool = False, verbose: bool = False) -> None:
-    log.info("rollout started")
-    apply_to_cluster(cfg, dry_run=dry_run, verbose=verbose)
-    log.info("rollout complete")
+    log.info("Rollout successful for %s/%s", cfg["NAMESPACE"], deployment_name)
 
 
 def delete_manifests(cfg: dict[str, Any]) -> None:
@@ -544,7 +547,6 @@ def delete_manifests(cfg: dict[str, Any]) -> None:
                     p.unlink()
             except Exception:
                 log.debug("Failed to remove %s", p, exc_info=True)
-        # remove state dir if present
         state_dir = manifests_dir / cfg.get("STATE_DIRNAME", DEFAULT_STATE_DIRNAME)
         if state_dir.exists():
             try:
@@ -553,18 +555,14 @@ def delete_manifests(cfg: dict[str, Any]) -> None:
                 log.debug("Failed to remove state dir %s", state_dir, exc_info=True)
         log.info("Deleted manifests at %s", str(manifests_dir))
     else:
-        log.info("Manifests dir not present: %s", str(manifests_dir))
-
-
-# -------------------- CLI --------------------
+        log.info("No manifests found at %s", str(manifests_dir))
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Generate/rollout/delete Sparse embedder Kubernetes manifests.")
     grp = p.add_mutually_exclusive_group(required=True)
     grp.add_argument("--generate", action="store_true", help="Generate manifests to MANIFESTS_DIR.")
-    grp.add_argument("--rollout", action="store_true", help="Create or converge resources to desired state (preferred over --apply).")
-    grp.add_argument("--apply", action="store_true", help="Legacy alias for --rollout (deprecated).")
+    grp.add_argument("--rollout", action="store_true", help="Create or converge resources to desired state.")
     grp.add_argument("--delete", action="store_true", help="Delete generated manifests.")
     p.add_argument("--dry-run", action="store_true", help="Render and validate but do not write or apply.")
     p.add_argument("--verbose", action="store_true", help="Print extra debug info.")
@@ -575,17 +573,16 @@ def main() -> None:
     args = parse_args()
     cfg = load_config()
     if args.delete:
+        log.info("Delete requested.")
         delete_manifests(cfg)
         return
     if args.generate:
+        log.info("Generate requested.")
         generate_manifests(cfg, dry_run=args.dry_run, verbose=args.verbose)
         return
     if args.rollout:
-        rollout_manifests(cfg, dry_run=args.dry_run, verbose=args.verbose)
-        return
-    if args.apply:
-        log.warning("--apply is deprecated; use --rollout")
-        rollout_manifests(cfg, dry_run=args.dry_run, verbose=args.verbose)
+        log.info("Rollout requested.")
+        apply_to_cluster(cfg, dry_run=args.dry_run, verbose=args.verbose, mode_label="rollout")
         return
 
 

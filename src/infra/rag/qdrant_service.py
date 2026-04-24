@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# Deterministic Qdrant deployer: env → values.yaml → Helm → validated pods
+# Runtime modes: --rollout (install/upgrade) | --delete (teardown namespace + manifests)
+# On rollout: ensure namespace → optional secret → render values → helm upgrade --install --atomic --wait
+# Supports image pinning (tag+digest) via post-renderer to enforce exact runtime image
+# Validates readiness using kubectl wait + polling; STRICT=1 fails fast on unhealthy rollout
+# Cluster-aware (kind/eks/eks-auto) but no branching side-effects—purely informational
+# Idempotent + atomic: repeated runs converge; manifests written safely, no partial state
 from __future__ import annotations
 
 import argparse
