@@ -1,6 +1,8 @@
 rm -rf src/manifests
+aws s3 rm s3://s3-temp-bucket-mlsecops-681802563986/ --recursive
+
 python3 src/scripts/local/force_sync_s3_local_fs.py --upload
-aws s3 ls s3://s3-temp-bucket-mlsecops-681802563986/ --recursive
+
 
 make core
 
@@ -23,7 +25,7 @@ kubectl delete jobs indexing-backup-manual -n indexing || true
 python3 src/infra/rag/indexing_cronjob.py
 kubectl create job --from=cronjob/indexing-backup-cronjob indexing-backup-manual -n indexing
 kubectl get jobs -n indexing
-kubectl get pods -n indexing --watch
+
 
 
 kubectl delete ns qdrant

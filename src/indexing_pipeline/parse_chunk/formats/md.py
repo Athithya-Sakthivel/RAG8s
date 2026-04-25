@@ -25,11 +25,6 @@ except Exception:
     BotocoreConfig = None  # type: ignore[assignment]
 
 try:
-    from botocore.exceptions import ClientError  # type: ignore
-except Exception:
-    ClientError = Exception  # type: ignore[assignment]
-
-try:
     from markdown_it import MarkdownIt  # type: ignore
 except Exception:
     MarkdownIt = None  # type: ignore[assignment]
@@ -38,6 +33,7 @@ try:
     import tiktoken  # type: ignore
 except Exception:
     tiktoken = None  # type: ignore[assignment]
+
 
 DATA_S3_BUCKET = (os.getenv("DATA_S3_BUCKET") or os.getenv("S3_BUCKET") or "").strip()
 AWS_REGION = (os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or "").strip()
@@ -60,7 +56,6 @@ if OVERLAP_TOKENS >= MAX_TOKENS_PER_CHUNK:
 
 PUT_RETRIES = int(os.getenv("PUT_RETRIES", "3") or 3)
 PUT_BACKOFF = float(os.getenv("PUT_BACKOFF", "0.3") or 0.3)
-REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "15") or 15)
 FETCH_RETRIES = int(os.getenv("FETCH_RETRIES", "3") or 3)
 FETCH_BACKOFF = float(os.getenv("FETCH_BACKOFF", "0.5") or 0.5)
 
@@ -91,11 +86,7 @@ def _now() -> str:
 
 
 def log(level: str, event: str, msg: str = "", **extra: Any) -> None:
-    payload: dict[str, Any] = {
-        "ts": _now(),
-        "level": level.lower(),
-        "event": event,
-    }
+    payload: dict[str, Any] = {"ts": _now(), "level": level.lower(), "event": event}
     if msg:
         payload["msg"] = msg
     if extra:
@@ -243,11 +234,7 @@ def _get_s3_client():
             return _S3_CLIENT
         session = boto3.session.Session(region_name=AWS_REGION or None)
         if BotocoreConfig is not None:
-            cfg = BotocoreConfig(
-                connect_timeout=5,
-                read_timeout=30,
-                retries={"max_attempts": 3, "mode": "standard"},
-            )
+            cfg = BotocoreConfig(connect_timeout=5, read_timeout=30, retries={"max_attempts": 3, "mode": "standard"})
             _S3_CLIENT = session.client("s3", config=cfg, endpoint_url=AWS_ENDPOINT_URL)
         else:
             _S3_CLIENT = session.client("s3", endpoint_url=AWS_ENDPOINT_URL)
@@ -273,7 +260,7 @@ def _storage_get_bytes(key: str) -> bytes:
         body = obj.get("Body")
         return body.read() if body is not None else b""
 
-    return retry_call(_call, retries=FETCH_RETRIES, backoff_base=FETCH_BACKOFF, allowed_exceptions=(Exception,))
+    return retry_call(_call, retries=FETCH_RETRIES, backoff_base=FETCH_BACKOFF)
 
 
 def _storage_put_bytes(key: str, payload: bytes, content_type: str = "application/octet-stream") -> None:
@@ -282,7 +269,7 @@ def _storage_put_bytes(key: str, payload: bytes, content_type: str = "applicatio
     def _call():
         client.put_object(Bucket=DATA_S3_BUCKET, Key=key, Body=payload, ContentType=content_type)
 
-    retry_call(_call, retries=PUT_RETRIES, backoff_base=PUT_BACKOFF, allowed_exceptions=(Exception,))
+    retry_call(_call, retries=PUT_RETRIES, backoff_base=PUT_BACKOFF)
 
 
 def _storage_upload_file(local_path: str, key: str, content_type: str = "application/octet-stream") -> None:
@@ -295,7 +282,7 @@ def _storage_upload_file(local_path: str, key: str, content_type: str = "applica
         else:
             client.upload_file(local_path, DATA_S3_BUCKET, key, ExtraArgs=extra)
 
-    retry_call(_call, retries=PUT_RETRIES, backoff_base=PUT_BACKOFF, allowed_exceptions=(Exception,))
+    retry_call(_call, retries=PUT_RETRIES, backoff_base=PUT_BACKOFF)
 
 
 def _storage_exists(key: str) -> bool:
@@ -304,16 +291,6 @@ def _storage_exists(key: str) -> bool:
         return True
     except Exception:
         return False
-
-
-def _is_not_found(err: Exception) -> bool:
-    code = None
-    if hasattr(err, "response"):
-        try:
-            code = err.response.get("Error", {}).get("Code")
-        except Exception:
-            code = None
-    return code in ("404", "NoSuchKey", "NotFound", "NoSuchBucket")
 
 
 def _headline(line: str) -> tuple[int, str] | None:
@@ -423,80 +400,6 @@ def _split_long_line(line: str, max_tokens: int) -> list[str]:
     return out or [line]
 
 
-def _chunk_section(section: dict[str, Any]) -> list[dict[str, Any]]:
-    lines = list(section.get("lines", []))
-    start_line = _safe_int(section.get("start_line"), 0)
-    if not lines:
-        return []
-
-    chunks: list[dict[str, Any]] = []
-    buffer_lines: list[str] = []
-    buffer_tokens = 0
-    buffer_start = start_line
-
-    def flush(end_line_abs: int) -> None:
-        nonlocal buffer_lines, buffer_tokens, buffer_start
-        if not buffer_lines:
-            return
-        text = canonicalize_text("\n".join(buffer_lines))
-        if text:
-            chunks.append(
-                {
-                    "text": text,
-                    "token_count": buffer_tokens,
-                    "line_start": buffer_start + 1,
-                    "line_end": end_line_abs,
-                }
-            )
-        buffer_lines = []
-        buffer_tokens = 0
-
-    for rel_idx, line in enumerate(lines):
-        abs_line = start_line + rel_idx
-        line_tokens = _token_len(line)
-
-        if line_tokens > MAX_TOKENS_PER_CHUNK:
-            flush(abs_line)
-            for piece in _split_long_line(line, MAX_TOKENS_PER_CHUNK):
-                pt = canonicalize_text(piece)
-                if not pt:
-                    continue
-                pt_tokens = _token_len(pt)
-                chunks.append(
-                    {
-                        "text": pt,
-                        "token_count": pt_tokens,
-                        "line_start": abs_line + 1,
-                        "line_end": abs_line + 1,
-                    }
-                )
-            buffer_start = abs_line + 1
-            continue
-
-        if buffer_lines and buffer_tokens + line_tokens > MAX_TOKENS_PER_CHUNK:
-            flush(abs_line)
-            buffer_start = abs_line
-
-        if not buffer_lines:
-            buffer_start = abs_line
-
-        buffer_lines.append(line)
-        buffer_tokens += line_tokens
-
-    flush(start_line + len(lines))
-
-    if len(chunks) >= 2 and chunks[-1]["token_count"] < MIN_TOKENS_PER_CHUNK:
-        prev = chunks[-2]
-        cur = chunks[-1]
-        if prev["token_count"] + cur["token_count"] <= MAX_TOKENS_PER_CHUNK:
-            prev["text"] = canonicalize_text(prev["text"] + "\n" + cur["text"])
-            prev["token_count"] = _token_len(prev["text"])
-            prev["line_end"] = cur["line_end"]
-            chunks.pop()
-
-    return chunks
-
-
 def _semantic_region(line_start: int, line_end: int, total_lines: int) -> str:
     try:
         if total_lines <= 0:
@@ -521,11 +424,18 @@ def _ensure_pyarrow():
         import pyarrow as pa  # type: ignore
         import pyarrow.parquet as pq  # type: ignore
         return pa, pq
-    except Exception as e:
-        raise RuntimeError("pyarrow required to write parquet") from e
+    except Exception as err:
+        raise RuntimeError("pyarrow required to write parquet") from err
 
 
-def _derive_file_name(source_url: str | None, raw_key: str) -> str:
+def _sanitize_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return json.loads(json.dumps(manifest, ensure_ascii=False, default=str))
+    except Exception:
+        return {"error": "manifest_serialization_failed"}
+
+
+def _file_name_from_source(source_url: str | None, raw_key: str) -> str:
     if source_url:
         candidate = _safe_str(source_url, "")
         try:
@@ -538,11 +448,18 @@ def _derive_file_name(source_url: str | None, raw_key: str) -> str:
     return os.path.basename(raw_key)
 
 
-def _sanitize_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
-    try:
-        return json.loads(json.dumps(manifest, ensure_ascii=False, default=str))
-    except Exception:
-        return {"error": "manifest_serialization_failed"}
+def _build_raw_manifest(doc_id: str, raw_key: str, chunked_key: str, rows: int, sha256: str, size_bytes: int) -> dict[str, Any]:
+    return {
+        "raw_key": raw_key,
+        "doc_id": doc_id,
+        "chunked_key": chunked_key,
+        "rows": rows,
+        "sha256": sha256,
+        "size_bytes": size_bytes,
+        "schema_version": CHUNKED_SCHEMA_VERSION,
+        "parser_version": PARSER_VERSION,
+        "created_at": _now(),
+    }
 
 
 class ParquetWriter:
@@ -625,9 +542,9 @@ class ParquetWriter:
         )
 
         cols: dict[str, list[Any]] = {name: [] for name in [f.name for f in schema]}
-        for r in normalized:
+        for row in normalized:
             for name in cols:
-                cols[name].append(r.get(name))
+                cols[name].append(row.get(name))
 
         table = pa.Table.from_pydict(cols, schema=schema)
         md = dict(table.schema.metadata or {})
@@ -660,31 +577,6 @@ class ParquetWriter:
         return len(normalized), parquet_key, sha, size
 
 
-def _split_long_line_into_windows(line: str, max_tokens: int) -> list[str]:
-    if _token_len(line) <= max_tokens:
-        return [line]
-    if _tiktoken_enc is not None:
-        try:
-            toks = _tiktoken_enc.encode(line)
-            out = []
-            for i in range(0, len(toks), max_tokens):
-                piece = _tiktoken_enc.decode(toks[i : i + max_tokens]).strip()
-                if piece:
-                    out.append(piece)
-            return out or [line]
-        except Exception:
-            pass
-    words = line.split()
-    if not words:
-        return [line[: max(1, max_tokens * 4)].strip() or line]
-    out = []
-    for i in range(0, len(words), max_tokens):
-        piece = " ".join(words[i : i + max_tokens]).strip()
-        if piece:
-            out.append(piece)
-    return out or [line]
-
-
 def _build_rows_from_sections(
     doc_id: str,
     raw_key: str,
@@ -693,17 +585,18 @@ def _build_rows_from_sections(
     original_manifest: dict[str, Any],
     sections: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    total_lines = sum(len(sec.get("lines", []) or []) for sec in sections)
+    total_lines = sum(len(section.get("lines", []) or []) for section in sections)
     rows: list[dict[str, Any]] = []
     chunk_index = 1
     cursor_tokens = 0
 
-    for sec in sections:
-        heading_path = [h for h in _safe_list(sec.get("heading_path")) if _safe_str(h).strip()]
-        headings = heading_path[:] if heading_path else ([] if not _safe_str(sec.get("heading")).strip() else [_safe_str(sec.get("heading")).strip()])
-        section_lines = list(sec.get("lines", []))
-        sec_start_line = _safe_int(sec.get("start_line"), 0)
-        sec_end_line = _safe_int(sec.get("end_line"), sec_start_line)
+    for section in sections:
+        heading_path = [h for h in _safe_list(section.get("heading_path")) if _safe_str(h).strip()]
+        heading_fallback = _safe_str(section.get("heading")).strip()
+        headings = heading_path[:] if heading_path else ([heading_fallback] if heading_fallback else [])
+        section_lines = list(section.get("lines", []))
+        sec_start_line = _safe_int(section.get("start_line"), 0)
+        sec_end_line = _safe_int(section.get("end_line"), sec_start_line)
 
         if not section_lines:
             continue
@@ -722,11 +615,13 @@ def _build_rows_from_sections(
             _headings: tuple[str, ...] = tuple(headings),
         ) -> None:
             nonlocal chunk_index, cursor_tokens
+
             line_start_1b = line_start + 1
             line_end_1b = max(line_start_1b, line_end)
             token_start = cursor_tokens
             token_end = cursor_tokens + max(0, token_count)
             cursor_tokens = token_end
+
             rows.append(
                 {
                     "document_id": doc_id,
@@ -766,7 +661,7 @@ def _build_rows_from_sections(
                     emit_chunk("\n".join(buffer), buffer_start, abs_line, buffer_tokens)
                     buffer = []
                     buffer_tokens = 0
-                for piece in _split_long_line_into_windows(line, MAX_TOKENS_PER_CHUNK):
+                for piece in _split_long_line(line, MAX_TOKENS_PER_CHUNK):
                     pt = canonicalize_text(piece)
                     if not pt:
                         continue
@@ -795,38 +690,12 @@ def _build_rows_from_sections(
         if prev["token_count"] + last["token_count"] <= MAX_TOKENS_PER_CHUNK:
             prev["text"] = canonicalize_text(prev["text"] + "\n" + last["text"])
             prev["token_count"] = _token_len(prev["text"])
-            prev["line_end"] = last["line_end"]
+            prev["line_range"] = [prev["line_range"][0], last["line_range"][1]]
             prev["token_range"] = [prev["token_range"][0], prev["token_range"][0] + prev["token_count"]]
+            prev["semantic_region"] = _semantic_region(prev["line_range"][0], prev["line_range"][1], total_lines)
             rows.pop()
 
     return rows
-
-
-def _build_raw_manifest(doc_id: str, raw_key: str, chunked_key: str, rows: int, sha256: str, size_bytes: int) -> dict[str, Any]:
-    return {
-        "raw_key": raw_key,
-        "doc_id": doc_id,
-        "chunked_key": chunked_key,
-        "rows": rows,
-        "sha256": sha256,
-        "size_bytes": size_bytes,
-        "schema_version": CHUNKED_SCHEMA_VERSION,
-        "parser_version": PARSER_VERSION,
-        "created_at": _now(),
-    }
-
-
-def _file_name_from_source(source_url: str | None, raw_key: str) -> str:
-    if source_url:
-        candidate = _safe_str(source_url, "")
-        try:
-            candidate = candidate.split("?", 1)[0].rstrip("/")
-            base = os.path.basename(candidate)
-            if base:
-                return base
-        except Exception:
-            pass
-    return os.path.basename(raw_key)
 
 
 def parse_file(s3_key: str, manifest: dict[str, Any]) -> dict[str, Any]:
@@ -839,14 +708,15 @@ def parse_file(s3_key: str, manifest: dict[str, Any]) -> dict[str, Any]:
                 "skipped": True,
                 "error": "DATA_S3_BUCKET missing",
             }
+
         _ensure_optional_deps()
 
         try:
             head = _storage_head(s3_key)
-        except Exception as e:
+        except Exception as err:
             total_ms = int((time.perf_counter() - start_all) * 1000)
-            log("error", "head_failed", "Could not head object", key=s3_key, error=str(e))
-            return {"saved_chunks": 0, "total_parse_duration_ms": total_ms, "skipped": True, "error": str(e)}
+            log("error", "head_failed", "Could not head object", key=s3_key, error=str(err))
+            return {"saved_chunks": 0, "total_parse_duration_ms": total_ms, "skipped": True, "error": str(err)}
 
         last_modified = head.get("LastModified", "")
         etag = _safe_str(head.get("ETag"), "")
@@ -877,10 +747,10 @@ def parse_file(s3_key: str, manifest: dict[str, Any]) -> dict[str, Any]:
 
         try:
             raw_bytes = _storage_get_bytes(s3_key)
-        except Exception as e:
+        except Exception as err:
             total_ms = int((time.perf_counter() - start_all) * 1000)
-            log("error", "read_failed", "Could not read object", key=s3_key, error=str(e))
-            return {"saved_chunks": 0, "total_parse_duration_ms": total_ms, "skipped": True, "error": str(e)}
+            log("error", "read_failed", "Could not read object", key=s3_key, error=str(err))
+            return {"saved_chunks": 0, "total_parse_duration_ms": total_ms, "skipped": True, "error": str(err)}
 
         raw_text = try_decode_bytes(raw_bytes)
 
@@ -888,8 +758,8 @@ def parse_file(s3_key: str, manifest: dict[str, Any]) -> dict[str, Any]:
             try:
                 snapshot_key = STORAGE_CHUNKED_PREFIX + doc_id + ".snapshot.md"
                 _storage_put_bytes(snapshot_key, raw_text.encode("utf-8"), content_type="text/markdown")
-            except Exception as e:
-                log("warning", "snapshot_write_failed", "Failed to save snapshot", key=s3_key, error=str(e))
+            except Exception as err:
+                log("warning", "snapshot_write_failed", "Failed to save snapshot", key=s3_key, error=str(err))
 
         canonical_full = canonicalize_text(raw_text)
         sections = _split_markdown_sections(canonical_full)
@@ -927,10 +797,10 @@ def parse_file(s3_key: str, manifest: dict[str, Any]) -> dict[str, Any]:
 
         try:
             count, uploaded_key, sha, size = writer.finalize_and_upload(out_basename)
-        except Exception as e_up:
+        except Exception as err:
             total_ms = int((time.perf_counter() - start_all) * 1000)
-            log("error", "upload_failed", "Failed to upload parquet", key=s3_key, error=str(e_up))
-            return {"saved_chunks": 0, "total_parse_duration_ms": total_ms, "skipped": True, "error": str(e_up)}
+            log("error", "upload_failed", "Failed to upload parquet", key=s3_key, error=str(err))
+            return {"saved_chunks": 0, "total_parse_duration_ms": total_ms, "skipped": True, "error": str(err)}
 
         try:
             raw_manifest = _build_raw_manifest(doc_id, s3_key, uploaded_key, count, sha, size)
@@ -939,17 +809,17 @@ def parse_file(s3_key: str, manifest: dict[str, Any]) -> dict[str, Any]:
                 json.dumps(raw_manifest, ensure_ascii=False, sort_keys=True).encode("utf-8"),
                 content_type="application/json",
             )
-        except Exception as e:
-            log("warning", "manifest_write_failed", "Failed to write raw manifest", key=s3_key, error=str(e))
+        except Exception as err:
+            log("warning", "manifest_write_failed", "Failed to write raw manifest", key=s3_key, error=str(err))
 
         total_ms = int((time.perf_counter() - start_all) * 1000)
         log("info", "write_complete", "Wrote chunks", count=count, raw=s3_key, chunked=uploaded_key, duration_ms=total_ms)
         return {"saved_chunks": count, "total_parse_duration_ms": total_ms, "skipped": False}
 
-    except Exception as e:
+    except Exception as err:
         total_ms = int((time.perf_counter() - start_all) * 1000)
-        log("error", "parse_failed", "parse_file failed", key=s3_key, error=str(e), traceback=traceback.format_exc())
-        return {"saved_chunks": 0, "total_parse_duration_ms": total_ms, "skipped": True, "error": str(e)}
+        log("error", "parse_failed", "parse_file failed", key=s3_key, error=str(err), traceback=traceback.format_exc())
+        return {"saved_chunks": 0, "total_parse_duration_ms": total_ms, "skipped": True, "error": str(err)}
 
 
 def _ensure_cli_env_or_exit() -> bool:
@@ -986,8 +856,8 @@ def main() -> int:
     try:
         keys = _iter_md_keys()
         log("info", "scan", "Found markdown files", count=len(keys))
-    except Exception as e:
-        log("error", "scan_failed", "Failed to list markdown keys", error=str(e))
+    except Exception as err:
+        log("error", "scan_failed", "Failed to list markdown keys", error=str(err))
         return 1
 
     rc = 0
@@ -1003,9 +873,9 @@ def main() -> int:
         try:
             result = parse_file(key, manifest)
             log("info", "cli_result", "Parse result", key=key, result=result)
-        except Exception as e:
+        except Exception as err:
             rc = 1
-            log("error", "cli_parse_failed", "Failed to parse file", key=key, error=str(e), traceback=traceback.format_exc())
+            log("error", "cli_parse_failed", "Failed to parse file", key=key, error=str(err), traceback=traceback.format_exc())
 
     return rc
 
