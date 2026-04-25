@@ -58,6 +58,46 @@ DEFAULTS: dict[str, str] = {
     "USE_IRSA": "",
     "IRSA_ROLE_ARN": "",
     "K8S_CLUSTER": "",
+
+    "MAX_TOKENS_PER_CHUNK": "320",
+    "MIN_TOKENS_PER_CHUNK": "100",
+    "NUMBER_OF_OVERLAPPING_SENTENCES": "2",
+    "PDF_DISABLE_OCR": "false",
+    "PDF_OCR_ENGINE": "rapidocr",
+    "PDF_TESSERACT_LANG": "eng",
+    "IMAGE_TESSERACT_LANG": "eng",
+    "TESSERACT_CONFIG": "--oem 1 --psm 6",
+    "PDF_FORCE_OCR": "false",
+    "PDF_OCR_RENDER_DPI": "400",
+    "PDF_MIN_IMG_SIZE_BYTES": "3072",
+    "IMAGE_OCR_ENGINE": "tesseract",
+    "IMAGE_MIN_IMG_SIZE_BYTES": "3072",
+    "IMAGE_RENDER_DPI": "400",
+    "IMAGE_UPSCALE_FACTOR": "2.0",
+    "CSV_TARGET_TOKENS_PER_CHUNK": "400",
+    "JSONL_TARGET_TOKENS_PER_CHUNK": "400",
+    "PPTX_SLIDES_PER_CHUNK": "4",
+    "PPTX_OCR_ENGINE": "rapidocr",
+
+    "COLLECTION_NAME": "default_rag_collection1",
+    "DENSE_DIM": "384",
+    "BATCH_SIZE": "8",
+    "UPSERT_CHUNK": "500",
+    "SPARSE_BATCH_FALLBACK": "8",
+
+    "QDRANT_SHARD_NUMBER": "3",
+    "QDRANT_REPLICATION_FACTOR": "2",
+    "QDRANT_WRITE_CONSISTENCY_FACTOR": "1",
+    "QDRANT_HNSW_EF_CONSTRUCT": "128",
+    "QDRANT_HNSW_M": "32",
+    "QDRANT_HNSW_FULL_SCAN_THRESHOLD": "10000",
+    "QDRANT_ONDISK": "false",
+
+    "INDEX_TIMEOUT": "1800",
+    "BACKUP_TIMEOUT": "300",
+    "ENABLE_QDRANT_BACKUP": "true",
+    "MIN_INDEXED_POINTS_FOR_BACKUP": "1",
+    "MIN_INDEX_DELTA_RATIO_FOR_BACKUP": "0.0",
 }
 
 RUNTIME_KEYS = set(DEFAULTS.keys())
@@ -218,11 +258,11 @@ def build_cronjob_manifest(cfg: dict[str, str], mode: str) -> dict[str, Any]:
     image = _image_ref(cfg["INDEXING_PIPELINE_CPU_IMAGE_REPO"], cfg["INDEXING_PIPELINE_CPU_IMAGE_TAG"])
     aws_region = cfg["AWS_REGION"] or cfg["AWS_DEFAULT_REGION"]
     env: list[dict[str, Any]] = [
-        env_item("PYTHONUNBUFFERED", "1"),
+        env_item("PYTHONUNBUFFERED", cfg.get("PYTHONUNBUFFERED", "1")),
         env_item("LOG_LEVEL", cfg["LOG_LEVEL"]),
         env_item("HTTP_TIMEOUT", cfg["HTTP_TIMEOUT"]),
         env_item("INDEXING_STRICT", cfg["INDEXING_STRICT"]),
-        env_item("RUN_PRE_CONVERSIONS", "0"),
+        env_item("RUN_PRE_CONVERSIONS", cfg["RUN_PRE_CONVERSIONS"]),
         env_item("QDRANT_URL", cfg["QDRANT_URL"]),
         env_item("DENSE_URL", cfg["DENSE_URL"]),
         env_item("SPARSE_URL", cfg["SPARSE_URL"]),
@@ -234,14 +274,61 @@ def build_cronjob_manifest(cfg: dict[str, str], mode: str) -> dict[str, Any]:
         env_item("AWS_DEFAULT_REGION", aws_region),
         env_item("AWS_SDK_LOAD_CONFIG", "1"),
         env_item("AWS_EC2_METADATA_DISABLED", "true"),
+
+        # Chunking / OCR / rendering / tokenization
+        env_item("MAX_TOKENS_PER_CHUNK", cfg.get("MAX_TOKENS_PER_CHUNK", "320")),
+        env_item("MIN_TOKENS_PER_CHUNK", cfg.get("MIN_TOKENS_PER_CHUNK", "100")),
+        env_item("NUMBER_OF_OVERLAPPING_SENTENCES", cfg.get("NUMBER_OF_OVERLAPPING_SENTENCES", "2")),
+        env_item("PDF_DISABLE_OCR", cfg.get("PDF_DISABLE_OCR", "false")),
+        env_item("PDF_OCR_ENGINE", cfg.get("PDF_OCR_ENGINE", "rapidocr")),
+        env_item("PDF_TESSERACT_LANG", cfg.get("PDF_TESSERACT_LANG", "eng")),
+        env_item("IMAGE_TESSERACT_LANG", cfg.get("IMAGE_TESSERACT_LANG", "eng")),
+        env_item("TESSERACT_CONFIG", cfg.get("TESSERACT_CONFIG", "--oem 1 --psm 6")),
+        env_item("PDF_FORCE_OCR", cfg.get("PDF_FORCE_OCR", "false")),
+        env_item("PDF_OCR_RENDER_DPI", cfg.get("PDF_OCR_RENDER_DPI", "400")),
+        env_item("PDF_MIN_IMG_SIZE_BYTES", cfg.get("PDF_MIN_IMG_SIZE_BYTES", "3072")),
+        env_item("IMAGE_OCR_ENGINE", cfg.get("IMAGE_OCR_ENGINE", "tesseract")),
+        env_item("IMAGE_MIN_IMG_SIZE_BYTES", cfg.get("IMAGE_MIN_IMG_SIZE_BYTES", "3072")),
+        env_item("IMAGE_RENDER_DPI", cfg.get("IMAGE_RENDER_DPI", "400")),
+        env_item("IMAGE_UPSCALE_FACTOR", cfg.get("IMAGE_UPSCALE_FACTOR", "2.0")),
+        env_item("CSV_TARGET_TOKENS_PER_CHUNK", cfg.get("CSV_TARGET_TOKENS_PER_CHUNK", "400")),
+        env_item("JSONL_TARGET_TOKENS_PER_CHUNK", cfg.get("JSONL_TARGET_TOKENS_PER_CHUNK", "400")),
+        env_item("PPTX_SLIDES_PER_CHUNK", cfg.get("PPTX_SLIDES_PER_CHUNK", "4")),
+        env_item("PPTX_OCR_ENGINE", cfg.get("PPTX_OCR_ENGINE", "rapidocr")),
+
+        # Collection / embedding / batching
+        env_item("COLLECTION_NAME", cfg.get("COLLECTION_NAME", "default_rag_collection1")),
+        env_item("DENSE_DIM", cfg.get("DENSE_DIM", "384")),
+        env_item("BATCH_SIZE", cfg.get("BATCH_SIZE", "8")),
+        env_item("UPSERT_CHUNK", cfg.get("UPSERT_CHUNK", "500")),
+        env_item("SPARSE_BATCH_FALLBACK", cfg.get("SPARSE_BATCH_FALLBACK", "8")),
+
+        # Qdrant tuning
+        env_item("QDRANT_SHARD_NUMBER", cfg.get("QDRANT_SHARD_NUMBER", "3")),
+        env_item("QDRANT_REPLICATION_FACTOR", cfg.get("QDRANT_REPLICATION_FACTOR", "2")),
+        env_item("QDRANT_WRITE_CONSISTENCY_FACTOR", cfg.get("QDRANT_WRITE_CONSISTENCY_FACTOR", "1")),
+        env_item("QDRANT_HNSW_EF_CONSTRUCT", cfg.get("QDRANT_HNSW_EF_CONSTRUCT", "128")),
+        env_item("QDRANT_HNSW_M", cfg.get("QDRANT_HNSW_M", "32")),
+        env_item("QDRANT_HNSW_FULL_SCAN_THRESHOLD", cfg.get("QDRANT_HNSW_FULL_SCAN_THRESHOLD", "10000")),
+        env_item("QDRANT_ONDISK", cfg.get("QDRANT_ONDISK", "false")),
+
+        # Timeouts and backup controls
+        env_item("INDEX_TIMEOUT", cfg.get("INDEX_TIMEOUT", "1800")),
+        env_item("BACKUP_TIMEOUT", cfg.get("BACKUP_TIMEOUT", "300")),
+        env_item("ENABLE_QDRANT_BACKUP", cfg.get("ENABLE_QDRANT_BACKUP", "true")),
+        env_item("MIN_INDEXED_POINTS_FOR_BACKUP", cfg.get("MIN_INDEXED_POINTS_FOR_BACKUP", "100")),
+        env_item("MIN_INDEX_DELTA_RATIO_FOR_BACKUP", cfg.get("MIN_INDEX_DELTA_RATIO_FOR_BACKUP", "0.0")),
     ]
+    # Qdrant API key: prefer secret if provided
     if cfg.get("QDRANT_API_KEY"):
         env.append(secret_env_item("QDRANT_API_KEY", cfg["QDRANT_SECRET_NAME"], "QDRANT_API_KEY"))
+    # AWS static creds for kind mode: mount from secret
     if mode == "kind":
         env.append(secret_env_item("AWS_ACCESS_KEY_ID", cfg["AWS_CREDENTIALS_SECRET_NAME"], "AWS_ACCESS_KEY_ID"))
         env.append(secret_env_item("AWS_SECRET_ACCESS_KEY", cfg["AWS_CREDENTIALS_SECRET_NAME"], "AWS_SECRET_ACCESS_KEY"))
         if os.environ.get("AWS_SESSION_TOKEN"):
             env.append(secret_env_item("AWS_SESSION_TOKEN", cfg["AWS_CREDENTIALS_SECRET_NAME"], "AWS_SESSION_TOKEN"))
+
     cronjob: dict[str, Any] = {
         "apiVersion": "batch/v1",
         "kind": "CronJob",
@@ -339,6 +426,47 @@ def collect_cfg() -> dict[str, str]:
     cfg["USE_IRSA"] = pick_env("USE_IRSA", "AWS_USE_IRSA", default=DEFAULTS["USE_IRSA"])
     cfg["IRSA_ROLE_ARN"] = pick_env("IRSA_ROLE_ARN", default=DEFAULTS["IRSA_ROLE_ARN"])
     cfg["K8S_CLUSTER"] = pick_env("K8S_CLUSTER", default=DEFAULTS["K8S_CLUSTER"])
+
+    cfg["MAX_TOKENS_PER_CHUNK"] = pick_env("MAX_TOKENS_PER_CHUNK", default=DEFAULTS["MAX_TOKENS_PER_CHUNK"])
+    cfg["MIN_TOKENS_PER_CHUNK"] = pick_env("MIN_TOKENS_PER_CHUNK", default=DEFAULTS["MIN_TOKENS_PER_CHUNK"])
+    cfg["NUMBER_OF_OVERLAPPING_SENTENCES"] = pick_env("NUMBER_OF_OVERLAPPING_SENTENCES", default=DEFAULTS["NUMBER_OF_OVERLAPPING_SENTENCES"])
+    cfg["PDF_DISABLE_OCR"] = pick_env("PDF_DISABLE_OCR", default=DEFAULTS["PDF_DISABLE_OCR"])
+    cfg["PDF_OCR_ENGINE"] = pick_env("PDF_OCR_ENGINE", default=DEFAULTS["PDF_OCR_ENGINE"])
+    cfg["PDF_TESSERACT_LANG"] = pick_env("PDF_TESSERACT_LANG", default=DEFAULTS["PDF_TESSERACT_LANG"])
+    cfg["IMAGE_TESSERACT_LANG"] = pick_env("IMAGE_TESSERACT_LANG", default=DEFAULTS["IMAGE_TESSERACT_LANG"])
+    cfg["TESSERACT_CONFIG"] = pick_env("TESSERACT_CONFIG", default=DEFAULTS["TESSERACT_CONFIG"])
+    cfg["PDF_FORCE_OCR"] = pick_env("PDF_FORCE_OCR", default=DEFAULTS["PDF_FORCE_OCR"])
+    cfg["PDF_OCR_RENDER_DPI"] = pick_env("PDF_OCR_RENDER_DPI", default=DEFAULTS["PDF_OCR_RENDER_DPI"])
+    cfg["PDF_MIN_IMG_SIZE_BYTES"] = pick_env("PDF_MIN_IMG_SIZE_BYTES", default=DEFAULTS["PDF_MIN_IMG_SIZE_BYTES"])
+    cfg["IMAGE_OCR_ENGINE"] = pick_env("IMAGE_OCR_ENGINE", default=DEFAULTS["IMAGE_OCR_ENGINE"])
+    cfg["IMAGE_MIN_IMG_SIZE_BYTES"] = pick_env("IMAGE_MIN_IMG_SIZE_BYTES", default=DEFAULTS["IMAGE_MIN_IMG_SIZE_BYTES"])
+    cfg["IMAGE_RENDER_DPI"] = pick_env("IMAGE_RENDER_DPI", default=DEFAULTS["IMAGE_RENDER_DPI"])
+    cfg["IMAGE_UPSCALE_FACTOR"] = pick_env("IMAGE_UPSCALE_FACTOR", default=DEFAULTS["IMAGE_UPSCALE_FACTOR"])
+    cfg["CSV_TARGET_TOKENS_PER_CHUNK"] = pick_env("CSV_TARGET_TOKENS_PER_CHUNK", default=DEFAULTS["CSV_TARGET_TOKENS_PER_CHUNK"])
+    cfg["JSONL_TARGET_TOKENS_PER_CHUNK"] = pick_env("JSONL_TARGET_TOKENS_PER_CHUNK", default=DEFAULTS["JSONL_TARGET_TOKENS_PER_CHUNK"])
+    cfg["PPTX_SLIDES_PER_CHUNK"] = pick_env("PPTX_SLIDES_PER_CHUNK", default=DEFAULTS["PPTX_SLIDES_PER_CHUNK"])
+    cfg["PPTX_OCR_ENGINE"] = pick_env("PPTX_OCR_ENGINE", default=DEFAULTS["PPTX_OCR_ENGINE"])
+
+    cfg["COLLECTION_NAME"] = pick_env("COLLECTION_NAME", default=DEFAULTS["COLLECTION_NAME"])
+    cfg["DENSE_DIM"] = pick_env("DENSE_DIM", default=DEFAULTS["DENSE_DIM"])
+    cfg["BATCH_SIZE"] = pick_env("BATCH_SIZE", default=DEFAULTS["BATCH_SIZE"])
+    cfg["UPSERT_CHUNK"] = pick_env("UPSERT_CHUNK", default=DEFAULTS["UPSERT_CHUNK"])
+    cfg["SPARSE_BATCH_FALLBACK"] = pick_env("SPARSE_BATCH_FALLBACK", default=DEFAULTS["SPARSE_BATCH_FALLBACK"])
+
+    cfg["QDRANT_SHARD_NUMBER"] = pick_env("QDRANT_SHARD_NUMBER", default=DEFAULTS["QDRANT_SHARD_NUMBER"])
+    cfg["QDRANT_REPLICATION_FACTOR"] = pick_env("QDRANT_REPLICATION_FACTOR", default=DEFAULTS["QDRANT_REPLICATION_FACTOR"])
+    cfg["QDRANT_WRITE_CONSISTENCY_FACTOR"] = pick_env("QDRANT_WRITE_CONSISTENCY_FACTOR", default=DEFAULTS["QDRANT_WRITE_CONSISTENCY_FACTOR"])
+    cfg["QDRANT_HNSW_EF_CONSTRUCT"] = pick_env("QDRANT_HNSW_EF_CONSTRUCT", default=DEFAULTS["QDRANT_HNSW_EF_CONSTRUCT"])
+    cfg["QDRANT_HNSW_M"] = pick_env("QDRANT_HNSW_M", default=DEFAULTS["QDRANT_HNSW_M"])
+    cfg["QDRANT_HNSW_FULL_SCAN_THRESHOLD"] = pick_env("QDRANT_HNSW_FULL_SCAN_THRESHOLD", default=DEFAULTS["QDRANT_HNSW_FULL_SCAN_THRESHOLD"])
+    cfg["QDRANT_ONDISK"] = pick_env("QDRANT_ONDISK", default=DEFAULTS["QDRANT_ONDISK"])
+
+    cfg["INDEX_TIMEOUT"] = pick_env("INDEX_TIMEOUT", default=DEFAULTS["INDEX_TIMEOUT"])
+    cfg["BACKUP_TIMEOUT"] = pick_env("BACKUP_TIMEOUT", default=DEFAULTS["BACKUP_TIMEOUT"])
+    cfg["ENABLE_QDRANT_BACKUP"] = pick_env("ENABLE_QDRANT_BACKUP", default=DEFAULTS["ENABLE_QDRANT_BACKUP"])
+    cfg["MIN_INDEXED_POINTS_FOR_BACKUP"] = pick_env("MIN_INDEXED_POINTS_FOR_BACKUP", default=DEFAULTS["MIN_INDEXED_POINTS_FOR_BACKUP"])
+    cfg["MIN_INDEX_DELTA_RATIO_FOR_BACKUP"] = pick_env("MIN_INDEX_DELTA_RATIO_FOR_BACKUP", default=DEFAULTS["MIN_INDEX_DELTA_RATIO_FOR_BACKUP"])
+
     return cfg
 
 def write_manifests(manifests_dir: Path, docs: list[tuple[str, dict[str, Any]]]) -> list[Path]:

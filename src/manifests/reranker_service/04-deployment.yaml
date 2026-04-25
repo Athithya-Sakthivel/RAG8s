@@ -1,19 +1,19 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: dense-deployment
+  name: reranker-deployment
   namespace: models
   labels: &id001
-    app.kubernetes.io/name: dense
-    app.kubernetes.io/component: embedder
-    app.kubernetes.io/managed-by: gen_dense
-    app.kubernetes.io/instance: dense
+    app.kubernetes.io/name: reranker
+    app.kubernetes.io/component: reranker
+    app.kubernetes.io/managed-by: gen_reranker
+    app.kubernetes.io/instance: reranker
     env: nonprod
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: dense
+      app.kubernetes.io/name: reranker
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -23,42 +23,38 @@ spec:
     metadata:
       labels: *id001
       annotations:
-        gen-dense/inputs-hash: 9a805fa5642381e7fc90af15be7da2a8fbefd4f5d075df858356775e8c7b10c8
+        gen-reranker/inputs-hash: 4d8965a2f22213860ab269f0517938faaeb68b0b22c9701eb21c292e05936ab5
         prometheus.io/scrape: 'true'
-        prometheus.io/port: '8200'
+        prometheus.io/port: '8202'
         prometheus.io/path: /metrics
     spec:
-      serviceAccountName: dense-sa
+      serviceAccountName: reranker-sa
       containers:
-      - name: dense
-        image: ghcr.io/athithya-sakthivel/dense:2026-04-24-16-22--7f601ca@sha256:9067914f490817a817346bfdf2afaeb3ec936f41d851763a8d25ee63cc8249ad
+      - name: reranker
+        image: ghcr.io/athithya-sakthivel/reranker:2026-04-24-16-22--7f601ca@sha256:62d8a0254ac5adb19718477c1bc2c25deeeba41cd25a5a6e53d672ccb4b70d4d
         ports:
-        - containerPort: 8200
+        - containerPort: 8202
         env:
-        - name: DENSE_HOST
+        - name: RERANKER_HOST
           value: 0.0.0.0
-        - name: DENSE_PORT
-          value: '8200'
-        - name: DEPLOY_ENV
-          value: NONPROD
-        - name: DENSE_LOGLEVEL
+        - name: RERANKER_PORT
+          value: '8202'
+        - name: RERANKER_LOGLEVEL
           value: INFO
-        - name: DENSE_MODEL_NAME
-          value: BAAI/bge-small-en-v1.5
-        - name: DENSE_DIM
-          value: '384'
-        - name: DENSE_BATCH_SIZE
-          value: '64'
-        - name: DENSE_NORMALIZE
-          value: '1'
-        - name: DENSE_CUDA
+        - name: RERANKER_MODEL_NAME
+          value: Xenova/ms-marco-MiniLM-L-6-v2
+        - name: RERANKER_MAX_DOCS
+          value: '50'
+        - name: RERANKER_CUDA
           value: '0'
         - name: PRELOAD_MODEL
           value: '0'
+        - name: ENV
+          value: NONPROD
         livenessProbe:
           httpGet:
             path: /health
-            port: 8200
+            port: 8202
           initialDelaySeconds: 30
           periodSeconds: 5
           timeoutSeconds: 3
@@ -66,7 +62,7 @@ spec:
         readinessProbe:
           httpGet:
             path: /readyz
-            port: 8200
+            port: 8202
           initialDelaySeconds: 10
           periodSeconds: 5
           timeoutSeconds: 3
@@ -74,7 +70,7 @@ spec:
         startupProbe:
           httpGet:
             path: /readyz
-            port: 8200
+            port: 8202
           periodSeconds: 5
           timeoutSeconds: 3
           failureThreshold: 60

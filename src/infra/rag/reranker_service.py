@@ -19,6 +19,7 @@
 # - Clear validation and early failures
 # - Type hints and robust subprocess handling
 
+#!/usr/bin/env python3
 from __future__ import annotations
 
 import argparse
@@ -40,7 +41,6 @@ log = logging.getLogger("gen_reranker")
 
 DEFAULT_MANIFESTS_DIR = Path("src/manifests/reranker_service")
 DEFAULT_STATE_DIRNAME = ".state"
-
 DEFAULTS: dict[str, Any] = {
     "DEPLOY_ENV": "NONPROD",
     "IMAGE": "ghcr.io/athithya-sakthivel/reranker:2026-04-24-16-22--7f601ca@sha256:62d8a0254ac5adb19718477c1bc2c25deeeba41cd25a5a6e53d672ccb4b70d4d",
@@ -89,7 +89,6 @@ DEFAULTS: dict[str, Any] = {
     "ROLLOUT_TIMEOUT": 300,
     "MANIFESTS_DIR": DEFAULT_MANIFESTS_DIR,
     "STATE_DIRNAME": DEFAULT_STATE_DIRNAME,
-    # Security defaults (sync with non-root Dockerfile that creates appuser uid/gid 1000)
     "RUN_AS_NONROOT": True,
     "RUN_AS_USER": 1000,
     "ALLOW_PRIV_ESC": False,
@@ -151,13 +150,11 @@ def kubectl_apply_yaml(yaml_str: str, dry_run: bool = False, timeout: int = 120)
     kubectl = shutil.which("kubectl")
     if not kubectl:
         return {"applied": False, "error": "kubectl-not-found"}
-
     cmd = [kubectl, "apply"]
     if dry_run:
         cmd += ["--dry-run=client", "-f", "-"]
     else:
         cmd += ["-f", "-"]
-
     try:
         proc = subprocess.run(cmd, input=yaml_str, capture_output=True, text=True, check=True, timeout=timeout)
         return {"applied": True, "stdout": proc.stdout or ""}
@@ -173,7 +170,6 @@ def _env_bool(name: str, default: str = "0") -> bool:
 
 def load_config() -> dict[str, Any]:
     cfg: dict[str, Any] = {}
-
     deploy_env = (
         os.environ.get("DEPLOY_ENV")
         or os.environ.get("RERANKER_ENV")
@@ -182,22 +178,18 @@ def load_config() -> dict[str, Any]:
     )
     env = str(deploy_env).upper()
     cfg["DEPLOY_ENV"] = env
-
     cfg["MANIFESTS_DIR"] = Path(os.environ.get("MANIFESTS_DIR", str(DEFAULTS["MANIFESTS_DIR"])))
     cfg["STATE_DIRNAME"] = os.environ.get("STATE_DIRNAME", DEFAULTS["STATE_DIRNAME"])
     cfg["INPUTS_HASH_PATH"] = cfg["MANIFESTS_DIR"] / cfg["STATE_DIRNAME"] / "inputs.sha256"
-
     cfg["IMAGE"] = os.environ.get("RERANKER_IMAGE", DEFAULTS["IMAGE"])
     cfg["NAMESPACE"] = os.environ.get("RERANKER_NAMESPACE", DEFAULTS["NAMESPACE"])
     cfg["SERVICE_NAME"] = os.environ.get("RERANKER_SERVICE_NAME", DEFAULTS["SERVICE_NAME"])
     cfg["CONTAINER_PORT"] = int(os.environ.get("RERANKER_PORT", str(DEFAULTS["CONTAINER_PORT"])))
     cfg["HOST"] = os.environ.get("RERANKER_HOST", DEFAULTS["HOST"])
     cfg["LOGLEVEL"] = os.environ.get("RERANKER_LOGLEVEL", DEFAULTS["LOGLEVEL"])
-
     cfg["SA_NAME"] = os.environ.get("RERANKER_SA_NAME", f"{cfg['SERVICE_NAME']}-sa")
     cfg["ROLE_NAME"] = os.environ.get("RERANKER_ROLE_NAME", f"{cfg['SERVICE_NAME']}-role")
     cfg["ROLEBIND_NAME"] = os.environ.get("RERANKER_ROLEBIND_NAME", f"{cfg['SERVICE_NAME']}-rb")
-
     if env in ("PROD", "PRODUCTION"):
         prod = DEFAULTS["PROD"]
         cfg["REPLICAS"] = int(os.environ.get("RERANKER_REPLICAS", str(prod["REPLICAS"])))
@@ -214,28 +206,22 @@ def load_config() -> dict[str, Any]:
         cfg["MEMORY_REQUEST"] = os.environ.get("RERANKER_MEMORY_REQUEST", nonprod["MEMORY_REQUEST"])
         cfg["MEMORY_LIMIT"] = os.environ.get("RERANKER_MEMORY_LIMIT", nonprod["MEMORY_LIMIT"])
         cfg["STARTUP_FAILURE_THRESHOLD"] = int(os.environ.get("RERANKER_STARTUP_FAILURE_THRESHOLD", str(nonprod["STARTUP_FAILURE_THRESHOLD"])))
-
     cfg["PROBE_PERIOD_SECONDS"] = int(os.environ.get("RERANKER_PROBE_PERIOD_SECONDS", str(DEFAULTS["PROBE_PERIOD_SECONDS"])))
     cfg["READINESS_INITIAL_DELAY"] = int(os.environ.get("RERANKER_READINESS_INITIAL_DELAY", str(DEFAULTS["READINESS_INITIAL_DELAY"])))
     cfg["LIVENESS_INITIAL_DELAY"] = int(os.environ.get("RERANKER_LIVENESS_INITIAL_DELAY", str(DEFAULTS["LIVENESS_INITIAL_DELAY"])))
     cfg["PROBE_TIMEOUT_SECONDS"] = int(os.environ.get("RERANKER_PROBE_TIMEOUT_SECONDS", str(DEFAULTS["PROBE_TIMEOUT_SECONDS"])))
-
     cfg["ENABLE_GPU"] = _env_bool("RERANKER_ENABLE_GPU", str(DEFAULTS["ENABLE_GPU"]).lower())
     cfg["GPU_RESOURCE_NAME"] = os.environ.get("RERANKER_GPU_RESOURCE", DEFAULTS["GPU_RESOURCE_NAME"])
     cfg["GPU_COUNT"] = int(os.environ.get("RERANKER_GPU_COUNT", str(DEFAULTS["GPU_COUNT"])))
     cfg["GPU_NODE_SELECTOR"] = os.environ.get("RERANKER_GPU_NODE_SELECTOR", DEFAULTS["GPU_NODE_SELECTOR"])
-
     cfg["HPA_ENABLED"] = _env_bool("RERANKER_HPA_ENABLED", str(DEFAULTS["HPA_ENABLED"]).lower())
     cfg["HPA_MIN"] = int(os.environ.get("RERANKER_HPA_MIN_REPLICAS", str(DEFAULTS["HPA_MIN"])))
     cfg["HPA_MAX"] = int(os.environ.get("RERANKER_HPA_MAX_REPLICAS", str(DEFAULTS["HPA_MAX"])))
     cfg["HPA_TARGET_CPU"] = int(os.environ.get("RERANKER_HPA_TARGET_CPU", str(DEFAULTS["HPA_TARGET_CPU"])))
-
     cfg["RERANKER_MODEL_NAME"] = os.environ.get("RERANKER_MODEL_NAME", DEFAULTS["RERANKER_MODEL_NAME"])
     cfg["RERANKER_MAX_DOCS"] = int(os.environ.get("RERANKER_MAX_DOCS", str(DEFAULTS["RERANKER_MAX_DOCS"])))
     cfg["RERANKER_CUDA"] = _env_bool("RERANKER_CUDA", str(DEFAULTS["RERANKER_CUDA"]).lower())
     cfg["PRELOAD_MODEL"] = _env_bool("PRELOAD_MODEL", str(DEFAULTS["PRELOAD_MODEL"]).lower())
-
-    # Security-related config (sync with Dockerfile non-root user)
     cfg["RUN_AS_NONROOT"] = os.environ.get("RERANKER_RUN_AS_NONROOT", str(DEFAULTS["RUN_AS_NONROOT"])).lower() in ("1", "true", "yes")
     try:
         cfg["RUN_AS_USER"] = int(os.environ.get("RERANKER_RUN_AS_USER", str(DEFAULTS["RUN_AS_USER"])))
@@ -248,7 +234,6 @@ def load_config() -> dict[str, Any]:
         cfg["FS_GROUP"] = int(fs_group_env) if fs_group_env != "" else DEFAULTS["FS_GROUP"]
     except Exception:
         cfg["FS_GROUP"] = DEFAULTS["FS_GROUP"]
-
     cfg["LABELS"] = {
         "app.kubernetes.io/name": cfg["SERVICE_NAME"],
         "app.kubernetes.io/component": "reranker",
@@ -259,7 +244,6 @@ def load_config() -> dict[str, Any]:
     cfg["MAX_UNAVAILABLE"] = os.environ.get("RERANKER_MAX_UNAVAILABLE", DEFAULTS["MAX_UNAVAILABLE"])
     cfg["MAX_SURGE"] = os.environ.get("RERANKER_MAX_SURGE", DEFAULTS["MAX_SURGE"])
     cfg["ROLLOUT_TIMEOUT"] = int(os.environ.get("RERANKER_ROLLOUT_TIMEOUT", str(DEFAULTS["ROLLOUT_TIMEOUT"])))
-
     manifests_dir = cfg["MANIFESTS_DIR"]
     cfg["FILES"] = {
         "namespace": manifests_dir / "00-namespace.yaml",
@@ -270,7 +254,6 @@ def load_config() -> dict[str, Any]:
         "service": manifests_dir / "05-service.yaml",
         "hpa": manifests_dir / "06-hpa.yaml",
     }
-
     cfg["UUID_SHORT"] = str(uuid.uuid4())[:8]
     log.info("Loaded config: DEPLOY_ENV=%s replicas=%d image=%s", cfg["DEPLOY_ENV"], cfg["REPLICAS"], cfg["IMAGE"])
     return cfg
@@ -286,11 +269,7 @@ def render_namespace(cfg: dict[str, Any]) -> str:
 
 
 def render_serviceaccount(cfg: dict[str, Any]) -> str:
-    sa = {
-        "apiVersion": "v1",
-        "kind": "ServiceAccount",
-        "metadata": {"name": cfg["SA_NAME"], "namespace": cfg["NAMESPACE"]},
-    }
+    sa = {"apiVersion": "v1", "kind": "ServiceAccount", "metadata": {"name": cfg["SA_NAME"], "namespace": cfg["NAMESPACE"]}}
     return yaml.safe_dump(sa, sort_keys=False)
 
 
@@ -363,15 +342,12 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
     if cfg["ENABLE_GPU"]:
         container["resources"]["limits"][cfg["GPU_RESOURCE_NAME"]] = cfg["GPU_COUNT"]
 
-    # Inject container-level securityContext based on config
     container_security: dict[str, Any] = {}
     if cfg.get("RUN_AS_NONROOT", False):
         container_security["runAsNonRoot"] = True
     if cfg.get("RUN_AS_USER") is not None:
         container_security["runAsUser"] = int(cfg["RUN_AS_USER"])
-    # disallow privilege escalation unless explicitly allowed
     container_security["allowPrivilegeEscalation"] = bool(cfg.get("ALLOW_PRIV_ESC", False))
-    # readOnlyRootFilesystem default true unless explicitly disabled
     container_security["readOnlyRootFilesystem"] = bool(cfg.get("READONLY_ROOTFS", True))
 
     if container_security:
@@ -398,7 +374,6 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
         },
     }
 
-    # Pod-level security: set fsGroup if provided (helps with shared volumes)
     pod_sec: dict[str, Any] = {}
     if cfg.get("FS_GROUP") is not None:
         try:
@@ -429,8 +404,6 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
         }
     )
 
-    # --- ensure writable tmp when readOnlyRootFilesystem is enabled ---
-    # create emptyDir volume and mount it at /tmp, /var/tmp, /usr/tmp so Python tempfile works
     if cfg.get("READONLY_ROOTFS", True):
         tmp_mounts = [
             {"name": "tmp-writable", "mountPath": "/tmp"},
@@ -441,11 +414,15 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
         for m in tmp_mounts:
             if not any(vm.get("mountPath") == m["mountPath"] for vm in existing_mounts):
                 existing_mounts.append(m)
+        if not any(vm.get("mountPath") == "/models_cache" for vm in existing_mounts):
+            existing_mounts.append({"name": "models-cache", "mountPath": "/models_cache"})
         container["volumeMounts"] = existing_mounts
 
         vols = deployment["spec"]["template"]["spec"].get("volumes", [])
         if not any(v.get("name") == "tmp-writable" for v in vols):
             vols.append({"name": "tmp-writable", "emptyDir": {}})
+        if not any(v.get("name") == "models-cache" for v in vols):
+            vols.append({"name": "models-cache", "emptyDir": {}})
         deployment["spec"]["template"]["spec"]["volumes"] = vols
 
         pod_sc = deployment["spec"]["template"]["spec"].get("securityContext", {})
@@ -485,10 +462,7 @@ def render_hpa(cfg: dict[str, Any]) -> str:
             "metrics": [
                 {
                     "type": "Resource",
-                    "resource": {
-                        "name": "cpu",
-                        "target": {"type": "Utilization", "averageUtilization": cfg["HPA_TARGET_CPU"]},
-                    },
+                    "resource": {"name": "cpu", "target": {"type": "Utilization", "averageUtilization": cfg["HPA_TARGET_CPU"]}},
                 }
             ],
         },
@@ -500,10 +474,8 @@ def generate_manifests(cfg: dict[str, Any], dry_run: bool = False, verbose: bool
     manifests_dir: Path = cfg["MANIFESTS_DIR"]
     ensure_dir(manifests_dir)
     inputs_hash = canonical_inputs_hash(cfg)
-
     state_dir = manifests_dir / cfg.get("STATE_DIRNAME", DEFAULT_STATE_DIRNAME)
     ensure_dir(state_dir)
-
     existing: str | None = None
     try:
         inputs_path = state_dir / "inputs.sha256"
@@ -511,18 +483,15 @@ def generate_manifests(cfg: dict[str, Any], dry_run: bool = False, verbose: bool
             existing = inputs_path.read_text(encoding="utf-8").strip()
     except Exception:
         existing = None
-
     if existing == inputs_hash and not dry_run:
         log.info("No changes detected; skipping manifest generation.")
         return None
-
     ns_yaml = render_namespace(cfg)
     sa_yaml = render_serviceaccount(cfg)
     role_yaml = render_role(cfg)
     rb_yaml = render_rolebinding(cfg)
     deploy_yaml = render_deployment(cfg, inputs_hash=inputs_hash)
     svc_yaml = render_service(cfg)
-
     atomic_write(cfg["FILES"]["namespace"], ns_yaml)
     atomic_write(cfg["FILES"]["serviceaccount"], sa_yaml)
     atomic_write(cfg["FILES"]["role"], role_yaml)
@@ -532,9 +501,7 @@ def generate_manifests(cfg: dict[str, Any], dry_run: bool = False, verbose: bool
     if cfg["HPA_ENABLED"]:
         hpa_yaml = render_hpa(cfg)
         atomic_write(cfg["FILES"]["hpa"], hpa_yaml)
-
     (state_dir / "inputs.sha256").write_text(inputs_hash + "\n", encoding="utf-8")
-
     log.info("Manifests written to %s (inputs_hash=%s)", str(manifests_dir), inputs_hash)
     if verbose:
         log.debug("Namespace manifest head:\n%s", "\n".join(ns_yaml.splitlines()[:20]))
@@ -547,16 +514,13 @@ def apply_to_cluster(cfg: dict[str, Any], dry_run: bool = False, verbose: bool =
     if not kubectl:
         log.error("kubectl not found; aborting apply.")
         raise SystemExit(2) from None
-
     inputs_hash = generate_manifests(cfg, dry_run=dry_run, verbose=verbose)
     if dry_run:
         log.info("Dry-run requested; skipping kubectl apply.")
         return
-
     if inputs_hash is None:
         log.info("No manifest changes; skipping kubectl apply.")
         return
-
     files = [
         cfg["FILES"]["namespace"],
         cfg["FILES"]["serviceaccount"],
@@ -567,31 +531,20 @@ def apply_to_cluster(cfg: dict[str, Any], dry_run: bool = False, verbose: bool =
     ]
     if cfg["HPA_ENABLED"]:
         files.append(cfg["FILES"]["hpa"])
-
     combined = ""
     for p in files:
         if not p.exists():
             log.warning("Manifest missing, skipping: %s", str(p))
             continue
         combined += f"---\n# source: {p.name}\n" + p.read_text(encoding="utf-8") + "\n"
-
     res = kubectl_apply_yaml(combined, dry_run=False)
     if not res.get("applied", False):
         log.error("%s apply failed: %s", mode_label, res.get("stderr") or res.get("error"))
         raise SystemExit(2) from None
-
     deployment_name = f"{cfg['SERVICE_NAME']}-deployment"
     log.info("Applied manifests; waiting for rollout of %s/%s", cfg["NAMESPACE"], deployment_name)
     rc, out, err = run_cmd(
-        [
-            shutil.which("kubectl") or "kubectl",
-            "rollout",
-            "status",
-            f"deployment/{deployment_name}",
-            "-n",
-            cfg["NAMESPACE"],
-            f"--timeout={cfg.get('ROLLOUT_TIMEOUT', 300)}s",
-        ],
+        [shutil.which("kubectl") or "kubectl", "rollout", "status", f"deployment/{deployment_name}", "-n", cfg["NAMESPACE"], f"--timeout={cfg.get('ROLLOUT_TIMEOUT', 300)}s"],
         timeout=cfg.get("ROLLOUT_TIMEOUT", 300) + 10,
     )
     if rc != 0:
@@ -605,7 +558,6 @@ def apply_to_cluster(cfg: dict[str, Any], dry_run: bool = False, verbose: bool =
             rcout, out, err = run_cmd(cmd, timeout=30)
             log.error("=== %s (rc=%d) ===\n%s\n%s", tag, rcout, (out or "").strip(), (err or "").strip())
         raise SystemExit(2) from None
-
     log.info("Rollout successful for %s/%s", cfg["NAMESPACE"], deployment_name)
 
 
@@ -645,17 +597,14 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     cfg = load_config()
-
     if args.delete:
         log.info("Delete requested.")
         delete_manifests(cfg)
         return
-
     if args.generate:
         log.info("Generate requested.")
         generate_manifests(cfg, dry_run=args.dry_run, verbose=args.verbose)
         return
-
     if args.rollout:
         log.info("Rollout requested.")
         apply_to_cluster(cfg, dry_run=args.dry_run, verbose=args.verbose, mode_label="rollout")

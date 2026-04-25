@@ -1,4 +1,24 @@
 #!/usr/bin/env python3
+# src/infra/rag/dense_service.py
+# Deterministic generator for Dense embedder Kubernetes manifests.
+# Writes manifests to src/manifests/dense_service/
+#
+# Key changes in this rewrite:
+# - Use explicit DEPLOY_ENV (preferred) with safe fallbacks for backward compatibility.
+# - Clear, unambiguous mapping: PROD -> production defaults; anything else -> nonprod defaults.
+# - Ensure DENSE_MODEL_NAME, DENSE_DIM, DENSE_BATCH_SIZE, DENSE_NORMALIZE, DENSE_CUDA, PRELOAD_MODEL
+#   are injected into the container env with strong defaults.
+# - Remove deprecated --apply CLI flag (use --rollout).
+# - Replace deprecated datetime.utcnow() with timezone-aware UTC timestamp.
+#
+# Features:
+# - Strong, sensible defaults for prod vs non-prod
+# - Idempotent generation: stores inputs hash and skips writes when nothing changed
+# - Atomic file writes
+# - Safe kubectl apply wrapper and rollout wait
+# - Clear validation and early failures
+# - Type hints and robust subprocess handling
+
 from __future__ import annotations
 
 import argparse

@@ -1,0 +1,154 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: indexing-backup-cronjob
+  namespace: indexing
+spec:
+  schedule: 0 */6 * * *
+  concurrencyPolicy: Allow
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: indexing-backup-cronjob
+            app.kubernetes.io/component: indexing
+        spec:
+          serviceAccountName: indexer-cron-sa
+          restartPolicy: Never
+          containers:
+          - name: indexer
+            image: ghcr.io/athithya-sakthivel/indexing-pipeline:2026-04-24-20-23--cf66a89@sha256:66bcd291bb7de264f53747f42a018280ec337291f9cd0938a289582d8da0ce25
+            imagePullPolicy: IfNotPresent
+            command:
+            - /opt/venv/bin/python
+            - /indexing_pipeline/indexing_pipeline.py
+            args:
+            - --workdir
+            - /indexing_pipeline
+            env:
+            - name: PYTHONUNBUFFERED
+              value: '1'
+            - name: LOG_LEVEL
+              value: INFO
+            - name: HTTP_TIMEOUT
+              value: '60'
+            - name: INDEXING_STRICT
+              value: '1'
+            - name: RUN_PRE_CONVERSIONS
+              value: '0'
+            - name: QDRANT_URL
+              value: http://qdrant.qdrant.svc.cluster.local:6333
+            - name: DENSE_URL
+              value: http://dense-svc.models.svc.cluster.local:8200
+            - name: SPARSE_URL
+              value: http://sparse-svc.models.svc.cluster.local:8201
+            - name: DATA_S3_BUCKET
+              value: s3-temp-bucket-mlsecops-681802563986
+            - name: DATA_S3_PREFIX
+              value: data/chunked/
+            - name: STORAGE_RAW_PREFIX
+              value: data/raw/
+            - name: STORAGE_CHUNKED_PREFIX
+              value: data/chunked/
+            - name: AWS_REGION
+              value: ap-south-1
+            - name: AWS_DEFAULT_REGION
+              value: ap-south-1
+            - name: AWS_SDK_LOAD_CONFIG
+              value: '1'
+            - name: AWS_EC2_METADATA_DISABLED
+              value: 'true'
+            - name: MAX_TOKENS_PER_CHUNK
+              value: '320'
+            - name: MIN_TOKENS_PER_CHUNK
+              value: '100'
+            - name: NUMBER_OF_OVERLAPPING_SENTENCES
+              value: '2'
+            - name: PDF_DISABLE_OCR
+              value: 'false'
+            - name: PDF_OCR_ENGINE
+              value: rapidocr
+            - name: PDF_TESSERACT_LANG
+              value: eng
+            - name: IMAGE_TESSERACT_LANG
+              value: eng
+            - name: TESSERACT_CONFIG
+              value: --oem 1 --psm 6
+            - name: PDF_FORCE_OCR
+              value: 'false'
+            - name: PDF_OCR_RENDER_DPI
+              value: '400'
+            - name: PDF_MIN_IMG_SIZE_BYTES
+              value: '3072'
+            - name: IMAGE_OCR_ENGINE
+              value: tesseract
+            - name: IMAGE_MIN_IMG_SIZE_BYTES
+              value: '3072'
+            - name: IMAGE_RENDER_DPI
+              value: '400'
+            - name: IMAGE_UPSCALE_FACTOR
+              value: '2.0'
+            - name: CSV_TARGET_TOKENS_PER_CHUNK
+              value: '400'
+            - name: JSONL_TARGET_TOKENS_PER_CHUNK
+              value: '400'
+            - name: PPTX_SLIDES_PER_CHUNK
+              value: '4'
+            - name: PPTX_OCR_ENGINE
+              value: rapidocr
+            - name: COLLECTION_NAME
+              value: default_rag_collection1
+            - name: DENSE_DIM
+              value: '384'
+            - name: BATCH_SIZE
+              value: '8'
+            - name: UPSERT_CHUNK
+              value: '500'
+            - name: SPARSE_BATCH_FALLBACK
+              value: '8'
+            - name: QDRANT_SHARD_NUMBER
+              value: '3'
+            - name: QDRANT_REPLICATION_FACTOR
+              value: '2'
+            - name: QDRANT_WRITE_CONSISTENCY_FACTOR
+              value: '1'
+            - name: QDRANT_HNSW_EF_CONSTRUCT
+              value: '128'
+            - name: QDRANT_HNSW_M
+              value: '32'
+            - name: QDRANT_HNSW_FULL_SCAN_THRESHOLD
+              value: '10000'
+            - name: QDRANT_ONDISK
+              value: 'false'
+            - name: INDEX_TIMEOUT
+              value: '1800'
+            - name: BACKUP_TIMEOUT
+              value: '300'
+            - name: ENABLE_QDRANT_BACKUP
+              value: 'true'
+            - name: MIN_INDEXED_POINTS_FOR_BACKUP
+              value: '1'
+            - name: MIN_INDEX_DELTA_RATIO_FOR_BACKUP
+              value: '0.0'
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: indexer-aws-creds
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: indexer-aws-creds
+                  key: AWS_SECRET_ACCESS_KEY
+            resources:
+              requests:
+                cpu: '2'
+                memory: 1Gi
+              limits:
+                cpu: '6'
+                memory: 2Gi
+            workingDir: /indexing_pipeline

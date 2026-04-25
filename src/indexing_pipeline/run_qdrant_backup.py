@@ -91,7 +91,7 @@ def _env_bool(name: str, default: bool) -> bool:
 # Configuration
 # ----------------------------
 DEFAULT_QDRANT_URL = _env_str("QDRANT_URL", "http://127.0.0.1:6333").rstrip("/")
-DEFAULT_S3_PREFIX = _env_str("DATA_S3_PREFIX", _env_str("BACKUP_PREFIX", "qdrant/backups")).strip("/")
+DEFAULT_S3_PREFIX = "qdrant/backups"
 DEFAULT_LOCAL_DIR = _env_str("BACKUP_LOCAL_DIR", "tmp")
 DEFAULT_TIMEOUT = _env_int("BACKUP_TIMEOUT", 300)
 DEFAULT_ENV_TAG = _env_str("BACKUP_ENV", _env_str("ENV", "STAGING")).upper()

@@ -19,8 +19,10 @@ export RERANKER_MODEL_NAME=Xenova/ms-marco-MiniLM-L-6-v2
 export RERANKER_MAX_DOCS=50 # upper bound
 python3 src/infra/rag/reranker_service.py --rollout
 
+export FORCE_QDRANT_BACKUP=true
+export MIN_INDEXED_POINTS_FOR_BACKUP=1
 
-kubectl delete jobs indexing-backup-manual -n indexing
+kubectl delete jobs indexing-backup-manual -n indexing || true
 python3 src/infra/rag/indexing_cronjob.py
 
 kubectl create job --from=cronjob/indexing-backup-cronjob indexing-backup-manual -n indexing
