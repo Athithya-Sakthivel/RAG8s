@@ -32,7 +32,7 @@ DEFAULTS: dict[str, str] = {
     "SERVICE_ACCOUNT_NAME": "indexer-cron-sa",
     "MANIFESTS_DIR": "src/manifests/indexing_cronjob",
     "INDEXING_PIPELINE_CPU_IMAGE_REPO": "ghcr.io/athithya-sakthivel/indexing-pipeline",
-    "INDEXING_PIPELINE_CPU_IMAGE_TAG": "2026-04-24-20-23--cf66a89@sha256:66bcd291bb7de264f53747f42a018280ec337291f9cd0938a289582d8da0ce25",
+    "INDEXING_PIPELINE_CPU_IMAGE_TAG": "2026-04-25-08-33--57613a5@sha256:e7a9914bf0f4000749b74d9985f2075834ef9fad9df0b554cf9d25d9abb8fc47",
     "INDEXING_BACKUP_CRONJOB_CPU_REQUEST": "2",
     "INDEXING_BACKUP_CRONJOB_CPU_LIMIT": "6",
     "INDEXING_BACKUP_CRONJOB_MEMORY_REQUEST": "1Gi",
@@ -96,8 +96,12 @@ DEFAULTS: dict[str, str] = {
     "INDEX_TIMEOUT": "1800",
     "BACKUP_TIMEOUT": "300",
     "ENABLE_QDRANT_BACKUP": "true",
-    "MIN_INDEXED_POINTS_FOR_BACKUP": "1",
+    "MIN_INDEXED_POINTS_FOR_BACKUP": "100",
     "MIN_INDEX_DELTA_RATIO_FOR_BACKUP": "0.0",
+
+    # New Qdrant quantization related defaults
+    "QDRANT_ENABLE_SCALAR_QUANTIZATION": "true",
+    "QDRANT_QUANTIZATION_ALWAYS_RAM": "true",
 }
 
 RUNTIME_KEYS = set(DEFAULTS.keys())
@@ -312,6 +316,10 @@ def build_cronjob_manifest(cfg: dict[str, str], mode: str) -> dict[str, Any]:
         env_item("QDRANT_HNSW_FULL_SCAN_THRESHOLD", cfg.get("QDRANT_HNSW_FULL_SCAN_THRESHOLD", "10000")),
         env_item("QDRANT_ONDISK", cfg.get("QDRANT_ONDISK", "false")),
 
+        # Qdrant quantization flags (new)
+        env_item("QDRANT_ENABLE_SCALAR_QUANTIZATION", cfg.get("QDRANT_ENABLE_SCALAR_QUANTIZATION", "false")),
+        env_item("QDRANT_QUANTIZATION_ALWAYS_RAM", cfg.get("QDRANT_QUANTIZATION_ALWAYS_RAM", "true")),
+
         # Timeouts and backup controls
         env_item("INDEX_TIMEOUT", cfg.get("INDEX_TIMEOUT", "1800")),
         env_item("BACKUP_TIMEOUT", cfg.get("BACKUP_TIMEOUT", "300")),
@@ -328,6 +336,26 @@ def build_cronjob_manifest(cfg: dict[str, str], mode: str) -> dict[str, Any]:
         env.append(secret_env_item("AWS_SECRET_ACCESS_KEY", cfg["AWS_CREDENTIALS_SECRET_NAME"], "AWS_SECRET_ACCESS_KEY"))
         if os.environ.get("AWS_SESSION_TOKEN"):
             env.append(secret_env_item("AWS_SESSION_TOKEN", cfg["AWS_CREDENTIALS_SECRET_NAME"], "AWS_SESSION_TOKEN"))
+
+    # Container security context: enforce non-root, drop capabilities, disallow privilege escalation,
+    # prevent gaining new privileges, and make root filesystem read-only.
+    # NOTE: some Kubernetes API server versions may not accept certain fields in strict decoding.
+    # Remove fields that cause strict decoding errors (e.g., noNewPrivileges) to maximize compatibility.
+    container_security_context = {
+        "runAsNonRoot": True,
+        "runAsUser": 10001,
+        "allowPrivilegeEscalation": False,
+        "readOnlyRootFilesystem": True,
+        "capabilities": {"drop": ["ALL"]},
+    }
+
+    # Pod-level security context: ensure pod runs as non-root and set fsGroup for writable volumes.
+    pod_security_context = {
+        "runAsNonRoot": True,
+        "runAsUser": 10001,
+        "fsGroup": 10001,
+        "seccompProfile": {"type": "RuntimeDefault"},
+    }
 
     cronjob: dict[str, Any] = {
         "apiVersion": "batch/v1",
@@ -351,6 +379,10 @@ def build_cronjob_manifest(cfg: dict[str, str], mode: str) -> dict[str, Any]:
                         "spec": {
                             "serviceAccountName": cfg["SERVICE_ACCOUNT_NAME"],
                             "restartPolicy": "Never",
+                            "securityContext": pod_security_context,
+                            "volumes": [
+                                {"name": "tmp", "emptyDir": {}},
+                            ],
                             "containers": [
                                 {
                                     "name": "indexer",
@@ -359,6 +391,10 @@ def build_cronjob_manifest(cfg: dict[str, str], mode: str) -> dict[str, Any]:
                                     "command": ["/opt/venv/bin/python", "/indexing_pipeline/indexing_pipeline.py"],
                                     "args": ["--workdir", "/indexing_pipeline"],
                                     "env": env,
+                                    "securityContext": container_security_context,
+                                    "volumeMounts": [
+                                        {"name": "tmp", "mountPath": "/tmp"},
+                                    ],
                                     "resources": {
                                         "requests": {
                                             "cpu": cfg["INDEXING_BACKUP_CRONJOB_CPU_REQUEST"],
@@ -427,6 +463,7 @@ def collect_cfg() -> dict[str, str]:
     cfg["IRSA_ROLE_ARN"] = pick_env("IRSA_ROLE_ARN", default=DEFAULTS["IRSA_ROLE_ARN"])
     cfg["K8S_CLUSTER"] = pick_env("K8S_CLUSTER", default=DEFAULTS["K8S_CLUSTER"])
 
+    # Collect new vars (OVERWRITE_* vars intentionally removed)
     cfg["MAX_TOKENS_PER_CHUNK"] = pick_env("MAX_TOKENS_PER_CHUNK", default=DEFAULTS["MAX_TOKENS_PER_CHUNK"])
     cfg["MIN_TOKENS_PER_CHUNK"] = pick_env("MIN_TOKENS_PER_CHUNK", default=DEFAULTS["MIN_TOKENS_PER_CHUNK"])
     cfg["NUMBER_OF_OVERLAPPING_SENTENCES"] = pick_env("NUMBER_OF_OVERLAPPING_SENTENCES", default=DEFAULTS["NUMBER_OF_OVERLAPPING_SENTENCES"])
@@ -460,6 +497,10 @@ def collect_cfg() -> dict[str, str]:
     cfg["QDRANT_HNSW_M"] = pick_env("QDRANT_HNSW_M", default=DEFAULTS["QDRANT_HNSW_M"])
     cfg["QDRANT_HNSW_FULL_SCAN_THRESHOLD"] = pick_env("QDRANT_HNSW_FULL_SCAN_THRESHOLD", default=DEFAULTS["QDRANT_HNSW_FULL_SCAN_THRESHOLD"])
     cfg["QDRANT_ONDISK"] = pick_env("QDRANT_ONDISK", default=DEFAULTS["QDRANT_ONDISK"])
+
+    # New Qdrant quantization config picks
+    cfg["QDRANT_ENABLE_SCALAR_QUANTIZATION"] = pick_env("QDRANT_ENABLE_SCALAR_QUANTIZATION", default=DEFAULTS["QDRANT_ENABLE_SCALAR_QUANTIZATION"])
+    cfg["QDRANT_QUANTIZATION_ALWAYS_RAM"] = pick_env("QDRANT_QUANTIZATION_ALWAYS_RAM", default=DEFAULTS["QDRANT_QUANTIZATION_ALWAYS_RAM"])
 
     cfg["INDEX_TIMEOUT"] = pick_env("INDEX_TIMEOUT", default=DEFAULTS["INDEX_TIMEOUT"])
     cfg["BACKUP_TIMEOUT"] = pick_env("BACKUP_TIMEOUT", default=DEFAULTS["BACKUP_TIMEOUT"])
@@ -539,24 +580,43 @@ def render_and_apply(cfg: dict[str, str], dry_run: bool) -> None:
     log("Applied manifests successfully")
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Render and apply the indexing CronJob manifests.")
-    parser.add_argument("--dry-run", action="store_true", help="Render manifests to disk only; do not apply.")
+    parser = argparse.ArgumentParser(
+        description="Render and optionally apply Kubernetes manifests for the indexing cronjob."
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Render manifests to disk but do not apply them to the cluster.",
+    )
+    parser.add_argument(
+        "--manifests-dir",
+        type=str,
+        default="",
+        help="Override the output manifests directory (default from environment or defaults).",
+    )
+    parser.add_argument(
+        "--validate-only",
+        action="store_true",
+        help="Validate configuration only (collect and validate env vars) and exit.",
+    )
     return parser.parse_args(argv)
 
-def main(argv: list[str] | None = None) -> None:
-    if argv is None:
-        argv = sys.argv[1:]
+def main(argv: list[str]) -> None:
     args = parse_args(argv)
     cfg = collect_cfg()
+    if args.manifests_dir:
+        cfg["MANIFESTS_DIR"] = args.manifests_dir
+    # Validate configuration for required fields depending on mode
     validate_cfg(cfg)
+    if args.validate_only:
+        log("Configuration validated successfully.")
+        return
     render_and_apply(cfg, dry_run=args.dry_run)
-    log("Done")
 
 if __name__ == "__main__":
     try:
-        main()
+        main(sys.argv[1:])
     except SystemExit:
         raise
     except Exception as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        raise SystemExit(2) from None
+        fatal(f"Unhandled error: {exc}", 99)

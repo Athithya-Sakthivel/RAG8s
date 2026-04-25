@@ -34,7 +34,7 @@
     "DOCKER_PROXY_HOST": "",
     "DOCKER_PROXY_PORT": ""
   },
-  "postCreateCommand": "bash src/scripts/bootstrap.sh",
+  "postCreateCommand": "bash src/scripts/local/bootstrap.sh",
   "customizations": {
     "vscode": {
       "extensions": [

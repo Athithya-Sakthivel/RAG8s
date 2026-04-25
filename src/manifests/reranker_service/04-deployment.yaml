@@ -23,7 +23,7 @@ spec:
     metadata:
       labels: *id001
       annotations:
-        gen-reranker/inputs-hash: 4d8965a2f22213860ab269f0517938faaeb68b0b22c9701eb21c292e05936ab5
+        gen-reranker/inputs-hash: 0fd3fd3ba1a6549a027d4f63ead89f6ace000d4242965d3abed6bb6564870570
         prometheus.io/scrape: 'true'
         prometheus.io/port: '8202'
         prometheus.io/path: /metrics

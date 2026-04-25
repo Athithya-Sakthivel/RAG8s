@@ -34,13 +34,22 @@ try:
     import pyarrow as pa
     import pyarrow.parquet as pq
 except Exception as e:
-    print(json.dumps({"ts": datetime.now(UTC).isoformat(), "level": "error", "event": "startup", "msg": "pyarrow missing", "error": str(e)}, ensure_ascii=False), flush=True)
+    print(
+        json.dumps(
+            {
+                "ts": datetime.now(UTC).isoformat(),
+                "level": "error",
+                "event": "startup",
+                "msg": "pyarrow missing",
+                "error": str(e),
+            },
+            ensure_ascii=False,
+        ),
+        flush=True,
+    )
     raise SystemExit(2) from e
 
-
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").strip().upper()
-LOGGER_NAME = "index"
-
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "").strip() or None
 COLLECTION_NAME = os.getenv("COLLECTION_NAME", "default_rag_collection1").strip()
 
@@ -49,11 +58,11 @@ DATA_S3_BUCKET = os.getenv("DATA_S3_BUCKET", "").strip()
 DATA_S3_PREFIX = os.getenv("DATA_S3_PREFIX", "data/chunked/").strip().lstrip("/")
 AWS_ENDPOINT_URL = os.getenv("AWS_ENDPOINT_URL", "").strip() or None
 
-QDRANT_URL = os.getenv("QDRANT_URL", "http://0.0.0.0:6333").strip()
-DENSE_URL = os.getenv("DENSE_URL", "http://0.0.0.0:8200").strip()
-SPARSE_URL = os.getenv("SPARSE_URL", "http://0.0.0.0:8201").strip()
+QDRANT_URL = os.getenv("QDRANT_URL", "http://qdrant.qdrant.svc.cluster.local:6333").strip()
+DENSE_URL = os.getenv("DENSE_URL", "http://dense-svc.models.svc.cluster.local:8200").strip()
+SPARSE_URL = os.getenv("SPARSE_URL", "http://sparse-svc.models.svc.cluster.local:8201").strip()
 
-DENSE_DIM = _dense_dim = int(os.getenv("DENSE_DIM", "384") or 384)
+DENSE_DIM = max(1, int(os.getenv("DENSE_DIM", "384") or 384))
 BATCH_SIZE = max(1, int(os.getenv("BATCH_SIZE", "16") or 16))
 UPSERT_CHUNK = max(1, int(os.getenv("UPSERT_CHUNK", "500") or 500))
 HTTP_TIMEOUT = float(os.getenv("HTTP_TIMEOUT", "10.0") or 10.0)
@@ -70,7 +79,7 @@ QDRANT_HNSW_EF_CONSTRUCT = int(os.getenv("QDRANT_HNSW_EF_CONSTRUCT", "128") or 1
 QDRANT_HNSW_M = int(os.getenv("QDRANT_HNSW_M", "32") or 32)
 QDRANT_HNSW_FULL_SCAN_THRESHOLD = int(os.getenv("QDRANT_HNSW_FULL_SCAN_THRESHOLD", "10000") or 10000)
 QDRANT_ONDISK = os.getenv("QDRANT_ONDISK", "false").strip().lower() in ("1", "true", "yes", "y", "on")
-QDRANT_ENABLE_SCALAR_QUANTIZATION = os.getenv("QDRANT_ENABLE_SCALAR_QUANTIZATION", "false").strip().lower() in ("1", "true", "yes", "y", "on")
+QDRANT_ENABLE_SCALAR_QUANTIZATION = os.getenv("QDRANT_ENABLE_SCALAR_QUANTIZATION", "true").strip().lower() in ("1", "true", "yes", "y", "on")
 QDRANT_QUANTIZATION_ALWAYS_RAM = os.getenv("QDRANT_QUANTIZATION_ALWAYS_RAM", "true").strip().lower() in ("1", "true", "yes", "y", "on")
 
 NORMALIZE_DENSE = True
@@ -102,7 +111,7 @@ for name in ("httpx", "httpcore", "urllib3", "boto3", "botocore", "qdrant_client
     lg.setLevel(logging.CRITICAL)
     lg.propagate = False
 
-logger = logging.getLogger(LOGGER_NAME)
+logger = logging.getLogger("index")
 logger.handlers.clear()
 logger.setLevel(logging.DEBUG if LOG_LEVEL == "DEBUG" else logging.INFO)
 _handler = logging.StreamHandler(sys.stdout)
@@ -115,7 +124,7 @@ def now_ts() -> str:
     return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-def slog(level: str, event: str, msg: str, **extra: Any) -> None:
+def slog(level: str, event: str, msg: str = "", **extra: Any) -> None:
     entry: dict[str, Any] = {"ts": now_ts(), "level": level, "event": event, "msg": msg}
     if extra:
         entry.update(extra)
@@ -339,11 +348,13 @@ class DenseClient:
 
     def _request(self, method: str, path: str, *, timeout: float | None = None, json_body: Any = None) -> httpx.Response:
         url = f"{self.url}{path}"
+
         def call() -> httpx.Response:
             resp = self.client.request(method, url, timeout=timeout or self.embed_timeout, json=json_body)
             if 500 <= resp.status_code < 600:
                 raise TransientHTTPError(f"{method} {url} -> {resp.status_code}")
             return resp
+
         return retry_call(call, retriable=lambda exc: isinstance(exc, (httpx.HTTPError, TransientHTTPError)))
 
     def health(self) -> bool:
@@ -385,11 +396,13 @@ class SparseClient:
 
     def _request(self, method: str, path: str, *, timeout: float | None = None, json_body: Any = None) -> httpx.Response:
         url = f"{self.url}{path}"
+
         def call() -> httpx.Response:
             resp = self.client.request(method, url, timeout=timeout or self.embed_timeout, json=json_body)
             if 500 <= resp.status_code < 600:
                 raise TransientHTTPError(f"{method} {url} -> {resp.status_code}")
             return resp
+
         return retry_call(call, retriable=lambda exc: isinstance(exc, (httpx.HTTPError, TransientHTTPError)))
 
     def health(self) -> bool:
@@ -659,7 +672,7 @@ def build_quantization_config() -> Any | None:
     )
 
 
-def create_collection(client: QdrantClient, collection_name: str, dense_dim: int, hybrid: bool) -> None:
+def create_collection(client: QdrantClient, collection_name: str, dense_dim: int, dense_enabled: bool, sparse_enabled: bool) -> None:
     exists = False
     try:
         exists = client.collection_exists(collection_name)
@@ -669,12 +682,24 @@ def create_collection(client: QdrantClient, collection_name: str, dense_dim: int
         slog("info", "collection.exists", "Collection already exists", collection=collection_name)
         return
 
+    if not dense_enabled and not sparse_enabled:
+        raise RuntimeError("at least one vector mode must be enabled")
+
     quantization_config = build_quantization_config()
-    sparse_config = {"sparse": models.SparseVectorParams()}
-    if hybrid:
-        vectors_config: Any = {"dense": models.VectorParams(size=dense_dim, distance=models.Distance.COSINE, on_disk=QDRANT_ONDISK)}
-    else:
-        vectors_config = {}
+    vectors_config: Any = None
+    sparse_config: Any = None
+
+    if dense_enabled:
+        vectors_config = {
+            "dense": models.VectorParams(
+                size=dense_dim,
+                distance=models.Distance.COSINE,
+                on_disk=QDRANT_ONDISK,
+            )
+        }
+    if sparse_enabled:
+        sparse_config = {"sparse": models.SparseVectorParams()}
+
     retry_call(
         lambda: client.create_collection(
             collection_name=collection_name,
@@ -685,7 +710,16 @@ def create_collection(client: QdrantClient, collection_name: str, dense_dim: int
         retries=3,
         retriable=lambda exc: True,
     )
-    slog("info", "collection.created", "Created collection", name=collection_name, dense_dim=dense_dim, hybrid=hybrid, quantization=bool(quantization_config))
+    slog(
+        "info",
+        "collection.created",
+        "Created collection",
+        name=collection_name,
+        dense_dim=dense_dim,
+        dense_enabled=dense_enabled,
+        sparse_enabled=sparse_enabled,
+        quantization=bool(quantization_config),
+    )
 
 
 def existing_point_ids(client: QdrantClient, collection_name: str, ids: list[int]) -> set[int]:
@@ -730,6 +764,34 @@ def id_from_string(s: str) -> int:
     return int(digest[:16], 16)
 
 
+FULL_PAYLOAD_KEYS = [
+    "document_id",
+    "file_name",
+    "chunk_id",
+    "chunk_type",
+    "text",
+    "token_count",
+    "source_url",
+    "timestamp",
+    "parser_version",
+    "page_number",
+    "row_range",
+    "line_range",
+    "token_range",
+    "semantic_region",
+    "audio_range",
+    "slide_range",
+    "headings",
+    "heading_path",
+    "tags",
+    "layout_tags",
+    "figures",
+    "file_type",
+    "used_ocr",
+    "layout",
+]
+
+
 def chunk_to_point(chunk: dict[str, Any], dense_vec: list[float] | None, sparse_obj: dict[str, Any] | None) -> PointStruct | None:
     cid = chunk.get("chunk_id") or f"{chunk.get('document_id')}_0"
     pid = id_from_string(str(cid))
@@ -742,34 +804,7 @@ def chunk_to_point(chunk: dict[str, Any], dense_vec: list[float] | None, sparse_
             vectors["sparse"] = sparse_vector
     if not vectors:
         return None
-
-    payload_keys = [
-        "document_id",
-        "file_name",
-        "chunk_id",
-        "chunk_type",
-        "text",
-        "token_count",
-        "source_url",
-        "timestamp",
-        "parser_version",
-        "page_number",
-        "row_range",
-        "line_range",
-        "token_range",
-        "semantic_region",
-        "audio_range",
-        "slide_range",
-        "headings",
-        "heading_path",
-        "tags",
-        "layout_tags",
-        "figures",
-        "file_type",
-        "used_ocr",
-        "layout",
-    ]
-    payload = {k: chunk.get(k) for k in payload_keys if k in chunk}
+    payload = {k: chunk.get(k) for k in FULL_PAYLOAD_KEYS if k in chunk}
     return PointStruct(id=pid, vector=vectors, payload=payload)
 
 
@@ -854,6 +889,7 @@ def validate_and_build_clients() -> tuple[DenseClient | None, SparseClient | Non
         raise SystemExit(2)
     return dense, sparse
 
+
 def embed_and_upsert(
     client: QdrantClient,
     collection_name: str,
@@ -864,42 +900,32 @@ def embed_and_upsert(
     metrics: dict[str, int],
 ) -> None:
     total = len(chunks)
-    slog("info", "index.start", total_input_chunks=total, batch=BATCH_SIZE, hybrid=hybrid)
+    slog("info", "index.start", "Indexing started", total_input_chunks=total, batch=BATCH_SIZE, hybrid=hybrid)
 
     processed = 0
     total_upserted = 0
 
     for offset in range(0, total, BATCH_SIZE):
         if SHUTDOWN:
-            slog("warning", "shutdown.during_index", offset=offset)
+            slog("warning", "shutdown.during_index", "Shutdown requested during indexing", offset=offset)
             break
 
         batch = chunks[offset : offset + BATCH_SIZE]
-
-        # deterministic IDs
-        ids = [
-            id_from_string(str(c.get("chunk_id") or f"{c.get('document_id')}_0"))
-            for c in batch
-        ]
-
+        ids = [id_from_string(str(c.get("chunk_id") or f"{c.get('document_id')}_0")) for c in batch]
         if len(batch) != len(ids):
             raise RuntimeError("batch and ids length mismatch")
 
-        # check existing
         start = time.time()
         existing = existing_point_ids(client, collection_name, ids)
         elapsed = round(time.time() - start, 3)
 
-        to_process = [
-            c for c, pid in zip(batch, ids, strict=True)
-            if pid not in existing
-        ]
-
+        to_process = [c for c, pid in zip(batch, ids, strict=True) if pid not in existing]
         skipped = len(batch) - len(to_process)
 
         slog(
             "debug",
             "batch.check",
+            "Checked batch against existing points",
             batch_range=f"{offset}..{offset + len(batch) - 1}",
             skipped=skipped,
             retrieve_time=elapsed,
@@ -908,32 +934,24 @@ def embed_and_upsert(
         if not to_process:
             continue
 
-        # embed
         try:
-            points = safe_embed_and_points(
-                to_process,
-                sparse_client,
-                dense_client,
-                hybrid,
-            )
-        except Exception as e:
-            slog("error", "batch.embed.failed", error=str(e), offset=offset)
+            points = safe_embed_and_points(to_process, sparse_client, dense_client, hybrid)
+        except Exception as exc:
+            slog("error", "batch.embed.failed", "Failed to embed batch", error=str(exc), offset=offset)
             continue
 
         if not points:
             continue
 
         processed += len(points)
-        slog("info", "batch.embedded", embedded=len(points), processed=processed)
+        slog("info", "batch.embedded", "Batch embedded", embedded=len(points), processed=processed)
 
-        # upsert in chunks (streaming, not buffered globally)
         for j in range(0, len(points), UPSERT_CHUNK):
             if SHUTDOWN:
-                slog("warning", "shutdown.before_upsert", offset=offset, chunk_start=j)
+                slog("warning", "shutdown.before_upsert", "Shutdown requested before upsert", offset=offset, chunk_start=j)
                 break
 
             slice_pts = points[j : j + UPSERT_CHUNK]
-
             try:
                 retry_call(
                     lambda pts=slice_pts: client.upsert(
@@ -943,11 +961,12 @@ def embed_and_upsert(
                     retries=NETWORK_RETRY_COUNT,
                     retriable=lambda exc: True,
                 )
-            except Exception as e:
+            except Exception as exc:
                 slog(
                     "error",
                     "upsert.failed",
-                    error=str(e),
+                    "Failed to upsert chunk",
+                    error=str(exc),
                     offset=offset,
                     chunk_start=j,
                     count=len(slice_pts),
@@ -956,26 +975,16 @@ def embed_and_upsert(
 
             total_upserted += len(slice_pts)
             metrics["indexed_points"] = int(metrics.get("indexed_points", 0)) + len(slice_pts)
+            slog("debug", "upsert.chunk", "Upserted chunk", offset=offset, chunk_start=j, count=len(slice_pts))
 
-            slog(
-                "debug",
-                "upsert.chunk",
-                offset=offset,
-                chunk_start=j,
-                count=len(slice_pts),
-            )
+    slog("info", "index.completed", "Indexing completed", total_processed=processed, total_upserted=total_upserted)
 
-    slog(
-        "info",
-        "index.completed",
-        total_processed=processed,
-        total_upserted=total_upserted,
-    )
 
-def load_dense_and_sparse_settings() -> tuple[bool, bool]:
-    dense_enabled = True
-    sparse_enabled = True
-    return dense_enabled, sparse_enabled
+def create_qdrant_client() -> QdrantClient:
+    kwargs: dict[str, Any] = {"url": QDRANT_URL}
+    if QDRANT_API_KEY:
+        kwargs["api_key"] = QDRANT_API_KEY
+    return QdrantClient(**kwargs)
 
 
 def retrieve_and_index(metrics: dict[str, int]) -> None:
@@ -986,7 +995,7 @@ def retrieve_and_index(metrics: dict[str, int]) -> None:
     hybrid_mode = dense_client is not None and sparse_client is not None
 
     try:
-        qdrant = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY) if QDRANT_API_KEY else QdrantClient(url=QDRANT_URL)
+        qdrant = create_qdrant_client()
     except Exception as exc:
         slog("error", "qdrant.client.init.failed", "Unable to initialize Qdrant client", error=str(exc))
         raise SystemExit(2) from exc
@@ -997,7 +1006,13 @@ def retrieve_and_index(metrics: dict[str, int]) -> None:
         slog("error", "qdrant.unreachable", "Qdrant is unreachable", error=str(exc))
         raise SystemExit(2) from exc
 
-    create_collection(qdrant, COLLECTION_NAME, DENSE_DIM, hybrid=hybrid_mode)
+    create_collection(
+        qdrant,
+        COLLECTION_NAME,
+        DENSE_DIM,
+        dense_enabled=(dense_client is not None),
+        sparse_enabled=(sparse_client is not None),
+    )
     create_payload_indexes(qdrant, COLLECTION_NAME)
     embed_and_upsert(qdrant, COLLECTION_NAME, chunks, sparse_client, dense_client, hybrid_mode, metrics)
 

@@ -19,9 +19,18 @@ spec:
         spec:
           serviceAccountName: indexer-cron-sa
           restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            fsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          volumes:
+          - name: tmp
+            emptyDir: {}
           containers:
           - name: indexer
-            image: ghcr.io/athithya-sakthivel/indexing-pipeline:2026-04-24-20-23--cf66a89@sha256:66bcd291bb7de264f53747f42a018280ec337291f9cd0938a289582d8da0ce25
+            image: ghcr.io/athithya-sakthivel/indexing-pipeline:2026-04-25-08-33--57613a5@sha256:e7a9914bf0f4000749b74d9985f2075834ef9fad9df0b554cf9d25d9abb8fc47
             imagePullPolicy: IfNotPresent
             command:
             - /opt/venv/bin/python
@@ -124,6 +133,10 @@ spec:
               value: '10000'
             - name: QDRANT_ONDISK
               value: 'false'
+            - name: QDRANT_ENABLE_SCALAR_QUANTIZATION
+              value: 'true'
+            - name: QDRANT_QUANTIZATION_ALWAYS_RAM
+              value: 'true'
             - name: INDEX_TIMEOUT
               value: '1800'
             - name: BACKUP_TIMEOUT
@@ -144,6 +157,17 @@ spec:
                 secretKeyRef:
                   name: indexer-aws-creds
                   key: AWS_SECRET_ACCESS_KEY
+            securityContext:
+              runAsNonRoot: true
+              runAsUser: 10001
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop:
+                - ALL
+            volumeMounts:
+            - name: tmp
+              mountPath: /tmp
             resources:
               requests:
                 cpu: '2'
