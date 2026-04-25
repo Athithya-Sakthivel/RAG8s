@@ -1,4 +1,7 @@
 rm -rf src/manifests
+python3 src/scripts/force_sync_s3_local_fs.py --upload
+aws s3 ls s3://s3-temp-bucket-mlsecops-681802563986/ --recursive
+
 make core
 
 python3 src/infra/rag/qdrant_service.py --rollout
@@ -16,9 +19,7 @@ export RERANKER_MODEL_NAME=Xenova/ms-marco-MiniLM-L-6-v2
 export RERANKER_MAX_DOCS=50 # upper bound
 python3 src/infra/rag/reranker_service.py --rollout
 
-sleep 800
 
-# ghcr.io/athithya-sakthivel/indexing-pipeline:2026-04-24-11-24--324996b@sha256:8a7ed61a4441cb274724e8b26eca7b5c7011f3035961baeec679f8434a70f6dc
 kubectl delete jobs indexing-backup-manual -n indexing
 python3 src/infra/rag/indexing_cronjob.py
 

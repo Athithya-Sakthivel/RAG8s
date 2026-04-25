@@ -23,7 +23,7 @@ spec:
     metadata:
       labels: *id001
       annotations:
-        gen-dense/inputs-hash: 837e43d041b6973b17d12f076f1e8a8ff6a6efac456985be718f1fc92885de8d
+        gen-dense/inputs-hash: 45aab8c8e5be48ea03e2e0a384eff1d1daccadb978fc06d8f5ff4f586554498e
         prometheus.io/scrape: 'true'
         prometheus.io/port: '8200'
         prometheus.io/path: /metrics
@@ -97,9 +97,13 @@ spec:
           mountPath: /var/tmp
         - name: tmp-writable
           mountPath: /usr/tmp
+        - name: models-cache
+          mountPath: /models_cache
       securityContext:
         fsGroup: 1000
         runAsNonRoot: true
       volumes:
       - name: tmp-writable
+        emptyDir: {}
+      - name: models-cache
         emptyDir: {}

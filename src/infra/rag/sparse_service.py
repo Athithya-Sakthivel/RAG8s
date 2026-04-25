@@ -19,6 +19,20 @@
 # - Clear validation and early failures
 # - Type hints and robust subprocess handling
 
+#!/usr/bin/env python3
+# src/infra/rag/sparse_service.py
+# Deterministic generator for Sparse embedder Kubernetes manifests.
+# Writes manifests to src/manifests/sparse_service/
+#
+# This variant injects secure securityContext defaults and ensures a writable
+# ephemeral tmp area (emptyDir) when readOnlyRootFilesystem is enabled.
+#
+# Environment variables to control behavior:
+# - SPARSE_RUN_AS_NONROOT (true/false) default true
+# - SPARSE_RUN_AS_USER (int) default 1000
+# - SPARSE_ALLOW_PRIV_ESC (true/false) default false
+# - SPARSE_READONLY_ROOTFS (true/false) default true
+# - SPARSE_FS_GROUP (int) optional, default 1000
 
 from __future__ import annotations
 

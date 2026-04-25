@@ -1,24 +1,4 @@
 #!/usr/bin/env python3
-# src/infra/rag/dense_service.py
-# Deterministic generator for Dense embedder Kubernetes manifests.
-# Writes manifests to src/manifests/dense_service/
-#
-# Key changes in this rewrite:
-# - Use explicit DEPLOY_ENV (preferred) with safe fallbacks for backward compatibility.
-# - Clear, unambiguous mapping: PROD -> production defaults; anything else -> nonprod defaults.
-# - Ensure DENSE_MODEL_NAME, DENSE_DIM, DENSE_BATCH_SIZE, DENSE_NORMALIZE, DENSE_CUDA, PRELOAD_MODEL
-#   are injected into the container env with strong defaults.
-# - Remove deprecated --apply CLI flag (use --rollout).
-# - Replace deprecated datetime.utcnow() with timezone-aware UTC timestamp.
-#
-# Features:
-# - Strong, sensible defaults for prod vs non-prod
-# - Idempotent generation: stores inputs hash and skips writes when nothing changed
-# - Atomic file writes
-# - Safe kubectl apply wrapper and rollout wait
-# - Clear validation and early failures
-# - Type hints and robust subprocess handling
-
 from __future__ import annotations
 
 import argparse
@@ -89,7 +69,6 @@ DEFAULTS: dict[str, Any] = {
     "ROLLOUT_TIMEOUT": 300,
     "MANIFESTS_DIR": DEFAULT_MANIFESTS_DIR,
     "STATE_DIRNAME": DEFAULT_STATE_DIRNAME,
-    # Security defaults (sync with non-root Dockerfile that creates appuser uid/gid 1000)
     "RUN_AS_NONROOT": True,
     "RUN_AS_USER": 1000,
     "ALLOW_PRIV_ESC": False,
@@ -232,7 +211,6 @@ def load_config() -> dict[str, Any]:
     cfg["DENSE_CUDA"] = os.environ.get("DENSE_CUDA", str(DEFAULTS["DENSE_CUDA"])).lower() in ("1", "true", "yes")
     cfg["PRELOAD_MODEL"] = os.environ.get("DENSE_PRELOAD_MODEL", "0").lower() in ("1", "true", "yes")
 
-    # Security-related config (sync with Dockerfile non-root user)
     cfg["RUN_AS_NONROOT"] = os.environ.get("DENSE_RUN_AS_NONROOT", str(DEFAULTS["RUN_AS_NONROOT"])).lower() in ("1", "true", "yes")
     try:
         cfg["RUN_AS_USER"] = int(os.environ.get("DENSE_RUN_AS_USER", str(DEFAULTS["RUN_AS_USER"])))
@@ -362,15 +340,12 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
     if cfg["ENABLE_GPU"]:
         container["resources"]["limits"][cfg["GPU_RESOURCE_NAME"]] = cfg["GPU_COUNT"]
 
-    # Inject container-level securityContext based on config
     container_security: dict[str, Any] = {}
     if cfg.get("RUN_AS_NONROOT", False):
         container_security["runAsNonRoot"] = True
     if cfg.get("RUN_AS_USER") is not None:
         container_security["runAsUser"] = int(cfg["RUN_AS_USER"])
-    # disallow privilege escalation unless explicitly allowed
     container_security["allowPrivilegeEscalation"] = bool(cfg.get("ALLOW_PRIV_ESC", False))
-    # readOnlyRootFilesystem default true unless explicitly disabled
     container_security["readOnlyRootFilesystem"] = bool(cfg.get("READONLY_ROOTFS", True))
 
     if container_security:
@@ -397,7 +372,6 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
         },
     }
 
-    # Pod-level security: set fsGroup if provided (helps with shared volumes)
     pod_sec: dict[str, Any] = {}
     if cfg.get("FS_GROUP") is not None:
         try:
@@ -409,11 +383,9 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
     if pod_sec:
         deployment["spec"]["template"]["spec"]["securityContext"] = pod_sec
 
-    # Annotate inputs hash if provided
     if inputs_hash:
         deployment["spec"]["template"]["metadata"]["annotations"]["gen-dense/inputs-hash"] = inputs_hash
 
-    # GPU node selector handling
     if cfg["ENABLE_GPU"] and cfg["GPU_NODE_SELECTOR"]:
         if "=" in cfg["GPU_NODE_SELECTOR"]:
             k, v = cfg["GPU_NODE_SELECTOR"].split("=", 1)
@@ -421,7 +393,6 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
         else:
             deployment["spec"]["template"]["spec"]["nodeSelector"] = {cfg["GPU_NODE_SELECTOR"]: "true"}
 
-    # Prometheus annotations
     deployment["spec"]["template"]["metadata"].setdefault("annotations", {})
     deployment["spec"]["template"]["metadata"]["annotations"].update(
         {
@@ -431,10 +402,7 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
         }
     )
 
-    # --- ensure writable tmp when readOnlyRootFilesystem is enabled ---
-    # create emptyDir volume and mount it at /tmp, /var/tmp, /usr/tmp so Python tempfile works
     if cfg.get("READONLY_ROOTFS", True):
-        # add volumeMounts to container
         tmp_mounts = [
             {"name": "tmp-writable", "mountPath": "/tmp"},
             {"name": "tmp-writable", "mountPath": "/var/tmp"},
@@ -444,15 +412,16 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
         for m in tmp_mounts:
             if not any(vm.get("mountPath") == m["mountPath"] for vm in existing_mounts):
                 existing_mounts.append(m)
+        existing_mounts.append({"name": "models-cache", "mountPath": "/models_cache"})
         container["volumeMounts"] = existing_mounts
 
-        # add the emptyDir volume at pod spec level
         vols = deployment["spec"]["template"]["spec"].get("volumes", [])
         if not any(v.get("name") == "tmp-writable" for v in vols):
             vols.append({"name": "tmp-writable", "emptyDir": {}})
+        if not any(v.get("name") == "models-cache" for v in vols):
+            vols.append({"name": "models-cache", "emptyDir": {}})
         deployment["spec"]["template"]["spec"]["volumes"] = vols
 
-        # ensure pod-level securityContext has fsGroup so mounted volume is writable by appuser
         pod_sc = deployment["spec"]["template"]["spec"].get("securityContext", {})
         if "fsGroup" not in pod_sc and cfg.get("FS_GROUP") is not None:
             try:
