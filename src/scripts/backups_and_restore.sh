@@ -9,7 +9,7 @@ fi
 
 PYTHON="${PYTHON:-python3}"
 BACKUP_RUNNER="${BACKUP_RUNNER:-infra/runners/run_qdrant_backup.py}"
-RESTORE_RUNNER="${RESTORE_RUNNER:-infra/runners/run_qdrant_restore.py}"
+RESTORE_RUNNER="${RESTORE_RUNNER:-src/scripts/qdrant_restore.py}"
 
 QDRANT_NAMESPACE="${QDRANT_NAMESPACE:-${NAMESPACE:-qdrant}}"
 QDRANT_URL="${QDRANT_URL:-http://qdrant.qdrant.svc.cluster.local:6333}"

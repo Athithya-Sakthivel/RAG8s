@@ -15,15 +15,23 @@ export SPARSE_MODEL_NAME=Qdrant/minicoil-v1
 export SPARSE_BATCH_SIZE=64 # upper bound
 python3 src/infra/rag/sparse_service.py --rollout
 
+
+
 export FORCE_QDRANT_BACKUP=true
 export MIN_INDEXED_POINTS_FOR_BACKUP=1
-
 kubectl delete jobs indexing-backup-manual -n indexing || true
 python3 src/infra/rag/indexing_cronjob.py
-
 kubectl create job --from=cronjob/indexing-backup-cronjob indexing-backup-manual -n indexing
 kubectl get jobs -n indexing
 kubectl get pods -n indexing --watch
+
+
+kubectl delete ns qdrant
+python3 src/infra/rag/qdrant_service.py --rollout
+export PER_POD=true
+export QDRANT_BACKUP_S3_PREFIX=qdrant/backups/
+export BACKUP_S3_BUCKET=$DATA_S3_BUCKET
+bash src/scripts/backups_and_restore.sh restore
 
 
 export RERANKER_MODEL_NAME=Xenova/ms-marco-MiniLM-L-6-v2

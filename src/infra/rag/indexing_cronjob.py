@@ -1,8 +1,4 @@
 #!/usr/bin/env python3
-# Generates CronJob + RBAC + supporting manifests for the indexing pipeline.
-# This variant enhances idempotent rollout behavior (render/hash/state) and
-# cluster-aware AWS auth (IRSA for EKS, static creds for kind).
-
 from __future__ import annotations
 
 import argparse
@@ -20,6 +16,7 @@ except Exception:
     print("ERROR: PyYAML required. Install with: pip install pyyaml", file=sys.stderr)
     raise SystemExit(2) from None
 
+
 DEFAULTS: dict[str, str] = {
     "NAMESPACE": "indexing",
     "CRONJOB_NAME": "indexing-backup-cronjob",
@@ -32,7 +29,7 @@ DEFAULTS: dict[str, str] = {
     "SERVICE_ACCOUNT_NAME": "indexer-cron-sa",
     "MANIFESTS_DIR": "src/manifests/indexing_cronjob",
     "INDEXING_PIPELINE_CPU_IMAGE_REPO": "ghcr.io/athithya-sakthivel/indexing-pipeline",
-    "INDEXING_PIPELINE_CPU_IMAGE_TAG": "2026-04-25-08-33--57613a5@sha256:e7a9914bf0f4000749b74d9985f2075834ef9fad9df0b554cf9d25d9abb8fc47",
+    "INDEXING_PIPELINE_CPU_IMAGE_TAG": "2026-04-25-09-49--addb758@sha256:adc4f653a4b05825bc98404a51f2a82308d9d6f35d6bdb1d0e17f524502867f9",
     "INDEXING_BACKUP_CRONJOB_CPU_REQUEST": "2",
     "INDEXING_BACKUP_CRONJOB_CPU_LIMIT": "6",
     "INDEXING_BACKUP_CRONJOB_MEMORY_REQUEST": "1Gi",
@@ -58,7 +55,6 @@ DEFAULTS: dict[str, str] = {
     "USE_IRSA": "",
     "IRSA_ROLE_ARN": "",
     "K8S_CLUSTER": "",
-
     "MAX_TOKENS_PER_CHUNK": "320",
     "MIN_TOKENS_PER_CHUNK": "100",
     "NUMBER_OF_OVERLAPPING_SENTENCES": "2",
@@ -78,13 +74,11 @@ DEFAULTS: dict[str, str] = {
     "JSONL_TARGET_TOKENS_PER_CHUNK": "400",
     "PPTX_SLIDES_PER_CHUNK": "4",
     "PPTX_OCR_ENGINE": "rapidocr",
-
     "COLLECTION_NAME": "default_rag_collection1",
     "DENSE_DIM": "384",
     "BATCH_SIZE": "8",
     "UPSERT_CHUNK": "500",
     "SPARSE_BATCH_FALLBACK": "8",
-
     "QDRANT_SHARD_NUMBER": "3",
     "QDRANT_REPLICATION_FACTOR": "2",
     "QDRANT_WRITE_CONSISTENCY_FACTOR": "1",
@@ -92,28 +86,62 @@ DEFAULTS: dict[str, str] = {
     "QDRANT_HNSW_M": "32",
     "QDRANT_HNSW_FULL_SCAN_THRESHOLD": "10000",
     "QDRANT_ONDISK": "false",
-
     "INDEX_TIMEOUT": "1800",
     "BACKUP_TIMEOUT": "300",
     "ENABLE_QDRANT_BACKUP": "true",
     "MIN_INDEXED_POINTS_FOR_BACKUP": "100",
     "MIN_INDEX_DELTA_RATIO_FOR_BACKUP": "0.0",
-
-    # New Qdrant quantization related defaults
     "QDRANT_ENABLE_SCALAR_QUANTIZATION": "true",
     "QDRANT_QUANTIZATION_ALWAYS_RAM": "true",
+    "TMPDIR": "/tmp",
 }
 
 RUNTIME_KEYS = set(DEFAULTS.keys())
+
 
 def log(msg: str, /, *args: object) -> None:
     if args:
         msg = msg % args
     print(msg, flush=True)
 
+
 def fatal(msg: str, code: int = 2) -> None:
     print(f"ERROR: {msg}", file=sys.stderr)
     raise SystemExit(code)
+
+
+def _env(name: str, default: str) -> str:
+    v = os.environ.get(name)
+    if v is None:
+        return default
+    v = str(v).strip()
+    return v if v else default
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    v = os.environ.get(name)
+    if v is None:
+        return default
+    return str(v).strip().lower() in ("1", "true", "yes", "y", "on")
+
+
+def _env_int(name: str, default: int) -> int:
+    v = os.environ.get(name)
+    if v is None or str(v).strip() == "":
+        return default
+    try:
+        return int(v)
+    except Exception:
+        return default
+
+
+def pick_env(*names: str, default: str = "") -> str:
+    for name in names:
+        v = os.environ.get(name)
+        if v is not None and str(v).strip() != "":
+            return str(v).strip()
+    return default
+
 
 def run_cmd(
     cmd: list[str],
@@ -139,13 +167,16 @@ def run_cmd(
     except subprocess.TimeoutExpired as exc:
         return 124, getattr(exc, "stdout", "") or "", getattr(exc, "stderr", "") or f"timeout after {timeout}s"
 
+
 def ensure_kubectl_available() -> None:
     rc, out, err = run_cmd(["kubectl", "version", "--client=true"], timeout=20)
     if rc != 0:
         fatal(f"kubectl not available or not in PATH: {err or out}")
 
+
 def yaml_dump(data: Any) -> str:
     return yaml.safe_dump(data, sort_keys=False, default_flow_style=False, allow_unicode=True)
+
 
 def write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -161,68 +192,10 @@ def write_text(path: Path, content: str) -> None:
         except Exception:
             pass
 
-def as_bool(value: str | None, default: bool = False) -> bool:
-    if value is None:
-        return default
-    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
-
-def as_int(value: str | None, default: int = 0) -> int:
-    if value is None or str(value).strip() == "":
-        return default
-    try:
-        return int(str(value))
-    except Exception:
-        return default
-
-def pick_env(*names: str, default: str = "") -> str:
-    for name in names:
-        value = os.environ.get(name)
-        if value is not None and str(value).strip() != "":
-            return str(value).strip()
-    return default
-
-def detect_mode(cfg: dict[str, str]) -> str:
-    explicit = cfg.get("K8S_CLUSTER", "").strip().lower()
-    if explicit in {"kind", "eks", "eks-auto"}:
-        return explicit
-    if as_bool(cfg.get("USE_IRSA")) or cfg.get("IRSA_ROLE_ARN"):
-        return "eks"
-    return "kind"
-
-def validate_cfg(cfg: dict[str, str]) -> None:
-    missing = []
-    mode = detect_mode(cfg)
-    if mode == "kind":
-        if not cfg.get("DATA_S3_BUCKET"):
-            missing.append("DATA_S3_BUCKET")
-        if not (cfg.get("AWS_REGION") or cfg.get("AWS_DEFAULT_REGION")):
-            missing.append("AWS_REGION")
-        if not cfg.get("QDRANT_URL"):
-            missing.append("QDRANT_URL")
-        if not cfg.get("DENSE_URL"):
-            missing.append("DENSE_URL")
-        if not cfg.get("SPARSE_URL"):
-            missing.append("SPARSE_URL")
-        if missing:
-            fatal("missing required env vars: " + ", ".join(missing))
-        if not (os.environ.get("AWS_ACCESS_KEY_ID") and os.environ.get("AWS_SECRET_ACCESS_KEY")):
-            fatal("kind/static mode requires AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY")
-    else:
-        if not cfg.get("DATA_S3_BUCKET"):
-            missing.append("DATA_S3_BUCKET")
-        if not cfg.get("QDRANT_URL"):
-            missing.append("QDRANT_URL")
-        if not cfg.get("DENSE_URL"):
-            missing.append("DENSE_URL")
-        if not cfg.get("SPARSE_URL"):
-            missing.append("SPARSE_URL")
-        if missing:
-            fatal("missing required env vars: " + ", ".join(missing))
-        if not cfg.get("IRSA_ROLE_ARN"):
-            fatal("EKS/IRSA mode requires IRSA_ROLE_ARN")
 
 def namespace_manifest(ns: str) -> dict[str, Any]:
     return {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": ns}}
+
 
 def serviceaccount_manifest(ns: str, name: str, mode: str, irsa_role_arn: str) -> dict[str, Any]:
     meta: dict[str, Any] = {"name": name, "namespace": ns}
@@ -230,7 +203,8 @@ def serviceaccount_manifest(ns: str, name: str, mode: str, irsa_role_arn: str) -
         meta["annotations"] = {"eks.amazonaws.com/role-arn": irsa_role_arn}
     return {"apiVersion": "v1", "kind": "ServiceAccount", "metadata": meta}
 
-def build_secret_manifest(ns: str, name: str, data: dict[str, str]) -> dict[str, Any]:
+
+def secret_manifest(ns: str, name: str, data: dict[str, str]) -> dict[str, Any]:
     return {
         "apiVersion": "v1",
         "kind": "Secret",
@@ -239,8 +213,128 @@ def build_secret_manifest(ns: str, name: str, data: dict[str, str]) -> dict[str,
         "stringData": data,
     }
 
-def env_item(name: str, value: str) -> dict[str, Any]:
-    return {"name": name, "value": value}
+
+def build_cfg() -> dict[str, str]:
+    cfg: dict[str, str] = {}
+    for key in sorted(RUNTIME_KEYS):
+        cfg[key] = pick_env(key, default=DEFAULTS.get(key, ""))
+    cfg["NAMESPACE"] = _env("NAMESPACE", DEFAULTS["NAMESPACE"])
+    cfg["CRONJOB_NAME"] = _env("CRONJOB_NAME", DEFAULTS["CRONJOB_NAME"]).lower()
+    cfg["CRON_SCHEDULE"] = pick_env("CRON_SCHEDULE", "INDEXING_BACKUP_CRON_EXPRESSION", default=DEFAULTS["CRON_SCHEDULE"])
+    cfg["CRONJOB_CONCURRENCY"] = _env("CRONJOB_CONCURRENCY", DEFAULTS["CRONJOB_CONCURRENCY"])
+    cfg["CRONJOB_BACKOFF_LIMIT"] = _env("CRONJOB_BACKOFF_LIMIT", DEFAULTS["CRONJOB_BACKOFF_LIMIT"])
+    cfg["CRONJOB_SUCCESSFUL_JOBS_HISTORY_LIMIT"] = _env("CRONJOB_SUCCESSFUL_JOBS_HISTORY_LIMIT", DEFAULTS["CRONJOB_SUCCESSFUL_JOBS_HISTORY_LIMIT"])
+    cfg["CRONJOB_FAILED_JOBS_HISTORY_LIMIT"] = _env("CRONJOB_FAILED_JOBS_HISTORY_LIMIT", DEFAULTS["CRONJOB_FAILED_JOBS_HISTORY_LIMIT"])
+    cfg["CRONJOB_TIMEZONE"] = _env("CRONJOB_TIMEZONE", DEFAULTS["CRONJOB_TIMEZONE"])
+    cfg["SERVICE_ACCOUNT_NAME"] = _env("SERVICE_ACCOUNT_NAME", DEFAULTS["SERVICE_ACCOUNT_NAME"])
+    cfg["MANIFESTS_DIR"] = _env("MANIFESTS_DIR", DEFAULTS["MANIFESTS_DIR"])
+    cfg["INDEXING_PIPELINE_CPU_IMAGE_REPO"] = _env("INDEXING_PIPELINE_CPU_IMAGE_REPO", DEFAULTS["INDEXING_PIPELINE_CPU_IMAGE_REPO"])
+    cfg["INDEXING_PIPELINE_CPU_IMAGE_TAG"] = _env("INDEXING_PIPELINE_CPU_IMAGE_TAG", DEFAULTS["INDEXING_PIPELINE_CPU_IMAGE_TAG"])
+    cfg["INDEXING_BACKUP_CRONJOB_CPU_REQUEST"] = _env("INDEXING_BACKUP_CRONJOB_CPU_REQUEST", DEFAULTS["INDEXING_BACKUP_CRONJOB_CPU_REQUEST"])
+    cfg["INDEXING_BACKUP_CRONJOB_CPU_LIMIT"] = _env("INDEXING_BACKUP_CRONJOB_CPU_LIMIT", DEFAULTS["INDEXING_BACKUP_CRONJOB_CPU_LIMIT"])
+    cfg["INDEXING_BACKUP_CRONJOB_MEMORY_REQUEST"] = _env("INDEXING_BACKUP_CRONJOB_MEMORY_REQUEST", DEFAULTS["INDEXING_BACKUP_CRONJOB_MEMORY_REQUEST"])
+    cfg["INDEXING_BACKUP_CRONJOB_MEMORY_LIMIT"] = _env("INDEXING_BACKUP_CRONJOB_MEMORY_LIMIT", DEFAULTS["INDEXING_BACKUP_CRONJOB_MEMORY_LIMIT"])
+    cfg["LOG_LEVEL"] = _env("LOG_LEVEL", DEFAULTS["LOG_LEVEL"])
+    cfg["HTTP_TIMEOUT"] = _env("HTTP_TIMEOUT", DEFAULTS["HTTP_TIMEOUT"])
+    cfg["INDEXING_STRICT"] = _env("INDEXING_STRICT", DEFAULTS["INDEXING_STRICT"])
+    cfg["RUN_PRE_CONVERSIONS"] = _env("RUN_PRE_CONVERSIONS", DEFAULTS["RUN_PRE_CONVERSIONS"])
+    cfg["PYTHONUNBUFFERED"] = _env("PYTHONUNBUFFERED", DEFAULTS["PYTHONUNBUFFERED"])
+    cfg["QDRANT_URL"] = _env("QDRANT_URL", DEFAULTS["QDRANT_URL"])
+    cfg["DENSE_URL"] = _env("DENSE_URL", DEFAULTS["DENSE_URL"])
+    cfg["SPARSE_URL"] = _env("SPARSE_URL", DEFAULTS["SPARSE_URL"])
+    cfg["DATA_S3_BUCKET"] = pick_env("DATA_S3_BUCKET", "S3_BUCKET", default=DEFAULTS["DATA_S3_BUCKET"])
+    cfg["DATA_S3_PREFIX"] = pick_env("DATA_S3_PREFIX", "BACKUP_PREFIX", default=DEFAULTS["DATA_S3_PREFIX"])
+    cfg["AWS_REGION"] = _env("AWS_REGION", DEFAULTS["AWS_REGION"])
+    cfg["AWS_DEFAULT_REGION"] = _env("AWS_DEFAULT_REGION", cfg["AWS_REGION"] or DEFAULTS["AWS_DEFAULT_REGION"])
+    if not cfg["AWS_REGION"]:
+        cfg["AWS_REGION"] = cfg["AWS_DEFAULT_REGION"]
+    if not cfg["AWS_DEFAULT_REGION"]:
+        cfg["AWS_DEFAULT_REGION"] = cfg["AWS_REGION"]
+    cfg["STORAGE_RAW_PREFIX"] = _env("STORAGE_RAW_PREFIX", DEFAULTS["STORAGE_RAW_PREFIX"])
+    cfg["STORAGE_CHUNKED_PREFIX"] = _env("STORAGE_CHUNKED_PREFIX", DEFAULTS["STORAGE_CHUNKED_PREFIX"])
+    cfg["QDRANT_API_KEY"] = _env("QDRANT_API_KEY", DEFAULTS["QDRANT_API_KEY"])
+    cfg["QDRANT_SECRET_NAME"] = _env("QDRANT_SECRET_NAME", DEFAULTS["QDRANT_SECRET_NAME"])
+    cfg["AWS_CREDENTIALS_SECRET_NAME"] = _env("AWS_CREDENTIALS_SECRET_NAME", DEFAULTS["AWS_CREDENTIALS_SECRET_NAME"])
+    cfg["EXTRA_SECRET_NAME"] = _env("EXTRA_SECRET_NAME", DEFAULTS["EXTRA_SECRET_NAME"])
+    cfg["USE_IRSA"] = pick_env("USE_IRSA", "AWS_USE_IRSA", default=DEFAULTS["USE_IRSA"])
+    cfg["IRSA_ROLE_ARN"] = _env("IRSA_ROLE_ARN", DEFAULTS["IRSA_ROLE_ARN"])
+    cfg["K8S_CLUSTER"] = _env("K8S_CLUSTER", DEFAULTS["K8S_CLUSTER"])
+    cfg["MAX_TOKENS_PER_CHUNK"] = _env("MAX_TOKENS_PER_CHUNK", DEFAULTS["MAX_TOKENS_PER_CHUNK"])
+    cfg["MIN_TOKENS_PER_CHUNK"] = _env("MIN_TOKENS_PER_CHUNK", DEFAULTS["MIN_TOKENS_PER_CHUNK"])
+    cfg["NUMBER_OF_OVERLAPPING_SENTENCES"] = _env("NUMBER_OF_OVERLAPPING_SENTENCES", DEFAULTS["NUMBER_OF_OVERLAPPING_SENTENCES"])
+    cfg["PDF_DISABLE_OCR"] = _env("PDF_DISABLE_OCR", DEFAULTS["PDF_DISABLE_OCR"])
+    cfg["PDF_OCR_ENGINE"] = _env("PDF_OCR_ENGINE", DEFAULTS["PDF_OCR_ENGINE"])
+    cfg["PDF_TESSERACT_LANG"] = _env("PDF_TESSERACT_LANG", DEFAULTS["PDF_TESSERACT_LANG"])
+    cfg["IMAGE_TESSERACT_LANG"] = _env("IMAGE_TESSERACT_LANG", DEFAULTS["IMAGE_TESSERACT_LANG"])
+    cfg["TESSERACT_CONFIG"] = _env("TESSERACT_CONFIG", DEFAULTS["TESSERACT_CONFIG"])
+    cfg["PDF_FORCE_OCR"] = _env("PDF_FORCE_OCR", DEFAULTS["PDF_FORCE_OCR"])
+    cfg["PDF_OCR_RENDER_DPI"] = _env("PDF_OCR_RENDER_DPI", DEFAULTS["PDF_OCR_RENDER_DPI"])
+    cfg["PDF_MIN_IMG_SIZE_BYTES"] = _env("PDF_MIN_IMG_SIZE_BYTES", DEFAULTS["PDF_MIN_IMG_SIZE_BYTES"])
+    cfg["IMAGE_OCR_ENGINE"] = _env("IMAGE_OCR_ENGINE", DEFAULTS["IMAGE_OCR_ENGINE"])
+    cfg["IMAGE_MIN_IMG_SIZE_BYTES"] = _env("IMAGE_MIN_IMG_SIZE_BYTES", DEFAULTS["IMAGE_MIN_IMG_SIZE_BYTES"])
+    cfg["IMAGE_RENDER_DPI"] = _env("IMAGE_RENDER_DPI", DEFAULTS["IMAGE_RENDER_DPI"])
+    cfg["IMAGE_UPSCALE_FACTOR"] = _env("IMAGE_UPSCALE_FACTOR", DEFAULTS["IMAGE_UPSCALE_FACTOR"])
+    cfg["CSV_TARGET_TOKENS_PER_CHUNK"] = _env("CSV_TARGET_TOKENS_PER_CHUNK", DEFAULTS["CSV_TARGET_TOKENS_PER_CHUNK"])
+    cfg["JSONL_TARGET_TOKENS_PER_CHUNK"] = _env("JSONL_TARGET_TOKENS_PER_CHUNK", DEFAULTS["JSONL_TARGET_TOKENS_PER_CHUNK"])
+    cfg["PPTX_SLIDES_PER_CHUNK"] = _env("PPTX_SLIDES_PER_CHUNK", DEFAULTS["PPTX_SLIDES_PER_CHUNK"])
+    cfg["PPTX_OCR_ENGINE"] = _env("PPTX_OCR_ENGINE", DEFAULTS["PPTX_OCR_ENGINE"])
+    cfg["COLLECTION_NAME"] = _env("COLLECTION_NAME", DEFAULTS["COLLECTION_NAME"])
+    cfg["DENSE_DIM"] = _env("DENSE_DIM", DEFAULTS["DENSE_DIM"])
+    cfg["BATCH_SIZE"] = _env("BATCH_SIZE", DEFAULTS["BATCH_SIZE"])
+    cfg["UPSERT_CHUNK"] = _env("UPSERT_CHUNK", DEFAULTS["UPSERT_CHUNK"])
+    cfg["SPARSE_BATCH_FALLBACK"] = _env("SPARSE_BATCH_FALLBACK", DEFAULTS["SPARSE_BATCH_FALLBACK"])
+    cfg["QDRANT_SHARD_NUMBER"] = _env("QDRANT_SHARD_NUMBER", DEFAULTS["QDRANT_SHARD_NUMBER"])
+    cfg["QDRANT_REPLICATION_FACTOR"] = _env("QDRANT_REPLICATION_FACTOR", DEFAULTS["QDRANT_REPLICATION_FACTOR"])
+    cfg["QDRANT_WRITE_CONSISTENCY_FACTOR"] = _env("QDRANT_WRITE_CONSISTENCY_FACTOR", DEFAULTS["QDRANT_WRITE_CONSISTENCY_FACTOR"])
+    cfg["QDRANT_HNSW_EF_CONSTRUCT"] = _env("QDRANT_HNSW_EF_CONSTRUCT", DEFAULTS["QDRANT_HNSW_EF_CONSTRUCT"])
+    cfg["QDRANT_HNSW_M"] = _env("QDRANT_HNSW_M", DEFAULTS["QDRANT_HNSW_M"])
+    cfg["QDRANT_HNSW_FULL_SCAN_THRESHOLD"] = _env("QDRANT_HNSW_FULL_SCAN_THRESHOLD", DEFAULTS["QDRANT_HNSW_FULL_SCAN_THRESHOLD"])
+    cfg["QDRANT_ONDISK"] = _env("QDRANT_ONDISK", DEFAULTS["QDRANT_ONDISK"])
+    cfg["QDRANT_ENABLE_SCALAR_QUANTIZATION"] = _env("QDRANT_ENABLE_SCALAR_QUANTIZATION", DEFAULTS["QDRANT_ENABLE_SCALAR_QUANTIZATION"])
+    cfg["QDRANT_QUANTIZATION_ALWAYS_RAM"] = _env("QDRANT_QUANTIZATION_ALWAYS_RAM", DEFAULTS["QDRANT_QUANTIZATION_ALWAYS_RAM"])
+    cfg["INDEX_TIMEOUT"] = _env("INDEX_TIMEOUT", DEFAULTS["INDEX_TIMEOUT"])
+    cfg["BACKUP_TIMEOUT"] = _env("BACKUP_TIMEOUT", DEFAULTS["BACKUP_TIMEOUT"])
+    cfg["ENABLE_QDRANT_BACKUP"] = _env("ENABLE_QDRANT_BACKUP", DEFAULTS["ENABLE_QDRANT_BACKUP"])
+    cfg["MIN_INDEXED_POINTS_FOR_BACKUP"] = _env("MIN_INDEXED_POINTS_FOR_BACKUP", DEFAULTS["MIN_INDEXED_POINTS_FOR_BACKUP"])
+    cfg["MIN_INDEX_DELTA_RATIO_FOR_BACKUP"] = _env("MIN_INDEX_DELTA_RATIO_FOR_BACKUP", DEFAULTS["MIN_INDEX_DELTA_RATIO_FOR_BACKUP"])
+    cfg["TMPDIR"] = _env("TMPDIR", DEFAULTS["TMPDIR"])
+    return cfg
+
+
+def detect_mode(cfg: dict[str, str]) -> str:
+    explicit = cfg.get("K8S_CLUSTER", "").strip().lower()
+    if explicit in {"kind", "eks", "eks-auto"}:
+        return explicit
+    if _env_bool("USE_IRSA", False) or cfg.get("IRSA_ROLE_ARN"):
+        return "eks"
+    return "kind"
+
+
+def validate_cfg(cfg: dict[str, str]) -> None:
+    missing: list[str] = []
+    mode = detect_mode(cfg)
+
+    if not cfg.get("DATA_S3_BUCKET"):
+        missing.append("DATA_S3_BUCKET")
+    if not cfg.get("QDRANT_URL"):
+        missing.append("QDRANT_URL")
+    if not cfg.get("DENSE_URL"):
+        missing.append("DENSE_URL")
+    if not cfg.get("SPARSE_URL"):
+        missing.append("SPARSE_URL")
+    if not (cfg.get("AWS_REGION") or cfg.get("AWS_DEFAULT_REGION")):
+        missing.append("AWS_REGION")
+
+    if missing:
+        fatal("missing required env vars: " + ", ".join(missing))
+
+    if mode == "kind":
+        if not (os.environ.get("AWS_ACCESS_KEY_ID") and os.environ.get("AWS_SECRET_ACCESS_KEY")):
+            fatal("kind/static mode requires AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY")
+    else:
+        if not cfg.get("IRSA_ROLE_ARN"):
+            fatal("EKS/IRSA mode requires IRSA_ROLE_ARN")
+
 
 def secret_env_item(name: str, secret_name: str, secret_key: str | None = None) -> dict[str, Any]:
     return {
@@ -253,108 +347,97 @@ def secret_env_item(name: str, secret_name: str, secret_key: str | None = None) 
         },
     }
 
-def _image_ref(repo: str, tag: str) -> str:
-    return f"{repo}:{tag}" if tag else repo
+
+def plain_env_item(name: str, value: str) -> dict[str, Any]:
+    return {"name": name, "value": value}
+
 
 def build_cronjob_manifest(cfg: dict[str, str], mode: str) -> dict[str, Any]:
     ns = cfg["NAMESPACE"]
     cron_name = cfg["CRONJOB_NAME"]
-    image = _image_ref(cfg["INDEXING_PIPELINE_CPU_IMAGE_REPO"], cfg["INDEXING_PIPELINE_CPU_IMAGE_TAG"])
+    image = f"{cfg['INDEXING_PIPELINE_CPU_IMAGE_REPO']}:{cfg['INDEXING_PIPELINE_CPU_IMAGE_TAG']}"
     aws_region = cfg["AWS_REGION"] or cfg["AWS_DEFAULT_REGION"]
+
     env: list[dict[str, Any]] = [
-        env_item("PYTHONUNBUFFERED", cfg.get("PYTHONUNBUFFERED", "1")),
-        env_item("LOG_LEVEL", cfg["LOG_LEVEL"]),
-        env_item("HTTP_TIMEOUT", cfg["HTTP_TIMEOUT"]),
-        env_item("INDEXING_STRICT", cfg["INDEXING_STRICT"]),
-        env_item("RUN_PRE_CONVERSIONS", cfg["RUN_PRE_CONVERSIONS"]),
-        env_item("QDRANT_URL", cfg["QDRANT_URL"]),
-        env_item("DENSE_URL", cfg["DENSE_URL"]),
-        env_item("SPARSE_URL", cfg["SPARSE_URL"]),
-        env_item("DATA_S3_BUCKET", cfg["DATA_S3_BUCKET"]),
-        env_item("DATA_S3_PREFIX", cfg["DATA_S3_PREFIX"]),
-        env_item("STORAGE_RAW_PREFIX", cfg["STORAGE_RAW_PREFIX"]),
-        env_item("STORAGE_CHUNKED_PREFIX", cfg["STORAGE_CHUNKED_PREFIX"]),
-        env_item("AWS_REGION", aws_region),
-        env_item("AWS_DEFAULT_REGION", aws_region),
-        env_item("AWS_SDK_LOAD_CONFIG", "1"),
-        env_item("AWS_EC2_METADATA_DISABLED", "true"),
-
-        # Chunking / OCR / rendering / tokenization
-        env_item("MAX_TOKENS_PER_CHUNK", cfg.get("MAX_TOKENS_PER_CHUNK", "320")),
-        env_item("MIN_TOKENS_PER_CHUNK", cfg.get("MIN_TOKENS_PER_CHUNK", "100")),
-        env_item("NUMBER_OF_OVERLAPPING_SENTENCES", cfg.get("NUMBER_OF_OVERLAPPING_SENTENCES", "2")),
-        env_item("PDF_DISABLE_OCR", cfg.get("PDF_DISABLE_OCR", "false")),
-        env_item("PDF_OCR_ENGINE", cfg.get("PDF_OCR_ENGINE", "rapidocr")),
-        env_item("PDF_TESSERACT_LANG", cfg.get("PDF_TESSERACT_LANG", "eng")),
-        env_item("IMAGE_TESSERACT_LANG", cfg.get("IMAGE_TESSERACT_LANG", "eng")),
-        env_item("TESSERACT_CONFIG", cfg.get("TESSERACT_CONFIG", "--oem 1 --psm 6")),
-        env_item("PDF_FORCE_OCR", cfg.get("PDF_FORCE_OCR", "false")),
-        env_item("PDF_OCR_RENDER_DPI", cfg.get("PDF_OCR_RENDER_DPI", "400")),
-        env_item("PDF_MIN_IMG_SIZE_BYTES", cfg.get("PDF_MIN_IMG_SIZE_BYTES", "3072")),
-        env_item("IMAGE_OCR_ENGINE", cfg.get("IMAGE_OCR_ENGINE", "tesseract")),
-        env_item("IMAGE_MIN_IMG_SIZE_BYTES", cfg.get("IMAGE_MIN_IMG_SIZE_BYTES", "3072")),
-        env_item("IMAGE_RENDER_DPI", cfg.get("IMAGE_RENDER_DPI", "400")),
-        env_item("IMAGE_UPSCALE_FACTOR", cfg.get("IMAGE_UPSCALE_FACTOR", "2.0")),
-        env_item("CSV_TARGET_TOKENS_PER_CHUNK", cfg.get("CSV_TARGET_TOKENS_PER_CHUNK", "400")),
-        env_item("JSONL_TARGET_TOKENS_PER_CHUNK", cfg.get("JSONL_TARGET_TOKENS_PER_CHUNK", "400")),
-        env_item("PPTX_SLIDES_PER_CHUNK", cfg.get("PPTX_SLIDES_PER_CHUNK", "4")),
-        env_item("PPTX_OCR_ENGINE", cfg.get("PPTX_OCR_ENGINE", "rapidocr")),
-
-        # Collection / embedding / batching
-        env_item("COLLECTION_NAME", cfg.get("COLLECTION_NAME", "default_rag_collection1")),
-        env_item("DENSE_DIM", cfg.get("DENSE_DIM", "384")),
-        env_item("BATCH_SIZE", cfg.get("BATCH_SIZE", "8")),
-        env_item("UPSERT_CHUNK", cfg.get("UPSERT_CHUNK", "500")),
-        env_item("SPARSE_BATCH_FALLBACK", cfg.get("SPARSE_BATCH_FALLBACK", "8")),
-
-        # Qdrant tuning
-        env_item("QDRANT_SHARD_NUMBER", cfg.get("QDRANT_SHARD_NUMBER", "3")),
-        env_item("QDRANT_REPLICATION_FACTOR", cfg.get("QDRANT_REPLICATION_FACTOR", "2")),
-        env_item("QDRANT_WRITE_CONSISTENCY_FACTOR", cfg.get("QDRANT_WRITE_CONSISTENCY_FACTOR", "1")),
-        env_item("QDRANT_HNSW_EF_CONSTRUCT", cfg.get("QDRANT_HNSW_EF_CONSTRUCT", "128")),
-        env_item("QDRANT_HNSW_M", cfg.get("QDRANT_HNSW_M", "32")),
-        env_item("QDRANT_HNSW_FULL_SCAN_THRESHOLD", cfg.get("QDRANT_HNSW_FULL_SCAN_THRESHOLD", "10000")),
-        env_item("QDRANT_ONDISK", cfg.get("QDRANT_ONDISK", "false")),
-
-        # Qdrant quantization flags (new)
-        env_item("QDRANT_ENABLE_SCALAR_QUANTIZATION", cfg.get("QDRANT_ENABLE_SCALAR_QUANTIZATION", "false")),
-        env_item("QDRANT_QUANTIZATION_ALWAYS_RAM", cfg.get("QDRANT_QUANTIZATION_ALWAYS_RAM", "true")),
-
-        # Timeouts and backup controls
-        env_item("INDEX_TIMEOUT", cfg.get("INDEX_TIMEOUT", "1800")),
-        env_item("BACKUP_TIMEOUT", cfg.get("BACKUP_TIMEOUT", "300")),
-        env_item("ENABLE_QDRANT_BACKUP", cfg.get("ENABLE_QDRANT_BACKUP", "true")),
-        env_item("MIN_INDEXED_POINTS_FOR_BACKUP", cfg.get("MIN_INDEXED_POINTS_FOR_BACKUP", "100")),
-        env_item("MIN_INDEX_DELTA_RATIO_FOR_BACKUP", cfg.get("MIN_INDEX_DELTA_RATIO_FOR_BACKUP", "0.0")),
+        plain_env_item("PYTHONUNBUFFERED", cfg["PYTHONUNBUFFERED"]),
+        plain_env_item("TMPDIR", cfg["TMPDIR"]),
+        plain_env_item("LOG_LEVEL", cfg["LOG_LEVEL"]),
+        plain_env_item("HTTP_TIMEOUT", cfg["HTTP_TIMEOUT"]),
+        plain_env_item("INDEXING_STRICT", cfg["INDEXING_STRICT"]),
+        plain_env_item("RUN_PRE_CONVERSIONS", cfg["RUN_PRE_CONVERSIONS"]),
+        plain_env_item("QDRANT_URL", cfg["QDRANT_URL"]),
+        plain_env_item("DENSE_URL", cfg["DENSE_URL"]),
+        plain_env_item("SPARSE_URL", cfg["SPARSE_URL"]),
+        plain_env_item("DATA_S3_BUCKET", cfg["DATA_S3_BUCKET"]),
+        plain_env_item("DATA_S3_PREFIX", cfg["DATA_S3_PREFIX"]),
+        plain_env_item("STORAGE_RAW_PREFIX", cfg["STORAGE_RAW_PREFIX"]),
+        plain_env_item("STORAGE_CHUNKED_PREFIX", cfg["STORAGE_CHUNKED_PREFIX"]),
+        plain_env_item("AWS_REGION", aws_region),
+        plain_env_item("AWS_DEFAULT_REGION", aws_region),
+        plain_env_item("AWS_SDK_LOAD_CONFIG", "1"),
+        plain_env_item("AWS_EC2_METADATA_DISABLED", "true"),
+        plain_env_item("MAX_TOKENS_PER_CHUNK", cfg["MAX_TOKENS_PER_CHUNK"]),
+        plain_env_item("MIN_TOKENS_PER_CHUNK", cfg["MIN_TOKENS_PER_CHUNK"]),
+        plain_env_item("NUMBER_OF_OVERLAPPING_SENTENCES", cfg["NUMBER_OF_OVERLAPPING_SENTENCES"]),
+        plain_env_item("PDF_DISABLE_OCR", cfg["PDF_DISABLE_OCR"]),
+        plain_env_item("PDF_OCR_ENGINE", cfg["PDF_OCR_ENGINE"]),
+        plain_env_item("PDF_TESSERACT_LANG", cfg["PDF_TESSERACT_LANG"]),
+        plain_env_item("IMAGE_TESSERACT_LANG", cfg["IMAGE_TESSERACT_LANG"]),
+        plain_env_item("TESSERACT_CONFIG", cfg["TESSERACT_CONFIG"]),
+        plain_env_item("PDF_FORCE_OCR", cfg["PDF_FORCE_OCR"]),
+        plain_env_item("PDF_OCR_RENDER_DPI", cfg["PDF_OCR_RENDER_DPI"]),
+        plain_env_item("PDF_MIN_IMG_SIZE_BYTES", cfg["PDF_MIN_IMG_SIZE_BYTES"]),
+        plain_env_item("IMAGE_OCR_ENGINE", cfg["IMAGE_OCR_ENGINE"]),
+        plain_env_item("IMAGE_MIN_IMG_SIZE_BYTES", cfg["IMAGE_MIN_IMG_SIZE_BYTES"]),
+        plain_env_item("IMAGE_RENDER_DPI", cfg["IMAGE_RENDER_DPI"]),
+        plain_env_item("IMAGE_UPSCALE_FACTOR", cfg["IMAGE_UPSCALE_FACTOR"]),
+        plain_env_item("CSV_TARGET_TOKENS_PER_CHUNK", cfg["CSV_TARGET_TOKENS_PER_CHUNK"]),
+        plain_env_item("JSONL_TARGET_TOKENS_PER_CHUNK", cfg["JSONL_TARGET_TOKENS_PER_CHUNK"]),
+        plain_env_item("PPTX_SLIDES_PER_CHUNK", cfg["PPTX_SLIDES_PER_CHUNK"]),
+        plain_env_item("PPTX_OCR_ENGINE", cfg["PPTX_OCR_ENGINE"]),
+        plain_env_item("COLLECTION_NAME", cfg["COLLECTION_NAME"]),
+        plain_env_item("DENSE_DIM", cfg["DENSE_DIM"]),
+        plain_env_item("BATCH_SIZE", cfg["BATCH_SIZE"]),
+        plain_env_item("UPSERT_CHUNK", cfg["UPSERT_CHUNK"]),
+        plain_env_item("SPARSE_BATCH_FALLBACK", cfg["SPARSE_BATCH_FALLBACK"]),
+        plain_env_item("QDRANT_SHARD_NUMBER", cfg["QDRANT_SHARD_NUMBER"]),
+        plain_env_item("QDRANT_REPLICATION_FACTOR", cfg["QDRANT_REPLICATION_FACTOR"]),
+        plain_env_item("QDRANT_WRITE_CONSISTENCY_FACTOR", cfg["QDRANT_WRITE_CONSISTENCY_FACTOR"]),
+        plain_env_item("QDRANT_HNSW_EF_CONSTRUCT", cfg["QDRANT_HNSW_EF_CONSTRUCT"]),
+        plain_env_item("QDRANT_HNSW_M", cfg["QDRANT_HNSW_M"]),
+        plain_env_item("QDRANT_HNSW_FULL_SCAN_THRESHOLD", cfg["QDRANT_HNSW_FULL_SCAN_THRESHOLD"]),
+        plain_env_item("QDRANT_ONDISK", cfg["QDRANT_ONDISK"]),
+        plain_env_item("QDRANT_ENABLE_SCALAR_QUANTIZATION", cfg["QDRANT_ENABLE_SCALAR_QUANTIZATION"]),
+        plain_env_item("QDRANT_QUANTIZATION_ALWAYS_RAM", cfg["QDRANT_QUANTIZATION_ALWAYS_RAM"]),
+        plain_env_item("INDEX_TIMEOUT", cfg["INDEX_TIMEOUT"]),
+        plain_env_item("BACKUP_TIMEOUT", cfg["BACKUP_TIMEOUT"]),
+        plain_env_item("ENABLE_QDRANT_BACKUP", cfg["ENABLE_QDRANT_BACKUP"]),
+        plain_env_item("MIN_INDEXED_POINTS_FOR_BACKUP", cfg["MIN_INDEXED_POINTS_FOR_BACKUP"]),
+        plain_env_item("MIN_INDEX_DELTA_RATIO_FOR_BACKUP", cfg["MIN_INDEX_DELTA_RATIO_FOR_BACKUP"]),
     ]
-    # Qdrant API key: prefer secret if provided
+
     if cfg.get("QDRANT_API_KEY"):
         env.append(secret_env_item("QDRANT_API_KEY", cfg["QDRANT_SECRET_NAME"], "QDRANT_API_KEY"))
-    # AWS static creds for kind mode: mount from secret
+
     if mode == "kind":
         env.append(secret_env_item("AWS_ACCESS_KEY_ID", cfg["AWS_CREDENTIALS_SECRET_NAME"], "AWS_ACCESS_KEY_ID"))
         env.append(secret_env_item("AWS_SECRET_ACCESS_KEY", cfg["AWS_CREDENTIALS_SECRET_NAME"], "AWS_SECRET_ACCESS_KEY"))
         if os.environ.get("AWS_SESSION_TOKEN"):
             env.append(secret_env_item("AWS_SESSION_TOKEN", cfg["AWS_CREDENTIALS_SECRET_NAME"], "AWS_SESSION_TOKEN"))
 
-    # Container security context: enforce non-root, drop capabilities, disallow privilege escalation,
-    # prevent gaining new privileges, and make root filesystem read-only.
-    # NOTE: some Kubernetes API server versions may not accept certain fields in strict decoding.
-    # Remove fields that cause strict decoding errors (e.g., noNewPrivileges) to maximize compatibility.
-    container_security_context = {
+    pod_security_context: dict[str, Any] = {
+        "runAsNonRoot": True,
+        "runAsUser": 10001,
+        "fsGroup": 10001,
+        "seccompProfile": {"type": "RuntimeDefault"},
+    }
+
+    container_security_context: dict[str, Any] = {
         "runAsNonRoot": True,
         "runAsUser": 10001,
         "allowPrivilegeEscalation": False,
         "readOnlyRootFilesystem": True,
         "capabilities": {"drop": ["ALL"]},
-    }
-
-    # Pod-level security context: ensure pod runs as non-root and set fsGroup for writable volumes.
-    pod_security_context = {
-        "runAsNonRoot": True,
-        "runAsUser": 10001,
-        "fsGroup": 10001,
-        "seccompProfile": {"type": "RuntimeDefault"},
     }
 
     cronjob: dict[str, Any] = {
@@ -364,11 +447,11 @@ def build_cronjob_manifest(cfg: dict[str, str], mode: str) -> dict[str, Any]:
         "spec": {
             "schedule": cfg["CRON_SCHEDULE"],
             "concurrencyPolicy": cfg["CRONJOB_CONCURRENCY"],
-            "successfulJobsHistoryLimit": as_int(cfg["CRONJOB_SUCCESSFUL_JOBS_HISTORY_LIMIT"], 3),
-            "failedJobsHistoryLimit": as_int(cfg["CRONJOB_FAILED_JOBS_HISTORY_LIMIT"], 1),
+            "successfulJobsHistoryLimit": _env_int("CRONJOB_SUCCESSFUL_JOBS_HISTORY_LIMIT", 3),
+            "failedJobsHistoryLimit": _env_int("CRONJOB_FAILED_JOBS_HISTORY_LIMIT", 1),
             "jobTemplate": {
                 "spec": {
-                    "backoffLimit": as_int(cfg["CRONJOB_BACKOFF_LIMIT"], 1),
+                    "backoffLimit": _env_int("CRONJOB_BACKOFF_LIMIT", 1),
                     "template": {
                         "metadata": {
                             "labels": {
@@ -394,6 +477,7 @@ def build_cronjob_manifest(cfg: dict[str, str], mode: str) -> dict[str, Any]:
                                     "securityContext": container_security_context,
                                     "volumeMounts": [
                                         {"name": "tmp", "mountPath": "/tmp"},
+                                        {"name": "tmp", "mountPath": "/indexing_pipeline/tmp"},
                                     ],
                                     "resources": {
                                         "requests": {
@@ -414,101 +498,12 @@ def build_cronjob_manifest(cfg: dict[str, str], mode: str) -> dict[str, Any]:
             },
         },
     }
-    if cfg.get("CRONJOB_TIMEZONE"):
+
+    if cfg["CRONJOB_TIMEZONE"]:
         cronjob["spec"]["timeZone"] = cfg["CRONJOB_TIMEZONE"]
+
     return cronjob
 
-def collect_cfg() -> dict[str, str]:
-    cfg: dict[str, str] = {}
-    for key in sorted(RUNTIME_KEYS):
-        cfg[key] = pick_env(key, default=DEFAULTS.get(key, ""))
-    cfg["NAMESPACE"] = pick_env("NAMESPACE", default=DEFAULTS["NAMESPACE"])
-    cfg["CRONJOB_NAME"] = pick_env("CRONJOB_NAME", default=DEFAULTS["CRONJOB_NAME"]).lower()
-    cfg["CRON_SCHEDULE"] = pick_env("CRON_SCHEDULE", "INDEXING_BACKUP_CRON_EXPRESSION", default=DEFAULTS["CRON_SCHEDULE"])
-    cfg["CRONJOB_CONCURRENCY"] = pick_env("CRONJOB_CONCURRENCY", default=DEFAULTS["CRONJOB_CONCURRENCY"])
-    cfg["CRONJOB_BACKOFF_LIMIT"] = pick_env("CRONJOB_BACKOFF_LIMIT", default=DEFAULTS["CRONJOB_BACKOFF_LIMIT"])
-    cfg["CRONJOB_SUCCESSFUL_JOBS_HISTORY_LIMIT"] = pick_env("CRONJOB_SUCCESSFUL_JOBS_HISTORY_LIMIT", default=DEFAULTS["CRONJOB_SUCCESSFUL_JOBS_HISTORY_LIMIT"])
-    cfg["CRONJOB_FAILED_JOBS_HISTORY_LIMIT"] = pick_env("CRONJOB_FAILED_JOBS_HISTORY_LIMIT", default=DEFAULTS["CRONJOB_FAILED_JOBS_HISTORY_LIMIT"])
-    cfg["CRONJOB_TIMEZONE"] = pick_env("CRONJOB_TIMEZONE", default=DEFAULTS["CRONJOB_TIMEZONE"])
-    cfg["SERVICE_ACCOUNT_NAME"] = pick_env("SERVICE_ACCOUNT_NAME", default=DEFAULTS["SERVICE_ACCOUNT_NAME"])
-    cfg["MANIFESTS_DIR"] = pick_env("MANIFESTS_DIR", default=DEFAULTS["MANIFESTS_DIR"])
-    cfg["INDEXING_PIPELINE_CPU_IMAGE_REPO"] = pick_env("INDEXING_PIPELINE_CPU_IMAGE_REPO", default=DEFAULTS["INDEXING_PIPELINE_CPU_IMAGE_REPO"])
-    cfg["INDEXING_PIPELINE_CPU_IMAGE_TAG"] = pick_env("INDEXING_PIPELINE_CPU_IMAGE_TAG", default=DEFAULTS["INDEXING_PIPELINE_CPU_IMAGE_TAG"])
-    cfg["INDEXING_BACKUP_CRONJOB_CPU_REQUEST"] = pick_env("INDEXING_BACKUP_CRONJOB_CPU_REQUEST", default=DEFAULTS["INDEXING_BACKUP_CRONJOB_CPU_REQUEST"])
-    cfg["INDEXING_BACKUP_CRONJOB_CPU_LIMIT"] = pick_env("INDEXING_BACKUP_CRONJOB_CPU_LIMIT", default=DEFAULTS["INDEXING_BACKUP_CRONJOB_CPU_LIMIT"])
-    cfg["INDEXING_BACKUP_CRONJOB_MEMORY_REQUEST"] = pick_env("INDEXING_BACKUP_CRONJOB_MEMORY_REQUEST", default=DEFAULTS["INDEXING_BACKUP_CRONJOB_MEMORY_REQUEST"])
-    cfg["INDEXING_BACKUP_CRONJOB_MEMORY_LIMIT"] = pick_env("INDEXING_BACKUP_CRONJOB_MEMORY_LIMIT", default=DEFAULTS["INDEXING_BACKUP_CRONJOB_MEMORY_LIMIT"])
-    cfg["LOG_LEVEL"] = pick_env("LOG_LEVEL", default=DEFAULTS["LOG_LEVEL"])
-    cfg["HTTP_TIMEOUT"] = pick_env("HTTP_TIMEOUT", default=DEFAULTS["HTTP_TIMEOUT"])
-    cfg["INDEXING_STRICT"] = pick_env("INDEXING_STRICT", default=DEFAULTS["INDEXING_STRICT"])
-    cfg["RUN_PRE_CONVERSIONS"] = pick_env("RUN_PRE_CONVERSIONS", default=DEFAULTS["RUN_PRE_CONVERSIONS"])
-    cfg["QDRANT_URL"] = pick_env("QDRANT_URL", default=DEFAULTS["QDRANT_URL"])
-    cfg["DENSE_URL"] = pick_env("DENSE_URL", default=DEFAULTS["DENSE_URL"])
-    cfg["SPARSE_URL"] = pick_env("SPARSE_URL", default=DEFAULTS["SPARSE_URL"])
-    cfg["DATA_S3_BUCKET"] = pick_env("DATA_S3_BUCKET", "S3_BUCKET", default=DEFAULTS["DATA_S3_BUCKET"])
-    cfg["DATA_S3_PREFIX"] = pick_env("DATA_S3_PREFIX", "BACKUP_PREFIX", default=DEFAULTS["DATA_S3_PREFIX"])
-    cfg["AWS_REGION"] = pick_env("AWS_REGION", default=DEFAULTS["AWS_REGION"])
-    cfg["AWS_DEFAULT_REGION"] = pick_env("AWS_DEFAULT_REGION", default=cfg["AWS_REGION"] or DEFAULTS["AWS_DEFAULT_REGION"])
-    if not cfg["AWS_REGION"]:
-        cfg["AWS_REGION"] = cfg["AWS_DEFAULT_REGION"]
-    if not cfg["AWS_DEFAULT_REGION"]:
-        cfg["AWS_DEFAULT_REGION"] = cfg["AWS_REGION"]
-    cfg["STORAGE_RAW_PREFIX"] = pick_env("STORAGE_RAW_PREFIX", default=DEFAULTS["STORAGE_RAW_PREFIX"])
-    cfg["STORAGE_CHUNKED_PREFIX"] = pick_env("STORAGE_CHUNKED_PREFIX", default=DEFAULTS["STORAGE_CHUNKED_PREFIX"])
-    cfg["QDRANT_API_KEY"] = pick_env("QDRANT_API_KEY", default=DEFAULTS["QDRANT_API_KEY"])
-    cfg["QDRANT_SECRET_NAME"] = pick_env("QDRANT_SECRET_NAME", default=DEFAULTS["QDRANT_SECRET_NAME"])
-    cfg["AWS_CREDENTIALS_SECRET_NAME"] = pick_env("AWS_CREDENTIALS_SECRET_NAME", default=DEFAULTS["AWS_CREDENTIALS_SECRET_NAME"])
-    cfg["EXTRA_SECRET_NAME"] = pick_env("EXTRA_SECRET_NAME", default=DEFAULTS["EXTRA_SECRET_NAME"])
-    cfg["USE_IRSA"] = pick_env("USE_IRSA", "AWS_USE_IRSA", default=DEFAULTS["USE_IRSA"])
-    cfg["IRSA_ROLE_ARN"] = pick_env("IRSA_ROLE_ARN", default=DEFAULTS["IRSA_ROLE_ARN"])
-    cfg["K8S_CLUSTER"] = pick_env("K8S_CLUSTER", default=DEFAULTS["K8S_CLUSTER"])
-
-    # Collect new vars (OVERWRITE_* vars intentionally removed)
-    cfg["MAX_TOKENS_PER_CHUNK"] = pick_env("MAX_TOKENS_PER_CHUNK", default=DEFAULTS["MAX_TOKENS_PER_CHUNK"])
-    cfg["MIN_TOKENS_PER_CHUNK"] = pick_env("MIN_TOKENS_PER_CHUNK", default=DEFAULTS["MIN_TOKENS_PER_CHUNK"])
-    cfg["NUMBER_OF_OVERLAPPING_SENTENCES"] = pick_env("NUMBER_OF_OVERLAPPING_SENTENCES", default=DEFAULTS["NUMBER_OF_OVERLAPPING_SENTENCES"])
-    cfg["PDF_DISABLE_OCR"] = pick_env("PDF_DISABLE_OCR", default=DEFAULTS["PDF_DISABLE_OCR"])
-    cfg["PDF_OCR_ENGINE"] = pick_env("PDF_OCR_ENGINE", default=DEFAULTS["PDF_OCR_ENGINE"])
-    cfg["PDF_TESSERACT_LANG"] = pick_env("PDF_TESSERACT_LANG", default=DEFAULTS["PDF_TESSERACT_LANG"])
-    cfg["IMAGE_TESSERACT_LANG"] = pick_env("IMAGE_TESSERACT_LANG", default=DEFAULTS["IMAGE_TESSERACT_LANG"])
-    cfg["TESSERACT_CONFIG"] = pick_env("TESSERACT_CONFIG", default=DEFAULTS["TESSERACT_CONFIG"])
-    cfg["PDF_FORCE_OCR"] = pick_env("PDF_FORCE_OCR", default=DEFAULTS["PDF_FORCE_OCR"])
-    cfg["PDF_OCR_RENDER_DPI"] = pick_env("PDF_OCR_RENDER_DPI", default=DEFAULTS["PDF_OCR_RENDER_DPI"])
-    cfg["PDF_MIN_IMG_SIZE_BYTES"] = pick_env("PDF_MIN_IMG_SIZE_BYTES", default=DEFAULTS["PDF_MIN_IMG_SIZE_BYTES"])
-    cfg["IMAGE_OCR_ENGINE"] = pick_env("IMAGE_OCR_ENGINE", default=DEFAULTS["IMAGE_OCR_ENGINE"])
-    cfg["IMAGE_MIN_IMG_SIZE_BYTES"] = pick_env("IMAGE_MIN_IMG_SIZE_BYTES", default=DEFAULTS["IMAGE_MIN_IMG_SIZE_BYTES"])
-    cfg["IMAGE_RENDER_DPI"] = pick_env("IMAGE_RENDER_DPI", default=DEFAULTS["IMAGE_RENDER_DPI"])
-    cfg["IMAGE_UPSCALE_FACTOR"] = pick_env("IMAGE_UPSCALE_FACTOR", default=DEFAULTS["IMAGE_UPSCALE_FACTOR"])
-    cfg["CSV_TARGET_TOKENS_PER_CHUNK"] = pick_env("CSV_TARGET_TOKENS_PER_CHUNK", default=DEFAULTS["CSV_TARGET_TOKENS_PER_CHUNK"])
-    cfg["JSONL_TARGET_TOKENS_PER_CHUNK"] = pick_env("JSONL_TARGET_TOKENS_PER_CHUNK", default=DEFAULTS["JSONL_TARGET_TOKENS_PER_CHUNK"])
-    cfg["PPTX_SLIDES_PER_CHUNK"] = pick_env("PPTX_SLIDES_PER_CHUNK", default=DEFAULTS["PPTX_SLIDES_PER_CHUNK"])
-    cfg["PPTX_OCR_ENGINE"] = pick_env("PPTX_OCR_ENGINE", default=DEFAULTS["PPTX_OCR_ENGINE"])
-
-    cfg["COLLECTION_NAME"] = pick_env("COLLECTION_NAME", default=DEFAULTS["COLLECTION_NAME"])
-    cfg["DENSE_DIM"] = pick_env("DENSE_DIM", default=DEFAULTS["DENSE_DIM"])
-    cfg["BATCH_SIZE"] = pick_env("BATCH_SIZE", default=DEFAULTS["BATCH_SIZE"])
-    cfg["UPSERT_CHUNK"] = pick_env("UPSERT_CHUNK", default=DEFAULTS["UPSERT_CHUNK"])
-    cfg["SPARSE_BATCH_FALLBACK"] = pick_env("SPARSE_BATCH_FALLBACK", default=DEFAULTS["SPARSE_BATCH_FALLBACK"])
-
-    cfg["QDRANT_SHARD_NUMBER"] = pick_env("QDRANT_SHARD_NUMBER", default=DEFAULTS["QDRANT_SHARD_NUMBER"])
-    cfg["QDRANT_REPLICATION_FACTOR"] = pick_env("QDRANT_REPLICATION_FACTOR", default=DEFAULTS["QDRANT_REPLICATION_FACTOR"])
-    cfg["QDRANT_WRITE_CONSISTENCY_FACTOR"] = pick_env("QDRANT_WRITE_CONSISTENCY_FACTOR", default=DEFAULTS["QDRANT_WRITE_CONSISTENCY_FACTOR"])
-    cfg["QDRANT_HNSW_EF_CONSTRUCT"] = pick_env("QDRANT_HNSW_EF_CONSTRUCT", default=DEFAULTS["QDRANT_HNSW_EF_CONSTRUCT"])
-    cfg["QDRANT_HNSW_M"] = pick_env("QDRANT_HNSW_M", default=DEFAULTS["QDRANT_HNSW_M"])
-    cfg["QDRANT_HNSW_FULL_SCAN_THRESHOLD"] = pick_env("QDRANT_HNSW_FULL_SCAN_THRESHOLD", default=DEFAULTS["QDRANT_HNSW_FULL_SCAN_THRESHOLD"])
-    cfg["QDRANT_ONDISK"] = pick_env("QDRANT_ONDISK", default=DEFAULTS["QDRANT_ONDISK"])
-
-    # New Qdrant quantization config picks
-    cfg["QDRANT_ENABLE_SCALAR_QUANTIZATION"] = pick_env("QDRANT_ENABLE_SCALAR_QUANTIZATION", default=DEFAULTS["QDRANT_ENABLE_SCALAR_QUANTIZATION"])
-    cfg["QDRANT_QUANTIZATION_ALWAYS_RAM"] = pick_env("QDRANT_QUANTIZATION_ALWAYS_RAM", default=DEFAULTS["QDRANT_QUANTIZATION_ALWAYS_RAM"])
-
-    cfg["INDEX_TIMEOUT"] = pick_env("INDEX_TIMEOUT", default=DEFAULTS["INDEX_TIMEOUT"])
-    cfg["BACKUP_TIMEOUT"] = pick_env("BACKUP_TIMEOUT", default=DEFAULTS["BACKUP_TIMEOUT"])
-    cfg["ENABLE_QDRANT_BACKUP"] = pick_env("ENABLE_QDRANT_BACKUP", default=DEFAULTS["ENABLE_QDRANT_BACKUP"])
-    cfg["MIN_INDEXED_POINTS_FOR_BACKUP"] = pick_env("MIN_INDEXED_POINTS_FOR_BACKUP", default=DEFAULTS["MIN_INDEXED_POINTS_FOR_BACKUP"])
-    cfg["MIN_INDEX_DELTA_RATIO_FOR_BACKUP"] = pick_env("MIN_INDEX_DELTA_RATIO_FOR_BACKUP", default=DEFAULTS["MIN_INDEX_DELTA_RATIO_FOR_BACKUP"])
-
-    return cfg
 
 def write_manifests(manifests_dir: Path, docs: list[tuple[str, dict[str, Any]]]) -> list[Path]:
     manifests_dir.mkdir(parents=True, exist_ok=True)
@@ -519,15 +514,18 @@ def write_manifests(manifests_dir: Path, docs: list[tuple[str, dict[str, Any]]])
         out.append(p)
     return out
 
+
 def apply_yaml(yaml_text: str, *, timeout: int = 60) -> None:
     rc, out, err = run_cmd(["kubectl", "apply", "-f", "-"], input_text=yaml_text, timeout=timeout)
     if rc != 0:
         fatal(err or out or "kubectl apply failed", 4)
 
+
 def apply_direct_secret(ns: str, name: str, data: dict[str, str], timeout: int = 30) -> None:
     if not data:
         return
-    apply_yaml(yaml_dump(build_secret_manifest(ns, name, data)), timeout=timeout)
+    apply_yaml(yaml_dump(secret_manifest(ns, name, data)), timeout=timeout)
+
 
 def wait_for_namespace(ns: str, timeout: int = 30) -> None:
     start = time.monotonic()
@@ -539,25 +537,32 @@ def wait_for_namespace(ns: str, timeout: int = 30) -> None:
             fatal(f"namespace '{ns}' was not observable after creation", 5)
         time.sleep(1)
 
+
 def render_and_apply(cfg: dict[str, str], dry_run: bool) -> None:
     ensure_kubectl_available()
     mode = detect_mode(cfg)
     manifests_dir = Path(cfg["MANIFESTS_DIR"])
+
     docs: list[tuple[str, dict[str, Any]]] = [
         ("00-namespace.yaml", namespace_manifest(cfg["NAMESPACE"])),
         ("10-serviceaccount.yaml", serviceaccount_manifest(cfg["NAMESPACE"], cfg["SERVICE_ACCOUNT_NAME"], mode, cfg["IRSA_ROLE_ARN"])),
         ("50-cronjob.yaml", build_cronjob_manifest(cfg, mode)),
     ]
+
     rendered_files = write_manifests(manifests_dir, docs)
     log(f"Rendered manifests to {manifests_dir}")
     for p in rendered_files:
         log(str(p))
+
     if dry_run:
         return
+
     apply_yaml(yaml_dump(namespace_manifest(cfg["NAMESPACE"])), timeout=20)
     wait_for_namespace(cfg["NAMESPACE"], timeout=30)
+
     if cfg.get("QDRANT_API_KEY"):
         apply_direct_secret(cfg["NAMESPACE"], cfg["QDRANT_SECRET_NAME"], {"QDRANT_API_KEY": cfg["QDRANT_API_KEY"]})
+
     if mode == "kind":
         aws_data: dict[str, str] = {}
         if os.environ.get("AWS_ACCESS_KEY_ID"):
@@ -567,6 +572,7 @@ def render_and_apply(cfg: dict[str, str], dry_run: bool) -> None:
         if os.environ.get("AWS_SESSION_TOKEN"):
             aws_data["AWS_SESSION_TOKEN"] = os.environ["AWS_SESSION_TOKEN"]
         apply_direct_secret(cfg["NAMESPACE"], cfg["AWS_CREDENTIALS_SECRET_NAME"], aws_data)
+
     apply_yaml(
         "\n---\n".join(
             yaml_dump(doc)
@@ -579,39 +585,28 @@ def render_and_apply(cfg: dict[str, str], dry_run: bool) -> None:
     )
     log("Applied manifests successfully")
 
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Render and optionally apply Kubernetes manifests for the indexing cronjob."
     )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Render manifests to disk but do not apply them to the cluster.",
-    )
-    parser.add_argument(
-        "--manifests-dir",
-        type=str,
-        default="",
-        help="Override the output manifests directory (default from environment or defaults).",
-    )
-    parser.add_argument(
-        "--validate-only",
-        action="store_true",
-        help="Validate configuration only (collect and validate env vars) and exit.",
-    )
+    parser.add_argument("--dry-run", action="store_true", help="Render manifests to disk but do not apply them.")
+    parser.add_argument("--manifests-dir", type=str, default="", help="Override output manifests directory.")
+    parser.add_argument("--validate-only", action="store_true", help="Validate configuration and exit.")
     return parser.parse_args(argv)
+
 
 def main(argv: list[str]) -> None:
     args = parse_args(argv)
-    cfg = collect_cfg()
+    cfg = build_cfg()
     if args.manifests_dir:
         cfg["MANIFESTS_DIR"] = args.manifests_dir
-    # Validate configuration for required fields depending on mode
     validate_cfg(cfg)
     if args.validate_only:
         log("Configuration validated successfully.")
         return
     render_and_apply(cfg, dry_run=args.dry_run)
+
 
 if __name__ == "__main__":
     try:
