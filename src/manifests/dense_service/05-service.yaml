@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: dense-svc
+  namespace: models
+  labels:
+    app.kubernetes.io/name: dense
+    app.kubernetes.io/component: embedder
+    app.kubernetes.io/managed-by: gen_dense
+    app.kubernetes.io/instance: dense
+    env: nonprod
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8200
+    targetPort: 8200
+    protocol: TCP
+    name: http
+  selector:
+    app.kubernetes.io/name: dense

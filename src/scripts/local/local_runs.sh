@@ -1,10 +1,11 @@
 rm -rf src/manifests
 aws s3 rm s3://s3-temp-bucket-mlsecops-681802563986/ --recursive
 
+aws s3 ls s3://s3-temp-bucket-mlsecops-681802563986/ --recursive
+
+
 python3 src/scripts/local/force_sync_s3_local_fs.py --upload
 
-
-make core
 
 python3 src/infra/rag/qdrant_service.py --rollout
 
@@ -20,7 +21,7 @@ python3 src/infra/rag/sparse_service.py --rollout
 
 
 export FORCE_QDRANT_BACKUP=true
-export MIN_INDEXED_POINTS_FOR_BACKUP=1
+export MIN_INDEXED_POINTS_FOR_BACKUP=50
 kubectl delete jobs indexing-backup-manual -n indexing || true
 python3 src/infra/rag/indexing_cronjob.py
 kubectl create job --from=cronjob/indexing-backup-cronjob indexing-backup-manual -n indexing
