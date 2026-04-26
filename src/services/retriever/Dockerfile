@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM docker.io/library/python:3.13.12-slim-bookworm@sha256:a58daefb915e1e03ad48f3ca4df8832065412c5c35cacb9d39f4229184de12b6 AS builder
+FROM python:3.13.12-slim@sha256:f1927c75e81efd1e091dbd64b6c0ecaa5630b38635a3d1c04034ac636e1f94c8 AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -22,7 +22,7 @@ RUN python -m pip install --upgrade pip setuptools wheel \
     && pip wheel --wheel-dir /wheels -r requirements.txt
 
 
-FROM docker.io/library/python:3.13.12-slim-bookworm@sha256:a58daefb915e1e03ad48f3ca4df8832065412c5c35cacb9d39f4229184de12b6 AS runtime
+FROM python:3.13.12-slim@sha256:f1927c75e81efd1e091dbd64b6c0ecaa5630b38635a3d1c04034ac636e1f94c8 AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -48,7 +48,7 @@ COPY requirements.txt ./
 RUN python -m pip install --no-index --find-links=/wheels -r requirements.txt \
     && rm -rf /wheels
 
-COPY query_helpers.py qdrant_store.py retriever.py ./
+COPY query_helpers.py qdrant_store.py retriever.py main.py retriever_helpers.py ./
 
 RUN chown -R app:app /app
 
@@ -66,4 +66,4 @@ CMD ["python", "-m", "uvicorn", "main:app",
      "--http", "httptools",
      "--proxy-headers",
      "--forwarded-allow-ips", "*",
-     "--workers", "2"]
+     "--workers", "1"]

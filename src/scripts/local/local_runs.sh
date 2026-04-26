@@ -16,9 +16,6 @@ export SPARSE_BATCH_SIZE=64 # upper bound
 python3 src/infra/rag/sparse_service.py --rollout
 
 
-
-export FORCE_QDRANT_BACKUP=true
-export MIN_INDEXED_POINTS_FOR_BACKUP=50
 kubectl delete jobs indexing-backup-manual -n indexing || true
 python3 src/infra/rag/indexing_cronjob.py
 kubectl create job --from=cronjob/indexing-backup-cronjob indexing-backup-manual -n indexing
@@ -56,9 +53,6 @@ uvicorn retriever:app \
   --proxy-headers \
   --forwarded-allow-ips "*"
 
-curl -s -X POST http://localhost:8203/generate   -H "Content-Type: application/json"   -d '{"query":"what are the agent governance standards?"}' | jq
-
-curl -s -X POST http://localhost:8203/generate   -H "Content-Type: application/json"   -d '{"query":"why AI agents become popular now?"}' | jq
-
-
-curl -s -X POST http://localhost:8203/generate   -H "Content-Type: application/json"   -d '{"query":"what is parsing in RAG?"}' | jq
+curl -N http://localhost:8203/stream \
+  -H "Content-Type: application/json" \
+  -d '{"query":"Why must RAGOps extend testing and evaluation capabilities when incorporating human feedback?"}'

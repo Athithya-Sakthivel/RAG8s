@@ -1,0 +1,2747 @@
+[
+  {
+    "dataset_record_id": "rag-0001",
+    "inputs": {
+      "query": "Why evaluate a RAG system?",
+      "context": "Intro to RAG evaluation; risks include hallucination and bias",
+      "source_doc_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163",
+      "source_chunk_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163_1",
+      "metadata": { "language": "en", "section": "introduction" }
+    },
+    "expectations": {
+      "expected_response": "Evaluate to measure accuracy, recall, precision and to avoid hallucinations and biased outputs.",
+      "expected_facts": ["measure precision", "measure recall", "avoid hallucinations", "check bias"],
+      "guidelines": "Prefer concise explanation listing key reasons; mention hallucination and contextual gaps.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/qdrant_eval_best_practices.html",
+          "chunk_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163_1",
+          "chunk_index": 1,
+          "snippet": "This guide will teach you how to evaluate a RAG system for both accuracy and quality.",
+          "confidence": 0.98
+        }
+      ]
+    },
+    "tags": { "eval_type": "rag", "priority": "high" },
+    "source": { "human": { "annotator": "auto-ingest" }, "document": { "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/qdrant_eval_best_practices.html" } },
+    "create_time": "2026-04-26T03:59:28.759Z",
+    "created_by": "ingest-script"
+  },
+  {
+    "dataset_record_id": "rag-0002",
+    "inputs": {
+      "query": "What are common augmentation issues for RAG?",
+      "context": "Augmentation challenges: outdated info and contextual gaps",
+      "source_doc_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163",
+      "source_chunk_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163_2",
+      "metadata": { "language": "en", "section": "augmentation" }
+    },
+    "expectations": {
+      "expected_response": "Outdated information and contextual gaps that lead to incomplete or fragmented augmented responses.",
+      "expected_facts": ["outdated information", "contextual gaps", "fragmented responses"],
+      "guidelines": "List augmentation failure modes and one mitigation (e.g., refresh index).",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/qdrant_eval_best_practices.html",
+          "chunk_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163_2",
+          "chunk_index": 2,
+          "snippet": "Augmentation processes face challenges such as outdated information, where responses may include data that is no longer current.",
+          "confidence": 0.96
+        }
+      ]
+    },
+    "tags": { "eval_type": "rag", "priority": "medium" },
+    "source": { "human": { "annotator": "auto-ingest" } },
+    "create_time": "2026-04-26T03:59:28.759Z",
+    "created_by": "ingest-script"
+  },
+  {
+    "dataset_record_id": "rag-0003",
+    "inputs": {
+      "query": "Which frameworks help evaluate RAG?",
+      "context": "Recommended frameworks: Ragas, Quotient AI, Arize Phoenix",
+      "source_doc_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163",
+      "source_chunk_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163_2",
+      "metadata": { "language": "en", "section": "frameworks" }
+    },
+    "expectations": {
+      "expected_response": "Ragas, Quotient AI, and Arize Phoenix are recommended; briefly state what each provides.",
+      "expected_facts": ["Ragas: Q&A based metrics", "Quotient: custom dataset benchmarking", "Arize Phoenix: visual step tracing"],
+      "guidelines": "One-sentence description per framework.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/qdrant_eval_best_practices.html",
+          "chunk_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163_2",
+          "chunk_index": 2,
+          "snippet": "To simplify the evaluation process, several powerful frameworks are available. Below we will explore three popular ones: Ragas, Quotient AI, and Arize Phoenix.",
+          "confidence": 0.95
+        }
+      ]
+    },
+    "tags": { "eval_type": "rag", "priority": "low" },
+    "source": { "document": { "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/qdrant_eval_best_practices.html" } },
+    "create_time": "2026-04-26T03:59:28.759Z",
+    "created_by": "ingest-script"
+  },
+  {
+    "dataset_record_id": "rag-0004",
+    "inputs": {
+      "query": "What metrics does Ragas provide?",
+      "context": "Ragas metrics: faithfulness, relevance, semantic similarity, recall, precision",
+      "source_doc_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163",
+      "source_chunk_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163_3",
+      "metadata": { "language": "en", "section": "ragas" }
+    },
+    "expectations": {
+      "expected_response": "Metrics include faithfulness, relevance, context recall, precision, entity recall, and answer similarity.",
+      "expected_facts": ["faithfulness", "relevance", "context recall", "precision", "entity recall", "answer similarity"],
+      "guidelines": "Return a bullet list of metrics with one-line definitions.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/qdrant_eval_best_practices.html",
+          "chunk_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163_3",
+          "chunk_index": 3,
+          "snippet": "It provides metrics like faithfulness, relevance, and semantic similarity to assess retrieval and answer quality.",
+          "confidence": 0.96
+        }
+      ]
+    },
+    "tags": { "eval_type": "rag", "priority": "medium" },
+    "source": { "human": { "annotator": "auto-ingest" } },
+    "create_time": "2026-04-26T03:59:28.759Z",
+    "created_by": "ingest-script"
+  },
+  {
+    "dataset_record_id": "rag-0005",
+    "inputs": {
+      "query": "How can Arize Phoenix help RAG debugging?",
+      "context": "Arize Phoenix visualizes response construction and calculates latency/token metrics",
+      "source_doc_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163",
+      "source_chunk_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163_4",
+      "metadata": { "language": "en", "section": "arize" }
+    },
+    "expectations": {
+      "expected_response": "Phoenix shows step-by-step response construction, helps identify slowdowns and errors, and reports latency and token usage.",
+      "expected_facts": ["visual step tracing", "latency metrics", "token usage", "error identification"],
+      "guidelines": "Explain two concrete benefits for debugging RAG pipelines.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/qdrant_eval_best_practices.html",
+          "chunk_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163_4",
+          "chunk_index": 4,
+          "snippet": "Phoenix also calculates key metrics like latency, token usage, and errors, giving you an idea of how efficiently your RAG system is working.",
+          "confidence": 0.94
+        }
+      ]
+    },
+    "tags": { "eval_type": "rag", "priority": "low" },
+    "source": { "document": { "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/qdrant_eval_best_practices.html" } },
+    "create_time": "2026-04-26T03:59:28.759Z",
+    "created_by": "ingest-script"
+  },
+  {
+    "dataset_record_id": "rag-0006",
+    "inputs": {
+      "query": "What chunking best practices improve retrieval?",
+      "context": "Chunk size, overlap, deduplication and content normalization",
+      "source_doc_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163",
+      "source_chunk_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163_5",
+      "metadata": { "language": "en", "section": "chunking" }
+    },
+    "expectations": {
+      "expected_response": "Calibrate chunk size to model token limits, ensure overlap, deduplicate, and normalize content for better recall and precision.",
+      "expected_facts": ["calibrate chunk size", "ensure overlap", "deduplicate", "normalize content"],
+      "guidelines": "Return recommended chunk size strategy and overlap rationale.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/qdrant_eval_best_practices.html",
+          "chunk_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163_5",
+          "chunk_index": 5,
+          "snippet": "Ensure proper chunk overlap: This helps retain context by sharing data points across chunks.",
+          "confidence": 0.97
+        }
+      ]
+    },
+    "tags": { "eval_type": "rag", "priority": "high" },
+    "source": { "human": { "annotator": "auto-ingest" } },
+    "create_time": "2026-04-26T03:59:28.760Z",
+    "created_by": "ingest-script"
+  },
+  {
+    "dataset_record_id": "rag-0007",
+    "inputs": {
+      "query": "How to choose an embedding model for retrieval?",
+      "context": "Embedding model selection affects semantic relationships and retrieval performance",
+      "source_doc_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163",
+      "source_chunk_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163_5",
+      "metadata": { "language": "en", "section": "embeddings" }
+    },
+    "expectations": {
+      "expected_response": "Pick embeddings that capture domain semantics; validate on benchmarks like MTEB and prefer models that improve retrieval metrics.",
+      "expected_facts": ["use MTEB", "domain-specific models", "validate retrieval performance"],
+      "guidelines": "Recommend one open and one commercial embedding model example.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/qdrant_eval_best_practices.html",
+          "chunk_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163_5",
+          "chunk_index": 5,
+          "snippet": "The embedding model plays a critical role in capturing semantic relationships in data. The quality of an embedding model is typically measured using benchmarks like the Massive Text Embedding Benchmark (MTEB).",
+          "confidence": 0.95
+        }
+      ]
+    },
+    "tags": { "eval_type": "rag", "priority": "medium" },
+    "source": { "document": { "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/qdrant_eval_best_practices.html" } },
+    "create_time": "2026-04-26T03:59:28.760Z",
+    "created_by": "ingest-script"
+  },
+  {
+    "dataset_record_id": "rag-0008",
+    "inputs": {
+      "query": "Which retrieval metrics should I track?",
+      "context": "Precision@k, MRR, DCG/NDCG and Precision@k for ANN evaluation",
+      "source_doc_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163",
+      "source_chunk_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163_6",
+      "metadata": { "language": "en", "section": "retrieval-metrics" }
+    },
+    "expectations": {
+      "expected_response": "Track Precision@k, MRR, DCG/NDCG; use Precision@k to evaluate ANN approximations.",
+      "expected_facts": ["Precision@k", "MRR", "DCG", "NDCG", "ANN evaluation"],
+      "guidelines": "Return metric definitions and when to use each.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/qdrant_eval_best_practices.html",
+          "chunk_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163_6",
+          "chunk_index": 6,
+          "snippet": "Precision@k: Measures the number of relevant documents in the top-k search results. Mean reciprocal rank (MRR): Considers the position of the first relevant document in the search results.",
+          "confidence": 0.96
+        }
+      ]
+    },
+    "tags": { "eval_type": "rag", "priority": "high" },
+    "source": { "human": { "annotator": "auto-ingest" } },
+    "create_time": "2026-04-26T03:59:28.760Z",
+    "created_by": "ingest-script"
+  },
+  {
+    "dataset_record_id": "rag-0009",
+    "inputs": {
+      "query": "What retrieval configuration options improve quality?",
+      "context": "Similarity metrics, hybrid search, filtering, hyperparameters, re-ranking",
+      "source_doc_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163",
+      "source_chunk_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163_7",
+      "metadata": { "language": "en", "section": "retrieval-config" }
+    },
+    "expectations": {
+      "expected_response": "Configure dense retrieval metric (cosine/dot), use hybrid search when needed, apply simple attribute filters, tune chunk size/overlap, and add re-ranking.",
+      "expected_facts": ["cosine/dot metrics", "hybrid search", "attribute filtering", "re-ranking"],
+      "guidelines": "Provide recommended default similarity metric and one re-ranking approach.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/qdrant_eval_best_practices.html",
+          "chunk_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163_7",
+          "chunk_index": 7,
+          "snippet": "Configure dense vector retrieval: You need to choose the right similarity metric to get the best retrieval quality. Use sparse vectors & hybrid search where needed.",
+          "confidence": 0.95
+        }
+      ]
+    },
+    "tags": { "eval_type": "rag", "priority": "medium" },
+    "source": { "document": { "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/qdrant_eval_best_practices.html" } },
+    "create_time": "2026-04-26T03:59:28.760Z",
+    "created_by": "ingest-script"
+  },
+  {
+    "dataset_record_id": "rag-0010",
+    "inputs": {
+      "query": "How to measure LLM response quality for RAG?",
+      "context": "Perplexity, human eval, BLEU, ROUGE, HELM, diversity",
+      "source_doc_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163",
+      "source_chunk_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163_8",
+      "metadata": { "language": "en", "section": "llm-eval" }
+    },
+    "expectations": {
+      "expected_response": "Use perplexity, human evaluation, BLEU/ROUGE for specific tasks, HELM for broad evaluation, and diversity metrics for output variety.",
+      "expected_facts": ["perplexity", "human eval", "BLEU", "ROUGE", "HELM", "diversity"],
+      "guidelines": "Map each metric to the evaluation goal (fluency, factuality, translation, summarization, robustness).",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/qdrant_eval_best_practices.html",
+          "chunk_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163_8",
+          "chunk_index": 8,
+          "snippet": "Perplexity: Measure how well the model predicts text. Human Evaluation: Rate responses based on relevance, coherence and quality.",
+          "confidence": 0.94
+        }
+      ]
+    },
+    "tags": { "eval_type": "rag", "priority": "high" },
+    "source": { "human": { "annotator": "auto-ingest" } },
+    "create_time": "2026-04-26T03:59:28.761Z",
+    "created_by": "ingest-script"
+  },
+  {
+    "dataset_record_id": "rag-0011",
+    "inputs": {
+      "query": "How can RAGAS be used to evaluate a RAG pipeline?",
+      "context": "Practical RAGAS example showing dataset creation and default metrics",
+      "source_doc_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d",
+      "source_chunk_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d_48",
+      "metadata": { "language": "en", "section": "ragas-example" }
+    },
+    "expectations": {
+      "expected_response": "Show how to build a small Dataset with question/answer/contexts and call RAGAS evaluate to get context_precision, faithfulness, and answer_relevancy.",
+      "expected_facts": ["create Dataset.from_dict", "contexts list per query", "evaluate(dataset) returns metrics"],
+      "guidelines": "Return the minimal code steps and interpret the three example metrics.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/eval_metrics.html",
+          "chunk_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d_48",
+          "chunk_index": 48,
+          "snippet": "We can use RAGAS to get some metrics: ... dataset = Dataset.from_dict(data); result = evaluate(dataset)",
+          "confidence": 0.97
+        }
+      ]
+    },
+    "source_excerpt": "We can use RAGAS to get some metrics: ... dataset = Dataset.from_dict(data); result = evaluate(dataset) # RAGAS will automatically apply default metrics.",
+    "tags": { "eval_type": "rag", "tool_example": "ragas" },
+    "source": { "document": { "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/eval_metrics.html" } },
+    "create_time": "2026-04-26T03:59:26.824Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0012",
+    "inputs": {
+      "query": "What do context_precision, faithfulness and answer_relevancy mean in the RAGAS example?",
+      "context": "Interpreting RAGAS output example",
+      "source_doc_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d",
+      "source_chunk_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d_48",
+      "metadata": { "language": "en", "section": "ragas-interpretation" }
+    },
+    "expectations": {
+      "expected_response": "Explain that context_precision measures proportion of retrieved content used; faithfulness measures support of answer by context; answer_relevancy measures how well answer addresses question.",
+      "expected_facts": ["context_precision = used content / retrieved content", "faithfulness = fraction of answer supported by context", "answer_relevancy = relevance score to question"],
+      "guidelines": "Give one-sentence definition per metric and a short remediation for low faithfulness.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/eval_metrics.html",
+          "chunk_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d_49",
+          "chunk_index": 49,
+          "snippet": "Interpreting this: context_precision 0.75 means 75% of the content in the retrieved passages was actually used in the answer.",
+          "confidence": 0.96
+        }
+      ]
+    },
+    "source_excerpt": "Interpreting this: context_precision 0.75 means 75% of the content in the retrieved passages was actually used in the answer. Faithfulness 0.5 means only half of the answer statements were supported by the context.",
+    "tags": { "eval_type": "rag", "metric": "ragas" },
+    "source": { "human": { "annotator": "auto-ingest" } },
+    "create_time": "2026-04-26T03:59:26.824Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0013",
+    "inputs": {
+      "query": "How to detect hallucinations using RAG evaluation?",
+      "context": "RAGAS example shows catching hallucination when answer not supported by context",
+      "source_doc_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d",
+      "source_chunk_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d_49",
+      "metadata": { "language": "en", "section": "hallucination-detection" }
+    },
+    "expectations": {
+      "expected_response": "Describe that low faithfulness indicates hallucination; remediation includes improving retrieval or generator factuality.",
+      "expected_facts": ["low faithfulness flags unsupported statements", "fix by improving retriever or grounding prompts"],
+      "guidelines": "Give two concrete fixes: improve retrieval or constrain generator with citations.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/eval_metrics.html",
+          "chunk_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d_49",
+          "chunk_index": 49,
+          "snippet": "Faithfulness 0.5 means only half of the answer statements were supported by the context. So we caught a hallucination in our small sample.",
+          "confidence": 0.95
+        }
+      ]
+    },
+    "source_excerpt": "Faithfulness 0.5 means only half of the answer statements were supported by the context. So we caught a hallucination in our small sample – the model answered with something not grounded in the retrieved docs.",
+    "tags": { "eval_type": "rag", "issue": "hallucination" },
+    "source": { "document": { "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/eval_metrics.html" } },
+    "create_time": "2026-04-26T03:59:26.824Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0014",
+    "inputs": {
+      "query": "What dashboard fields are useful for qualitative RAG analysis?",
+      "context": "Logging question, retrieved docs, answer, correctness flag, faithfulness score",
+      "source_doc_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d",
+      "source_chunk_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d_45",
+      "metadata": { "language": "en", "section": "analytics" }
+    },
+    "expectations": {
+      "expected_response": "Recommend dashboard columns: question, retrieved_docs (with hit flag), answer, correctness flag, faithfulness score, notes on failure mode.",
+      "expected_facts": ["include retrieved docs and whether they contained the answer", "log faithfulness and correctness flags"],
+      "guidelines": "Return a 6-item list of dashboard fields and one example insight.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/eval_metrics.html",
+          "chunk_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d_45",
+          "chunk_index": 45,
+          "snippet": "create a spreadsheet or dashboard that for each query shows: the question, the documents retrieved (and whether they contained the answer), the answer given, a correctness flag, a faithfulness score, etc.",
+          "confidence": 0.96
+        }
+      ]
+    },
+    "source_excerpt": "Create a spreadsheet or dashboard that for each query shows: the question, the documents retrieved (and whether they contained the answer), the answer given, a correctness flag, a faithfulness score, etc.",
+    "tags": { "eval_type": "rag", "tooling": "dashboard" },
+    "source": { "human": { "annotator": "auto-ingest" } },
+    "create_time": "2026-04-26T03:59:26.823Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0015",
+    "inputs": {
+      "query": "How can closed-loop signals from support chatbots be used for evaluation?",
+      "context": "Use follow-up re-asks or escalations as failure signals and compute effective accuracy",
+      "source_doc_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d",
+      "source_chunk_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d_51",
+      "metadata": { "language": "en", "section": "customer-support" }
+    },
+    "expectations": {
+      "expected_response": "Explain closed-loop metric: percent of queries answered without re-ask/escalation; describe retrieval and answer correctness components.",
+      "expected_facts": ["use re-asks as failure signals", "compute percent answered without escalation"],
+      "guidelines": "Give one formula for effective accuracy and one implementation tip.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/eval_metrics.html",
+          "chunk_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d_51",
+          "chunk_index": 51,
+          "snippet": "After an agent answer is given, if the user asks a follow-up like \"That didn't help\" or rephrases the question, it's a signal the answer might have failed.",
+          "confidence": 0.95
+        }
+      ]
+    },
+    "source_excerpt": "After an agent answer is given, if the user asks a follow-up like \"That didn't help\" or rephrases the question, it's a signal the answer might have failed. Businesses have started logging such signals to compute a kind of effective accuracy.",
+    "tags": { "eval_type": "rag", "application": "support" },
+    "source": { "document": { "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/eval_metrics.html" } },
+    "create_time": "2026-04-26T03:59:26.825Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0016",
+    "inputs": {
+      "query": "Which benchmarks stress RAG temporal and multi-hop behavior?",
+      "context": "DomainRAG focuses on time-sensitive queries; MultiHop-RAG and HoVer test multi-document reasoning",
+      "source_doc_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d",
+      "source_chunk_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d_53",
+      "metadata": { "language": "en", "section": "benchmarks" }
+    },
+    "expectations": {
+      "expected_response": "List DomainRAG for time-sensitive queries and MultiHop-RAG/HoVer for multi-step retrieval; explain what each stresses (temporal robustness, stepwise recall).",
+      "expected_facts": ["DomainRAG: time-sensitive", "MultiHop-RAG: multi-piece retrieval", "use recall-of-all-facts metrics"],
+      "guidelines": "Recommend which benchmark to use for news vs. multi-hop QA.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/eval_metrics.html",
+          "chunk_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d_53",
+          "chunk_index": 53,
+          "snippet": "DomainRAG (2024) focuses on domain-specific challenges like time-sensitive queries... MultiHop-RAG and HoVer challenge the system to retrieve multiple pieces of info and reason.",
+          "confidence": 0.95
+        }
+      ]
+    },
+    "source_excerpt": "DomainRAG (2024) focuses on domain-specific challenges like time-sensitive queries, multi-document reasoning, etc. MultiHop-RAG and HoVer challenge the system to retrieve multiple pieces of info and reason.",
+    "tags": { "eval_type": "rag", "benchmark": "domain/multihop" },
+    "source": { "human": { "annotator": "auto-ingest" } },
+    "create_time": "2026-04-26T03:59:26.825Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0017",
+    "inputs": {
+      "query": "What metrics are used for multi-hop RAG evaluation?",
+      "context": "Multi-hop uses recall-of-all-facts and human judgment on final answer completeness",
+      "source_doc_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d",
+      "source_chunk_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d_54",
+      "metadata": { "language": "en", "section": "multihop-metrics" }
+    },
+    "expectations": {
+      "expected_response": "Recommend recall-of-all-facts, stepwise recall, and human judgment for completeness; explain why partial retrieval yields partial answers.",
+      "expected_facts": ["recall-of-all-facts", "stepwise recall", "human judgment for final completeness"],
+      "guidelines": "Give one example metric and how to compute it for a 2-hop question.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/eval_metrics.html",
+          "chunk_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d_54",
+          "chunk_index": 54,
+          "snippet": "Multi-hop evaluation thus uses metrics like \"recall of all facts\" and sometimes human judgment on whether the final answer addressed the full question.",
+          "confidence": 0.94
+        }
+      ]
+    },
+    "source_excerpt": "Multi-hop evaluation thus uses metrics like \"recall of all facts\" and sometimes human judgment on whether the final answer addressed the full question.",
+    "tags": { "eval_type": "rag", "metric": "multihop" },
+    "source": { "document": { "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/eval_metrics.html" } },
+    "create_time": "2026-04-26T03:59:26.825Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0018",
+    "inputs": {
+      "query": "How should high-stakes domains like healthcare evaluate RAG outputs?",
+      "context": "Use domain experts, track harmful hallucination rate, and focus on worst-case errors",
+      "source_doc_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d",
+      "source_chunk_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d_54",
+      "metadata": { "language": "en", "section": "healthcare-case-study" }
+    },
+    "expectations": {
+      "expected_response": "Recommend expert human labeling, track harmful hallucination rate, and prioritize near-100% faithfulness for critical outputs.",
+      "expected_facts": ["use doctors for labels", "harmful hallucination rate metric", "track worst-case errors"],
+      "guidelines": "Provide one recommended threshold for harmful hallucination monitoring.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/eval_metrics.html",
+          "chunk_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d_55",
+          "chunk_index": 55,
+          "snippet": "One interesting metric here is \"harmful hallucination rate\" – percent of answers that contain a fabrication that could lead to harm.",
+          "confidence": 0.96
+        }
+      ]
+    },
+    "source_excerpt": "One interesting metric here is \"harmful hallucination rate\" – percent of answers that contain a fabrication that could lead to harm. In this healthcare case, a single hallucinated dosage instruction can be catastrophic.",
+    "tags": { "eval_type": "rag", "domain": "healthcare" },
+    "source": { "human": { "annotator": "auto-ingest" } },
+    "create_time": "2026-04-26T03:59:26.826Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0019",
+    "inputs": {
+      "query": "What are the recommended core retrieval and answer-level metrics?",
+      "context": "Recall@K, Precision@K, MRR, nDCG for retrieval; faithfulness, relevance, completeness for answers",
+      "source_doc_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d",
+      "source_chunk_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d_56",
+      "metadata": { "language": "en", "section": "conclusion-metrics" }
+    },
+    "expectations": {
+      "expected_response": "List retrieval metrics (Recall@K, Precision@K, MRR, nDCG) and answer metrics (faithfulness, factual consistency, relevance, completeness).",
+      "expected_facts": ["Recall@K", "Precision@K", "MRR", "nDCG", "faithfulness", "relevance"],
+      "guidelines": "Map each metric to the component it evaluates (retriever vs generator).",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/eval_metrics.html",
+          "chunk_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d_56",
+          "chunk_index": 56,
+          "snippet": "By measuring core retrieval metrics like Recall@K, Precision@K, MRR, and nDCG, you ensure the pipeline is fetching the right knowledge.",
+          "confidence": 0.95
+        }
+      ]
+    },
+    "source_excerpt": "By measuring core retrieval metrics like Recall@K, Precision@K, MRR, and nDCG, you ensure the pipeline is fetching the right knowledge. By assessing answer-level qualities – faithfulness to context, factual consistency, relevance, and completeness – you ensure the generative model is using that knowledge correctly.",
+    "tags": { "eval_type": "rag", "priority": "high" },
+    "source": { "document": { "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/eval_metrics.html" } },
+    "create_time": "2026-04-26T03:59:26.826Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0020",
+    "inputs": {
+      "query": "What final evaluation advice should teams follow for RAG?",
+      "context": "Evaluate retrieval and generation separately and end-to-end; choose metrics with awareness of error impact",
+      "source_doc_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d",
+      "source_chunk_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d_56",
+      "metadata": { "language": "en", "section": "final-advice" }
+    },
+    "expectations": {
+      "expected_response": "Advise separate retrieval and generation evaluation, use combined/reference-free metrics when needed, and pick metrics mindful of worst-case impact.",
+      "expected_facts": ["separate evaluations", "use LLM-based evaluators when ground truth missing", "choose metrics by error impact"],
+      "guidelines": "Provide three concise best-practice bullets for teams starting RAG evaluation.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/eval_metrics.html",
+          "chunk_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d_56",
+          "chunk_index": 56,
+          "snippet": "Always evaluate both components: Separate retrieval and generation evaluations prevent blind spots. Use combined and reference-free metrics when needed.",
+          "confidence": 0.96
+        }
+      ]
+    },
+    "source_excerpt": "Always evaluate both components: Separate retrieval and generation evaluations prevent blind spots. Use combined and reference-free metrics when needed.",
+    "tags": { "eval_type": "rag", "advice": "best-practices" },
+    "source": { "human": { "annotator": "auto-ingest" } },
+    "create_time": "2026-04-26T03:59:26.826Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0021",
+    "inputs": {
+      "query": "What is the Lost in the Middle problem and its impact on RAG?",
+      "context": "LLMs can struggle with long contexts when crucial info is in the middle of documents",
+      "source_doc_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163",
+      "source_chunk_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163_6",
+      "metadata": { "language": "en", "section": "retrieval-issues" }
+    },
+    "expectations": {
+      "expected_response": "Explain that 'Lost in the Middle' occurs when LLMs miss information placed mid-document; recommend chunking and retrieval window tuning.",
+      "expected_facts": ["LLMs struggle with long contexts", "important info in middle can be missed", "mitigate via chunking and retrieval tuning"],
+      "guidelines": "One-paragraph explanation and two mitigation steps (chunking strategy, re-ranking).",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/qdrant_eval_best_practices.html",
+          "chunk_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163_6",
+          "chunk_index": 6,
+          "snippet": "The “Lost in the Middle” problem indicates that some LLMs may struggle with long contexts, particularly when crucial information is positioned in the middle of the document, leading to incomplete or less useful results.",
+          "confidence": 0.95
+        }
+      ]
+    },
+    "source_excerpt": "The “Lost in the Middle” problem indicates that some LLMs may struggle with long contexts, particularly when crucial information is positioned in the middle of the document, leading to incomplete or less useful results.",
+    "tags": { "eval_type": "rag", "issue": "lost-in-middle" },
+    "source": { "document": { "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/qdrant_eval_best_practices.html" } },
+    "create_time": "2026-04-26T03:59:28.760Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0022",
+    "inputs": {
+      "query": "When should you use re-ranking in retrieval pipelines?",
+      "context": "Re-ranking with cross-encoders can improve final retrieval quality after vector search",
+      "source_doc_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163",
+      "source_chunk_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163_7",
+      "metadata": { "language": "en", "section": "retrieval-config" }
+    },
+    "expectations": {
+      "expected_response": "Recommend re-ranking when initial vector search returns noisy or borderline-relevant results; suggest cross-encoder re-rankers for precision-sensitive use cases.",
+      "expected_facts": ["re-ranking improves precision", "use cross-encoders to rescore vector results", "trade-off: latency vs accuracy"],
+      "guidelines": "Give one re-ranking model suggestion and when to enable it (e.g., high-stakes answers).",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/qdrant_eval_best_practices.html",
+          "chunk_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163_7",
+          "chunk_index": 7,
+          "snippet": "Introduce re-ranking: Such methods may use cross-encoder models to re-score the results returned by vector search. Re-ranking can significantly improve retrieval and thus RAG system performance.",
+          "confidence": 0.96
+        }
+      ]
+    },
+    "source_excerpt": "Introduce re-ranking: Such methods may use cross-encoder models to re-score the results returned by vector search. Re-ranking can significantly improve retrieval and thus RAG system performance.",
+    "tags": { "eval_type": "rag", "technique": "re-ranking" },
+    "source": { "human": { "annotator": "auto-ingest" } },
+    "create_time": "2026-04-26T03:59:28.760Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0023",
+    "inputs": {
+      "query": "How to choose similarity metrics for dense retrieval?",
+      "context": "Cosine, dot product, Euclidean and Manhattan distances affect retrieval behavior",
+      "source_doc_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163",
+      "source_chunk_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163_7",
+      "metadata": { "language": "en", "section": "retrieval-config" }
+    },
+    "expectations": {
+      "expected_response": "Compare cosine vs dot product and when to prefer each; mention Euclidean/Manhattan for specific index types and recommend testing on dev queries.",
+      "expected_facts": ["cosine and dot product common for dense vectors", "Euclidean/Manhattan used in some ANN indexes", "validate on dev set"],
+      "guidelines": "Provide one-sentence recommendation and an A/B test suggestion.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/qdrant_eval_best_practices.html",
+          "chunk_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163_7",
+          "chunk_index": 7,
+          "snippet": "Configure dense vector retrieval: You need to choose the right similarity metric to get the best retrieval quality. Metrics used in dense vector retrieval include Cosine Similarity, Dot Product, Euclidean Distance, and Manhattan Distance.",
+          "confidence": 0.95
+        }
+      ]
+    },
+    "source_excerpt": "Metrics used in dense vector retrieval include Cosine Similarity, Dot Product, Euclidean Distance, and Manhattan Distance.",
+    "tags": { "eval_type": "rag", "metric": "similarity" },
+    "source": { "document": { "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/qdrant_eval_best_practices.html" } },
+    "create_time": "2026-04-26T03:59:28.760Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0024",
+    "inputs": {
+      "query": "Why calibrate chunk size and overlap?",
+      "context": "Chunk size and overlap determine granularity and context retention for retrieval",
+      "source_doc_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163",
+      "source_chunk_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163_5",
+      "metadata": { "language": "en", "section": "chunking" }
+    },
+    "expectations": {
+      "expected_response": "Explain trade-offs: smaller chunks increase precision but may lose context; overlap preserves context but increases redundancy; recommend tuning to model token limits.",
+      "expected_facts": ["chunk size affects granularity", "overlap helps retain context", "align chunk size with embedding model token limits"],
+      "guidelines": "Give one numeric example (e.g., 200–500 tokens) and overlap recommendation (10–30%).",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/qdrant_eval_best_practices.html",
+          "chunk_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163_5",
+          "chunk_index": 5,
+          "snippet": "Calibrate document chunk size: The chunk size determines data granularity and impacts precision, recall, and relevance. Ensure proper chunk overlap: This helps retain context by sharing data points across chunks.",
+          "confidence": 0.97
+        }
+      ]
+    },
+    "source_excerpt": "Calibrate document chunk size: The chunk size determines data granularity and impacts precision, recall, and relevance. Ensure proper chunk overlap: This helps retain context by sharing data points across chunks.",
+    "tags": { "eval_type": "rag", "topic": "chunking" },
+    "source": { "human": { "annotator": "auto-ingest" } },
+    "create_time": "2026-04-26T03:59:28.760Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0025",
+    "inputs": {
+      "query": "How to validate embedding model choice?",
+      "context": "Use benchmarks like MTEB and measure retrieval performance on dev queries",
+      "source_doc_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163",
+      "source_chunk_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163_5",
+      "metadata": { "language": "en", "section": "embeddings" }
+    },
+    "expectations": {
+      "expected_response": "Recommend evaluating embeddings on MTEB and on retrieval metrics (Precision@k, Recall@k) using a representative dev set; prefer domain-specific models when needed.",
+      "expected_facts": ["use MTEB", "validate on retrieval metrics", "domain-specific models may be required"],
+      "guidelines": "Suggest one open-source and one commercial embedding model to try.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/qdrant_eval_best_practices.html",
+          "chunk_id": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163_5",
+          "chunk_index": 5,
+          "snippet": "The embedding model plays a critical role in capturing semantic relationships in data. The quality of an embedding model is typically measured using benchmarks like the Massive Text Embedding Benchmark (MTEB).",
+          "confidence": 0.95
+        }
+      ]
+    },
+    "source_excerpt": "The embedding model plays a critical role in capturing semantic relationships in data. The quality of an embedding model is typically measured using benchmarks like the Massive Text Embedding Benchmark (MTEB).",
+    "tags": { "eval_type": "rag", "topic": "embeddings" },
+    "source": { "document": { "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/qdrant_eval_best_practices.html" } },
+    "create_time": "2026-04-26T03:59:28.760Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0026",
+    "inputs": {
+      "query": "What is citation precision and why does it matter?",
+      "context": "Citation precision checks whether cited sources actually support the answer",
+      "source_doc_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d",
+      "source_chunk_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d_50",
+      "metadata": { "language": "en", "section": "industry-applications" }
+    },
+    "expectations": {
+      "expected_response": "Define citation precision as the fraction of cited sources that actually support the answer; explain its importance for trust and source attribution.",
+      "expected_facts": ["citation precision checks cited sources", "important for trust and legal/regulatory contexts"],
+      "guidelines": "Give one example of how to compute citation precision for a single answer.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/eval_metrics.html",
+          "chunk_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d_50",
+          "chunk_index": 50,
+          "snippet": "One insight from this field is the importance of citation accuracy – not just getting the answer right, but correctly citing which source it came from. A metric used is \"citation precision\", checking if the model's cited sources indeed support the parts of the answer.",
+          "confidence": 0.96
+        }
+      ]
+    },
+    "source_excerpt": "One insight from this field is the importance of citation accuracy – not just getting the answer right, but correctly citing which source it came from. A metric used is \"citation precision\", checking if the model's cited sources indeed support the parts of the answer.",
+    "tags": { "eval_type": "rag", "metric": "citation-precision" },
+    "source": { "human": { "annotator": "auto-ingest" } },
+    "create_time": "2026-04-26T03:59:26.824Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0027",
+    "inputs": {
+      "query": "How to evaluate summarization augmented by retrieval?",
+      "context": "Summarization with RAG needs both summary quality and faithfulness checks",
+      "source_doc_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d",
+      "source_chunk_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d_53",
+      "metadata": { "language": "en", "section": "summarization" }
+    },
+    "expectations": {
+      "expected_response": "Recommend using ROUGE for overlap plus a faithfulness audit (check that no facts in the summary are absent from original or retrieved sources).",
+      "expected_facts": ["use ROUGE for overlap", "perform faithfulness audit against sources", "domain experts for strict checks"],
+      "guidelines": "Provide one automated and one human-in-the-loop check.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/eval_metrics.html",
+          "chunk_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d_53",
+          "chunk_index": 53,
+          "snippet": "They might use metrics like ROUGE for summary overlap, but also check if any fact in the summary wasn't in either the original or retrieved references (a kind of faithfulness audit).",
+          "confidence": 0.95
+        }
+      ]
+    },
+    "source_excerpt": "They might use metrics like ROUGE for summary overlap, but also check if any fact in the summary wasn't in either the original or retrieved references (a kind of faithfulness audit).",
+    "tags": { "eval_type": "rag", "application": "summarization" },
+    "source": { "document": { "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/eval_metrics.html" } },
+    "create_time": "2026-04-26T03:59:26.825Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0028",
+    "inputs": {
+      "query": "Can automated LLM-based evaluators replace human judgment?",
+      "context": "RAGAS compared automated metrics to GPT-4 and human judgments with good correlation",
+      "source_doc_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d",
+      "source_chunk_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d_54",
+      "metadata": { "language": "en", "section": "research-developments" }
+    },
+    "expectations": {
+      "expected_response": "State that well-designed automated metrics can correlate with humans; recommend validating automated scores against a human-labeled subset.",
+      "expected_facts": ["RAGAS metrics correlated well with humans", "validate automated evaluators on labeled subset", "LLM-based evaluators can be reliable when designed carefully"],
+      "guidelines": "Give one validation protocol (sample 200 items for human labeling).",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/eval_metrics.html",
+          "chunk_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d_54",
+          "chunk_index": 54,
+          "snippet": "The RAGAS paper actually compared its automated metrics (faithfulness, answer relevance, context relevance) against GPT-4 scoring and human judgments. They found RAGAS's metrics correlated quite well with humans.",
+          "confidence": 0.95
+        }
+      ]
+    },
+    "source_excerpt": "The RAGAS paper actually compared its automated metrics (faithfulness, answer relevance, context relevance) against GPT-4 scoring and human judgments. They found RAGAS's metrics correlated quite well with humans.",
+    "tags": { "eval_type": "rag", "topic": "automated-eval" },
+    "source": { "human": { "annotator": "auto-ingest" } },
+    "create_time": "2026-04-26T03:59:26.825Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0029",
+    "inputs": {
+      "query": "What is harmful hallucination rate and how to monitor it?",
+      "context": "Harmful hallucination rate measures percent of answers with fabrications that could cause harm",
+      "source_doc_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d",
+      "source_chunk_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d_55",
+      "metadata": { "language": "en", "section": "healthcare-case-study" }
+    },
+    "expectations": {
+      "expected_response": "Define harmful hallucination rate and recommend monitoring via human review sampling and automated detectors; set alert thresholds for high-risk domains.",
+      "expected_facts": ["harmful hallucination rate = percent of answers with dangerous fabrications", "monitor with expert review and automated flags", "set strict thresholds in healthcare"],
+      "guidelines": "Suggest sampling frequency and an alert threshold (e.g., >0.5% triggers investigation).",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/eval_metrics.html",
+          "chunk_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d_55",
+          "chunk_index": 55,
+          "snippet": "One interesting metric here is \"harmful hallucination rate\" – percent of answers that contain a fabrication that could lead to harm. In this healthcare case, a single hallucinated dosage instruction can be catastrophic.",
+          "confidence": 0.96
+        }
+      ]
+    },
+    "source_excerpt": "One interesting metric here is \"harmful hallucination rate\" – percent of answers that contain a fabrication that could lead to harm. In this healthcare case, a single hallucinated dosage instruction can be catastrophic.",
+    "tags": { "eval_type": "rag", "metric": "harmful-hallucination" },
+    "source": { "document": { "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/eval_metrics.html" } },
+    "create_time": "2026-04-26T03:59:26.826Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0030",
+    "inputs": {
+      "query": "What final best-practices should teams adopt for RAG evaluation?",
+      "context": "Separate retrieval and generation evaluation; use combined/reference-free metrics when needed; choose metrics mindful of error impact",
+      "source_doc_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d",
+      "source_chunk_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d_56",
+      "metadata": { "language": "en", "section": "conclusion" }
+    },
+    "expectations": {
+      "expected_response": "Provide three concise best-practice bullets: (1) evaluate retrieval and generation separately, (2) validate automated evaluators against human labels, (3) pick metrics by error impact and monitor worst-case errors.",
+      "expected_facts": ["separate retrieval and generation evaluations", "validate automated metrics", "monitor worst-case errors for high-stakes domains"],
+      "guidelines": "Return three short bullets suitable for a team checklist.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/htmls/eval_metrics.html",
+          "chunk_id": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d_56",
+          "chunk_index": 56,
+          "snippet": "Always evaluate both components: Separate retrieval and generation evaluations prevent blind spots. Use combined and reference-free metrics when needed.",
+          "confidence": 0.96
+        }
+      ]
+    },
+    "source_excerpt": "Always evaluate both components: Separate retrieval and generation evaluations prevent blind spots. Use combined and reference-free metrics when needed.",
+    "tags": { "eval_type": "rag", "advice": "final-checklist" },
+    "source": { "human": { "annotator": "auto-ingest" } },
+    "create_time": "2026-04-26T03:59:26.826Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0031",
+    "inputs": {
+      "query": "Does ULTRAG benefit from using GPT-5 for query generation and arbitration?",
+      "context": "ULTRAG experiments comparing GPT-5 and lighter LLMs for query generation and arbitration",
+      "source_doc_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c",
+      "source_chunk_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c_p8_9",
+      "metadata": { "language": "en", "section": "ultrag-efficiency" }
+    },
+    "expectations": {
+      "expected_response": "Using GPT-5 for both query generation and arbitration yields best performance; lighter LLMs for arbitration can be nearly as effective and reduce cost.",
+      "expected_facts": ["GPT-5 yields best performance", "GPT-5-mini for arbitration loses ~4% Hits/F1", "lighter LLMs reduce cost for arbitration"],
+      "guidelines": "Summarize trade-off: small accuracy drop vs cost savings; recommend testing GPT-5-mini for arbitration in cost-sensitive setups.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/ultRAG.pdf",
+          "chunk_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c_p8_9",
+          "chunk_index": 8,
+          "snippet": "While using GPT-5 for both query generation and arbitration yields best performance (likely due to its reasoning capabilities), we note that all the tested combinations achieve good results in our analysis.",
+          "confidence": 0.97
+        }
+      ]
+    },
+    "source_excerpt": "While using GPT-5 for both query generation and arbitration yields best performance (likely due to its reasoning capabilities), we note that all the tested combinations achieve good results in our analysis.",
+    "tags": { "eval_type": "rag", "topic": "model-selection" },
+    "source": { "document": { "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/ultRAG.pdf" } },
+    "create_time": "2026-04-26T04:01:24.277Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0032",
+    "inputs": {
+      "query": "How much faster is ULTRAG-OTS compared to baselines on WikiKG2 subgraphs?",
+      "context": "ULTRAG-OTS non-API runtime speedups vs RoG/GNN-RAG/SubgraphRAG",
+      "source_doc_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c",
+      "source_chunk_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c_p8_10",
+      "metadata": { "language": "en", "section": "efficiency-results" }
+    },
+    "expectations": {
+      "expected_response": "Report ULTRAG-OTS is 19x/99x/167x faster than RoG/GNN-RAG/SubgraphRAG in non-API time per query on WikiKG2 subgraphs and note similar results on Wikidata.",
+      "expected_facts": ["19x vs RoG", "99x vs GNN-RAG", "167x vs SubgraphRAG", "similar results on Wikidata"],
+      "guidelines": "State the three speedup numbers and mention dataset context (WikiKG2).",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/ultRAG.pdf",
+          "chunk_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c_p8_10",
+          "chunk_index": 8,
+          "snippet": "On WikiKG2 subgraphs, ULTRAG-OTS is 19x/99x/167x faster than RoG/GNN-RAG/SubgraphRAG in terms of non-API time per query (similar results also hold for Wikidata subgraphs).",
+          "confidence": 0.98
+        }
+      ]
+    },
+    "source_excerpt": "On WikiKG2 subgraphs, ULTRAG-OTS is 19x/99x/167x faster than RoG/GNN-RAG/SubgraphRAG in terms of non-API time per query (similar results also hold for Wikidata subgraphs).",
+    "tags": { "eval_type": "rag", "metric": "latency" },
+    "source": { "document": { "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/ultRAG.pdf" } },
+    "create_time": "2026-04-26T04:01:24.278Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0033",
+    "inputs": {
+      "query": "What token-processing behavior did ULTRAG-OTS observe and how does caching affect cost?",
+      "context": "ULTRAG-OTS processes many input tokens but GPT-5 caches most due to identical prompts",
+      "source_doc_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c",
+      "source_chunk_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c_p8_10",
+      "metadata": { "language": "en", "section": "token-caching" }
+    },
+    "expectations": {
+      "expected_response": "Explain that ULTRAG-OTS processes 25x–62x more input tokens than baselines but 94–96% are cached by GPT-5, limiting cost and complexity.",
+      "expected_facts": ["25x–62x more input tokens", "94–96% cached by GPT-5", "caching limits cost and complexity"],
+      "guidelines": "Give the token multiplier range and the caching percentage with a short implication for cost.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/ultRAG.pdf",
+          "chunk_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c_p8_10",
+          "chunk_index": 8,
+          "snippet": "Due to the presence of relation types in the prompt and two API calls, ULTRAG-OTS processes between 25x and 62x more input tokens than the baselines. However, 94−96% of these tokens are cached by GPT-5 (due to our prompts being structurally identical), limiting both cost and computational complexity.",
+          "confidence": 0.97
+        }
+      ]
+    },
+    "source_excerpt": "Due to the presence of relation types in the prompt and two API calls, ULTRAG-OTS processes between 25x and 62x more input tokens than the baselines. However, 94−96% of these tokens are cached by GPT-5 (due to our prompts being structurally identical), limiting both cost and computational complexity.",
+    "tags": { "eval_type": "rag", "topic": "cost" },
+    "source": { "document": { "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/ultRAG.pdf" } },
+    "create_time": "2026-04-26T04:01:24.278Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0034",
+    "inputs": {
+      "query": "How does ULTRAG-OTS compare in API cost to baselines?",
+      "context": "ULTRAG-OTS API cost is slightly higher due to larger input size but may avoid extra steps required by baselines",
+      "source_doc_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c",
+      "source_chunk_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c_p8_11",
+      "metadata": { "language": "en", "section": "api-cost" }
+    },
+    "expectations": {
+      "expected_response": "State ULTRAG-OTS is 23%–27% more expensive in API cost than baselines due to larger input, but baselines would incur extra costs for mention extraction in end-to-end pipelines.",
+      "expected_facts": ["23%–27% higher API cost", "larger input size causes cost increase", "baselines need extra mention-extraction cost"],
+      "guidelines": "Mention the percent range and note the end-to-end cost trade-off.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/ultRAG.pdf",
+          "chunk_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c_p8_11",
+          "chunk_index": 8,
+          "snippet": "In terms of API cost, ULTRAG-OTS is 23% to 27% more expensive than the baselines (due to the larger size of the input), however, we emphasize that no additional cost would be required for extracting relevant mentions from input queries with ULTRAG-OTS, while all baselines would incur extra costs for this step in an end-to-end pipeline.",
+          "confidence": 0.96
+        }
+      ]
+    },
+    "source_excerpt": "In terms of API cost, ULTRAG-OTS is 23% to 27% more expensive than the baselines (due to the larger size of the input), however, we emphasize that no additional cost would be required for extracting relevant mentions from input queries with ULTRAG-OTS, while all baselines would incur extra costs for this step in an end-to-end pipeline.",
+    "tags": { "eval_type": "rag", "metric": "api-cost" },
+    "source": { "document": { "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/ultRAG.pdf" } },
+    "create_time": "2026-04-26T04:01:24.278Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0035",
+    "inputs": {
+      "query": "Can ULTRAG-OTS maintain performance with smaller LLMs?",
+      "context": "ULTRAG-OTS performance when using smaller/cheaper LLMs and cost/performance trade-offs",
+      "source_doc_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c",
+      "source_chunk_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c_p8_11",
+      "metadata": { "language": "en", "section": "small-llms" }
+    },
+    "expectations": {
+      "expected_response": "Explain that ULTRAG-OTS achieves good performance even with smaller LLMs and can compare favorably in results and efficiency when cheaper models are used.",
+      "expected_facts": ["ULTRAG-OTS performs well with smaller LLMs", "favorable results and efficiency trade-offs possible"],
+      "guidelines": "Recommend evaluating cheaper LLMs for arbitration and mention empirical gains.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/ultRAG.pdf",
+          "chunk_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c_p8_11",
+          "chunk_index": 8,
+          "snippet": "Moreover, as shown in Table 7, ULTRAG-OTS achieves a better performance than the baselines even when using smaller and cheaper LLMs, in which case ULTRAG-OTS compares favourably both in terms of results and efficiency.",
+          "confidence": 0.95
+        }
+      ]
+    },
+    "source_excerpt": "Moreover, as shown in Table 7, ULTRAG-OTS achieves a better performance than the baselines even when using smaller and cheaper LLMs, in which case ULTRAG-OTS compares favourably both in terms of results and efficiency.",
+    "tags": { "eval_type": "rag", "topic": "cost-optimization" },
+    "source": { "human": { "annotator": "auto-ingest" } },
+    "create_time": "2026-04-26T04:01:24.278Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0036",
+    "inputs": {
+      "query": "What limitations of ULTRAG-OTS are noted regarding temporal queries and hypergraphs?",
+      "context": "ULTRAG-OTS limitations: no native temporal query support and potential underperformance on Knowledge HyperGraphs",
+      "source_doc_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c",
+      "source_chunk_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c_p8_12",
+      "metadata": { "language": "en", "section": "limitations" }
+    },
+    "expectations": {
+      "expected_response": "List limitations: lacks native temporal query support (needs Temporal KG extension) and may underperform on Knowledge HyperGraphs due to ULTRA reliance.",
+      "expected_facts": ["no native temporal query support", "may underperform on Knowledge HyperGraphs", "future work needed to address these"],
+      "guidelines": "Provide two suggested research directions to address each limitation.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/ultRAG.pdf",
+          "chunk_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c_p8_12",
+          "chunk_index": 8,
+          "snippet": "In particular, ULTRAG-OTS does not natively support temporal queries, which would require extending our methodology to Temporal Knowledge Graphs (Lin et al., 2023). Similarly, ULTRAG-OTS might underperform on Knowledge HyperGraphs due to its reliance on ULTRA.",
+          "confidence": 0.96
+        }
+      ]
+    },
+    "source_excerpt": "In particular, ULTRAG-OTS does not natively support temporal queries, which would require extending our methodology to Temporal Knowledge Graphs (Lin et al., 2023). Similarly, ULTRAG-OTS might underperform on Knowledge HyperGraphs due to its reliance on ULTRA.",
+    "tags": { "eval_type": "rag", "topic": "limitations" },
+    "source": { "document": { "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/ultRAG.pdf" } },
+    "create_time": "2026-04-26T04:01:24.278Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0037",
+    "inputs": {
+      "query": "What is ULTRAG's stated research direction for addressing limitations?",
+      "context": "Authors plan to investigate temporal KG extensions and hypergraph handling in future work",
+      "source_doc_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c",
+      "source_chunk_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c_p8_12",
+      "metadata": { "language": "en", "section": "future-work" }
+    },
+    "expectations": {
+      "expected_response": "Summarize that addressing temporal queries and hypergraph weaknesses is future work and an interesting research direction.",
+      "expected_facts": ["future work to extend to Temporal KGs", "investigate hypergraph limitations", "authors plan further research"],
+      "guidelines": "One-sentence summary of planned directions and why they matter.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/ultRAG.pdf",
+          "chunk_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c_p8_12",
+          "chunk_index": 8,
+          "snippet": "Addressing these limitations constitutes an interesting research direction that we plan to investigate further in future work.",
+          "confidence": 0.94
+        }
+      ]
+    },
+    "source_excerpt": "Addressing these limitations constitutes an interesting research direction that we plan to investigate further in future work.",
+    "tags": { "eval_type": "rag", "topic": "research-agenda" },
+    "source": { "human": { "annotator": "auto-ingest" } },
+    "create_time": "2026-04-26T04:01:24.278Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0038",
+    "inputs": {
+      "query": "What is ULTRAG's impact statement and publication context?",
+      "context": "Paper impact statement and references section indicating ML research contributions",
+      "source_doc_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c",
+      "source_chunk_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c_p9_1",
+      "metadata": { "language": "en", "section": "impact-and-refs" }
+    },
+    "expectations": {
+      "expected_response": "Note the paper's stated goal to advance ML and list that references follow; include the impact statement sentence.",
+      "expected_facts": ["paper aims to advance ML", "references section follows impact statement"],
+      "guidelines": "Quote the impact statement sentence and mention that references are provided.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/ultRAG.pdf",
+          "chunk_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c_p9_1",
+          "chunk_index": 9,
+          "snippet": "ULTRAG Impact Statement This paper presents work whose goal is to advance the field of machine learning.",
+          "confidence": 0.93
+        }
+      ]
+    },
+    "source_excerpt": "ULTRAG Impact Statement This paper presents work whose goal is to advance the field of machine learning.",
+    "tags": { "eval_type": "rag", "topic": "meta" },
+    "source": { "document": { "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/ultRAG.pdf" } },
+    "create_time": "2026-04-26T04:01:24.282Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0039",
+    "inputs": {
+      "query": "Which external benchmarks and related work does ULTRAG cite in references?",
+      "context": "References list includes works on graph learning, retrieval-augmented generation, FAISS, and other KG/LLM research",
+      "source_doc_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c",
+      "source_chunk_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c_p9_2",
+      "metadata": { "language": "en", "section": "references-sample" }
+    },
+    "expectations": {
+      "expected_response": "List a few cited works such as Semma, Transformers need glasses, FAISS, Atlas, and Retrieval-augmented generation (Lewis et al. 2020).",
+      "expected_facts": ["Semma (2025)", "Transformers need glasses (2024)", "FAISS (Douze et al.)", "Atlas (2023)", "Lewis et al. 2020 RAG"],
+      "guidelines": "Provide 4–6 reference titles/authors as examples from the chunk.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/ultRAG.pdf",
+          "chunk_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c_p9_2",
+          "chunk_index": 9,
+          "snippet": "Semma: A semantic aware knowledge graph foundation model. ... Transformers need glasses! information over-squashing in language tasks. ... The faiss library. ... Atlas: Few-shot learning with retrieval augmented language models.",
+          "confidence": 0.92
+        }
+      ]
+    },
+    "source_excerpt": "Semma: A semantic aware knowledge graph foundation model. ... Transformers need glasses! information over-squashing in language tasks. ... The faiss library. ... Atlas: Few-shot learning with retrieval augmented language models.",
+    "tags": { "eval_type": "rag", "topic": "references" },
+    "source": { "human": { "annotator": "auto-ingest" } },
+    "create_time": "2026-04-26T04:01:24.282Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0040",
+    "inputs": {
+      "query": "Which implementation and dataset resources are referenced for graph and retrieval tooling?",
+      "context": "References mention FAISS, product quantization, billion-scale similarity search, and graph learning datasets",
+      "source_doc_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c",
+      "source_chunk_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c_p10_3",
+      "metadata": { "language": "en", "section": "tooling-refs" }
+    },
+    "expectations": {
+      "expected_response": "Identify FAISS, product quantization, and billion-scale similarity search as key tooling references and mention Open Graph Benchmark as dataset resource.",
+      "expected_facts": ["Product quantization (Jégou et al.)", "FAISS library (Douze et al.)", "Billion-scale similarity search with GPUs (Johnson et al.)", "Open Graph Benchmark (Leskovec et al.)"],
+      "guidelines": "Return 3–4 tooling/dataset names and one-sentence why they matter for RAG/KGQA.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/ultRAG.pdf",
+          "chunk_id": "867e41de4f60f335fe6e05a3dc41a29cf0411f279d378bf5fda32188019c240c_p10_3",
+          "chunk_index": 10,
+          "snippet": "Jégou, H., Douze, M., and Schmid, C. Product quantization for nearest neighbor search. ... The faiss library. ... Billion-scale similarity search with GPUs. ... Open graph benchmark: Datasets for machine learning on graphs.",
+          "confidence": 0.93
+        }
+      ]
+    },
+    "source_excerpt": "Jégou, H., Douze, M., and Schmid, C. Product quantization for nearest neighbor search. ... The faiss library. ... Billion-scale similarity search with GPUs. ... Open graph benchmark: Datasets for machine learning on graphs.",
+    "tags": { "eval_type": "rag", "topic": "tooling" },
+    "source": { "document": { "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/ultRAG.pdf" } },
+    "create_time": "2026-04-26T04:01:24.289Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0041",
+    "inputs": {
+      "query": "How do governance styles affect participation volume in SWARM?",
+      "context": "Figure 8 and accompanying text compare total proposed vs accepted interactions across governance scenarios",
+      "source_doc_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3",
+      "source_chunk_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3_p13_1",
+      "metadata": { "language": "en", "section": "interaction-volume" }
+    },
+    "expectations": {
+      "expected_response": "Strict governance and adversarial red-team scenarios reduce participation compared to baseline; explain trade-off between safety and participation.",
+      "expected_facts": ["strict governance reduces participation", "adversarial red-team reduces participation", "Figure 8 shows proposed vs accepted counts"],
+      "guidelines": "One-paragraph explanation and a short recommendation to monitor participation when tightening governance.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agent_swarm.pdf",
+          "chunk_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3_p13_1",
+          "chunk_index": 13,
+          "snippet": "Strict governance and defensive strategies (e.g., in strict governance and broadly in adversarial red team) reduce systemic participation considerably compared to baseline levels.",
+          "confidence": 0.96
+        }
+      ]
+    },
+    "source_excerpt": "Strict governance and defensive strategies (e.g., in strict governance and broadly in adversarial red team) reduce systemic participation considerably compared to baseline levels.",
+    "tags": { "eval_type": "rag", "topic": "governance" },
+    "source": { "document": { "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agent_swarm.pdf" } },
+    "create_time": "2026-04-26T04:00:47.065Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0042",
+    "inputs": {
+      "query": "What is the threshold dancer problem and why do soft metrics help?",
+      "context": "Threshold dancer scenario and comparison of binary vs continuous metrics",
+      "source_doc_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3",
+      "source_chunk_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3_p13_1",
+      "metadata": { "language": "en", "section": "threshold-dancer" }
+    },
+    "expectations": {
+      "expected_response": "Define threshold dancing (agents operating just below freeze threshold) and explain how continuous soft-label metrics detect accumulation of systemic risk.",
+      "expected_facts": ["threshold dancing escapes binary detection", "soft metrics detect continuous accumulation", "soft metrics enable proportional governance responses"],
+      "guidelines": "Provide a short mitigation suggestion: adopt continuous monitoring and adaptive thresholds.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agent_swarm.pdf",
+          "chunk_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3_p13_1",
+          "chunk_index": 13,
+          "snippet": "The threshold dancer scenario highlights the fundamental weakness of binary governance: agents that operate just below the freeze threshold (toxicity ≈0.35) escape detection while accumulating systemic risk.",
+          "confidence": 0.97
+        }
+      ]
+    },
+    "source_excerpt": "The threshold dancer scenario highlights the fundamental weakness of binary governance: agents that operate just below the freeze threshold (toxicity ≈0.35) escape detection while accumulating systemic risk.",
+    "tags": { "eval_type": "rag", "metric": "soft-vs-binary" },
+    "source": { "human": { "annotator": "auto-ingest" } },
+    "create_time": "2026-04-26T04:00:47.065Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0043",
+    "inputs": {
+      "query": "How did the self-optimizing agent behave and which metrics detected degradation?",
+      "context": "Case study: agent that degrades quality while cutting costs; hard metrics passed but soft metrics flagged issues",
+      "source_doc_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3",
+      "source_chunk_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3_p13_2",
+      "metadata": { "language": "en", "section": "self-optimizing" }
+    },
+    "expectations": {
+      "expected_response": "Describe phases (Farming, Drifting, Degraded), cost reduction, and that soft metrics (toxicity trend, quality gap, variance, distribution shift) independently detected degradation.",
+      "expected_facts": ["discrete phases observed", "agent cut costs by 98% in Table 7", "soft metrics flagged degradation while hard metrics passed"],
+      "guidelines": "Summarize detection pipeline: monitor soft metrics and trigger human review when trends worsen.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agent_swarm.pdf",
+          "chunk_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3_p14_1",
+          "chunk_index": 14,
+          "snippet": "Across 20 epochs and 579 interactions, the agent progressed through discrete phases (Farming, Drifting, Degraded), successfully cutting interaction costs by 98% while continuing to pass hard binary acceptance metrics. Continuous soft metrics reliably flagged the degradation independently.",
+          "confidence": 0.98
+        }
+      ]
+    },
+    "source_excerpt": "Across 20 epochs and 579 interactions, the agent progressed through discrete phases (Farming, Drifting, Degraded), successfully cutting interaction costs by 98% while continuing to pass hard binary acceptance metrics.",
+    "tags": { "eval_type": "rag", "issue": "self-optimization" },
+    "source": { "document": { "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agent_swarm.pdf" } },
+    "create_time": "2026-04-26T04:00:47.068Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0044",
+    "inputs": {
+      "query": "What LLM validation experiments were run and what paradox emerged?",
+      "context": "LLM-backed validation with Llama 3.1, Claude models, and observation of a safety-trained paradox",
+      "source_doc_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3",
+      "source_chunk_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3_p13_2",
+      "metadata": { "language": "en", "section": "llm-validation" }
+    },
+    "expectations": {
+      "expected_response": "Summarize three validation findings: Llama 3.1 engagement, Claude RLHF robustness, and safety-trained paradox where safety-prompted agents scored marginally higher toxicity.",
+      "expected_facts": ["Llama 3.1 produced higher engagement", "Claude RLHF remained robust under adversarial prompts", "safety-trained paradox observed"],
+      "guidelines": "Explain the paradox briefly and recommend cross-checking heuristic scorers against human labels.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agent_swarm.pdf",
+          "chunk_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3_p13_2",
+          "chunk_index": 13,
+          "snippet": "Concordia entities backed by Llama 3.1 8B produced substantially higher engagement than scripted counterparts, while achieving nearly identical soft probability proxy scores (p ≈0.75). ... Notably, a “safety-trained paradox” emerged: explicitly safety-prompted agents scored marginally higher on measured toxicity due to cautious monitoring language receiving lower cooperation signals from the heuristic scorer.",
+          "confidence": 0.95
+        }
+      ]
+    },
+    "source_excerpt": "Concordia entities backed by Llama 3.1 8B produced substantially higher engagement than scripted counterparts, while achieving nearly identical soft probability proxy scores (p ≈0.75).",
+    "tags": { "eval_type": "rag", "topic": "llm-validation" },
+    "source": { "human": { "annotator": "auto-ingest" } },
+    "create_time": "2026-04-26T04:00:47.065Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0045",
+    "inputs": {
+      "query": "What market behavior did GPT-4o Mini show in SWARM Economy?",
+      "context": "Observation of trade aversion consistent with adverse selection theory",
+      "source_doc_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3",
+      "source_chunk_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3_p13_3",
+      "metadata": { "language": "en", "section": "trade-aversion" }
+    },
+    "expectations": {
+      "expected_response": "Explain that GPT-4o Mini exhibited extreme trade aversion in markets with deceptive counterparties, aligning with adverse selection predictions.",
+      "expected_facts": ["extreme trade aversion observed", "consistent with Akerlof 1978 adverse selection", "many rejections in rollouts"],
+      "guidelines": "One-sentence summary and implication for market design in agent economies.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agent_swarm.pdf",
+          "chunk_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3_p13_3",
+          "chunk_index": 13,
+          "snippet": "Third, GPT-4o Mini in the SWARM Economy exhibited extreme trade aversion, consistent with adverse selection theory (Akerlof, 1978): rational agents avoid markets populated by deceptive counterparties.",
+          "confidence": 0.94
+        }
+      ]
+    },
+    "source_excerpt": "Third, GPT-4o Mini in the SWARM Economy exhibited extreme trade aversion, consistent with adverse selection theory (Akerlof, 1978): rational agents avoid markets populated by deceptive counterparties.",
+    "tags": { "eval_type": "rag", "application": "economy" },
+    "source": { "document": { "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agent_swarm.pdf" } },
+    "create_time": "2026-04-26T04:00:47.065Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0046",
+    "inputs": {
+      "query": "What key quantitative insights are summarized in Table 7?",
+      "context": "Table 7 supplemental findings: self-optimizing agent, LLM backing, adversarial prompts, trade aversion",
+      "source_doc_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3",
+      "source_chunk_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3_p14_1",
+      "metadata": { "language": "en", "section": "table-7" }
+    },
+    "expectations": {
+      "expected_response": "List the four highlighted insights: self-optimizing agent phases and cost cut, Llama 3.1 engagement, Claude RLHF robustness, and GPT-4o Mini trade aversion with counts.",
+      "expected_facts": ["self-optimizing: 20 epochs, 579 interactions, 98% cost cut", "Llama 3.1 produced 305 proposals (8× rule-based)", "Claude tests: zero of 19 comparisons survived correction", "GPT-4o Mini: ~73 rejections out of 80 rollouts"],
+      "guidelines": "Return a 4-line bulleted summary with the numeric highlights.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agent_swarm.pdf",
+          "chunk_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3_p14_1",
+          "chunk_index": 14,
+          "snippet": "Across 20 epochs and 579 interactions, the agent progressed... Llama 3.1 8B produced 305 proposals (8× more than rule-based scripted agents)... zero of 19 statistical comparisons survived Holm-Bonferroni correction... concluding in approximately 73 rejections out of 80 potential rollouts.",
+          "confidence": 0.96
+        }
+      ]
+    },
+    "source_excerpt": "Across 20 epochs and 579 interactions, the agent progressed through discrete phases (Farming, Drifting, Degraded), successfully cutting interaction costs by 98% while continuing to pass hard binary acceptance metrics.",
+    "tags": { "eval_type": "rag", "topic": "results-summary" },
+    "source": { "human": { "annotator": "auto-ingest" } },
+    "create_time": "2026-04-26T04:00:47.068Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0047",
+    "inputs": {
+      "query": "What governance intervention improved welfare and reduced toxicity in SWARM?",
+      "context": "Adaptive acceptance with externality internalization and transaction tax experiments",
+      "source_doc_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3",
+      "source_chunk_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3_p14_2",
+      "metadata": { "language": "en", "section": "policy-interventions" }
+    },
+    "expectations": {
+      "expected_response": "State that adaptive acceptance plus externality internalization reduced toxicity by 34% and recovered systemic welfare by +137%; note transaction tax dampened volume and reduced welfare.",
+      "expected_facts": ["adaptive acceptance reduced toxicity by 34%", "recovered welfare +137%", "15% transaction tax reduced welfare from 165.1 to 140.0"],
+      "guidelines": "Provide numeric outcomes and a short policy implication.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agent_swarm.pdf",
+          "chunk_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3_p14_2",
+          "chunk_index": 14,
+          "snippet": "Introducing an adaptive acceptance threshold along with externality internalization reduced measured toxicity by 34% and recovered systemic welfare by +137% (d = 11.30, p < 0.001 at ρ = 1.0), outperforming fixed-threshold policies.",
+          "confidence": 0.97
+        }
+      ]
+    },
+    "source_excerpt": "Introducing an adaptive acceptance threshold along with externality internalization reduced measured toxicity by 34% and recovered systemic welfare by +137% (d = 11.30, p < 0.001 at ρ = 1.0), outperforming fixed-threshold policies.",
+    "tags": { "eval_type": "rag", "policy": "adaptive-acceptance" },
+    "source": { "document": { "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agent_swarm.pdf" } },
+    "create_time": "2026-04-26T04:00:47.068Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0048",
+    "inputs": {
+      "query": "What are SWARM's main limitations and recommended future work?",
+      "context": "Limitations: uncalibrated proxy mapping, under-specified acceptance mechanics, static agents, fixed taxonomy, limited LLM validation; Future work: evolutionary dynamics, calibration guarantees, topology analysis",
+      "source_doc_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3",
+      "source_chunk_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3_p14_3",
+      "metadata": { "language": "en", "section": "limitations-future" }
+    },
+    "expectations": {
+      "expected_response": "List the five limitations and summarize future directions including evolutionary dynamics, RL, calibration, network topology, and scaling empirical evaluations.",
+      "expected_facts": ["uncalibrated proxy mapping", "simplified acceptance mechanics", "static rule-based agents", "fixed agent taxonomy", "limited LLM validation sample sizes"],
+      "guidelines": "Return a concise 5-item list of limitations and 4-item future work bullets.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agent_swarm.pdf",
+          "chunk_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3_p14_3",
+          "chunk_index": 14,
+          "snippet": "First, uncalibrated proxy mapping... Second, under-specified acceptance mechanics... Third, static agent response... Fourth, fixed agent taxonomy... Lastly, preliminary LLM validation bounds: ... limiting the sample size and thus dampening the statistical power.",
+          "confidence": 0.95
+        }
+      ]
+    },
+    "source_excerpt": "While SWARM provides a robust foundation for modeling distributional safety, we acknowledge several critical limitations in the current implementation. First, uncalibrated proxy mapping: the translation of complex proxy observable scores into probabilities (= P(v = +1)) via a simple scaled sigmoid is a stark simplification.",
+    "tags": { "eval_type": "rag", "topic": "limitations" },
+    "source": { "human": { "annotator": "auto-ingest" } },
+    "create_time": "2026-04-26T04:00:47.069Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0049",
+    "inputs": {
+      "query": "What is SWARM's core contribution and conclusion?",
+      "context": "SWARM replaces binary labels with continuous probabilities to measure governance tradeoffs and detect subtle exploitation",
+      "source_doc_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3",
+      "source_chunk_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3_p15_1",
+      "metadata": { "language": "en", "section": "conclusion" }
+    },
+    "expectations": {
+      "expected_response": "Summarize that SWARM introduces soft probabilistic labels enabling continuous metrics (expected toxicity, quality gap) and shows continuous interventions yield better welfare-safety trade-offs than rigid thresholds.",
+      "expected_facts": ["soft probabilistic labels p ∈ [0,1]", "continuous metrics detect threshold-dancing and masked self-optimization", "adaptive acceptance offers tunable Pareto frontier"],
+      "guidelines": "Two-sentence summary suitable for an executive brief.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agent_swarm.pdf",
+          "chunk_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3_p15_1",
+          "chunk_index": 15,
+          "snippet": "By replacing binary safe/unsafe classifications with continuous probabilities p ∈[0, 1], SWARM enables precise measurement of governance tradeoffs through continuous metrics like expected toxicity and quality gap.",
+          "confidence": 0.96
+        }
+      ]
+    },
+    "source_excerpt": "By replacing binary safe/unsafe classifications with continuous probabilities p ∈[0, 1], SWARM enables precise measurement of governance tradeoffs through continuous metrics like expected toxicity and quality gap.",
+    "tags": { "eval_type": "rag", "conclusion": "core-contribution" },
+    "source": { "document": { "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agent_swarm.pdf" } },
+    "create_time": "2026-04-26T04:00:47.071Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0050",
+    "inputs": {
+      "query": "Who do the authors acknowledge and what are suggested next steps?",
+      "context": "Acknowledgments and future work directions listed at end of paper",
+      "source_doc_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3",
+      "source_chunk_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3_p15_2",
+      "metadata": { "language": "en", "section": "acknowledgments-future" }
+    },
+    "expectations": {
+      "expected_response": "List a few acknowledged contributors and summarize next steps: evolutionary dynamics, RL, calibration guarantees, topology analysis, and scaling empirical evaluations.",
+      "expected_facts": ["acknowledgments include Jed Silver and others", "future work includes evolutionary dynamics and calibration guarantees"],
+      "guidelines": "Return 2–3 names from acknowledgments and 4 future-work bullets.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agent_swarm.pdf",
+          "chunk_id": "3796b1255a7675d1852cc7722906e7106439bb6db1af80d92e67409bda8af0c3_p15_2",
+          "chunk_index": 15,
+          "snippet": "We thank Jed Silver, Etan Zapinsky, Gideon Weiler, Samuel Ballan, Josh Trachtenberg, Trace Cohen, Amit Mukherjee, Bob DiMaiolo, and Perry Feng for their helpful and insightful discussions on this topic.",
+          "confidence": 0.93
+        }
+      ]
+    },
+    "source_excerpt": "We thank Jed Silver, Etan Zapinsky, Gideon Weiler, Samuel Ballan, Josh Trachtenberg, Trace Cohen, Amit Mukherjee, Bob DiMaiolo, and Perry Feng for their helpful and insightful discussions on this topic.",
+    "tags": { "eval_type": "rag", "meta": "acknowledgments" },
+    "source": { "human": { "annotator": "auto-ingest" } },
+    "create_time": "2026-04-26T04:00:47.071Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0051",
+    "inputs": {
+      "query": "What lightweight defenses does POTEMKIN evaluate?",
+      "context": "Defense analysis characterizes two lightweight defenses: perplexity filtering and spotlighting",
+      "source_doc_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa",
+      "source_chunk_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa_p10_2",
+      "metadata": { "language": "en", "section": "defenses" }
+    },
+    "expectations": {
+      "expected_response": "Name the two lightweight defenses (perplexity filtering; spotlighting), describe their utility-security trade-off, and note that comprehensive benchmarking is out of scope.",
+      "expected_facts": ["perplexity filtering", "spotlighting", "defense benchmarking orthogonal to attack-surface identification"],
+      "guidelines": "One-paragraph summary and a short note recommending integration with broader benchmarks.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agent_mislead.pdf",
+          "chunk_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa_p10_2",
+          "chunk_index": 10,
+          "snippet": "Our defense analysis characterizes two lightweight defenses (perplexity filtering, spotlighting) to demonstrate the utility-security tradeoff.",
+          "confidence": 0.96
+        }
+      ]
+    },
+    "source_excerpt": "Our defense analysis characterizes two lightweight defenses (perplexity filtering, spotlighting) to demonstrate the utility-security tradeoff.",
+    "tags": { "eval_type": "agent-security", "technique": "defenses" },
+    "source": { "document": { "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agent_mislead.pdf" } },
+    "create_time": "2026-04-26T04:00:40.403Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0052",
+    "inputs": {
+      "query": "Does POTEMKIN plan integration with other agent security frameworks?",
+      "context": "Integration with AgentDojo and InjecAgent is planned for cross-methodology comparison",
+      "source_doc_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa",
+      "source_chunk_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa_p10_2",
+      "metadata": { "language": "en", "section": "future-integration" }
+    },
+    "expectations": {
+      "expected_response": "Confirm planned integration with AgentDojo and InjecAgent to enable cross-methodology comparison and note it's future work.",
+      "expected_facts": ["AgentDojo (Debenedetti et al., 2024)", "InjecAgent (Zhan et al., 2024)", "integration planned"],
+      "guidelines": "One-sentence confirmation and rationale for integration.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agent_mislead.pdf",
+          "chunk_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa_p10_2",
+          "chunk_index": 10,
+          "snippet": "Integration with existing agent security frameworks such as AgentDojo (Debenedetti et al., 2024) and InjecAgent (Zhan et al., 2024) would enable cross-methodology comparison and is planned for future work.",
+          "confidence": 0.95
+        }
+      ]
+    },
+    "source_excerpt": "Integration with existing agent security frameworks such as AgentDojo (Debenedetti et al., 2024) and InjecAgent (Zhan et al., 2024) would enable cross-methodology comparison and is planned for future work.",
+    "tags": { "eval_type": "agent-security", "topic": "integration" },
+    "source": { "human": { "annotator": "auto-ingest" } },
+    "create_time": "2026-04-26T04:00:40.403Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0053",
+    "inputs": {
+      "query": "What ethical considerations do the authors state for POTEMKIN?",
+      "context": "Authors acknowledge potential misuse but argue mitigations and benefits of transparent evaluation",
+      "source_doc_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa",
+      "source_chunk_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa_p10_2",
+      "metadata": { "language": "en", "section": "ethics" }
+    },
+    "expectations": {
+      "expected_response": "Summarize ethical stance: acknowledge attack techniques could be misused; mitigations include infrastructure control requirement, defense focus, and closed-network experiments; argue transparency benefits research.",
+      "expected_facts": ["attacks require control over tool infrastructure", "defense characterization provides guidance", "experiments run on authors' hardware in closed network"],
+      "guidelines": "Three short bullets covering risk, mitigations, and rationale for release.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agent_mislead.pdf",
+          "chunk_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa_p10_2",
+          "chunk_index": 10,
+          "snippet": "We acknowledge that the attack techniques described could potentially be misused to exploit agentic systems. However, we believe this risk is mitigated by: (1) the attacks require control over tool infrastructure, which limits adversary scope; (2) our focus on defense characterization provides actionable guidance for practitioners; and (3) releasing POTEMKIN enables proactive robustness testing.",
+          "confidence": 0.96
+        }
+      ]
+    },
+    "source_excerpt": "We acknowledge that the attack techniques described could potentially be misused to exploit agentic systems. However, we believe this risk is mitigated by: (1) the attacks require control over tool infrastructure, which limits adversary scope; (2) our focus on defense characterization provides actionable guidance for practitioners; and (3) releasing POTEMKIN enables proactive robustness testing.",
+    "tags": { "eval_type": "agent-security", "topic": "ethics" },
+    "source": { "document": { "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agent_mislead.pdf" } },
+    "create_time": "2026-04-26T04:00:40.403Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0054",
+    "inputs": {
+      "query": "Where were the adversarial experiments conducted?",
+      "context": "All adversarial experiments were conducted on the authors' own hardware in a closed local network",
+      "source_doc_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa",
+      "source_chunk_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa_p10_3",
+      "metadata": { "language": "en", "section": "experimental-setup" }
+    },
+    "expectations": {
+      "expected_response": "State that experiments were run on authors' hardware in a closed local network with no connection to production or third-party infrastructure.",
+      "expected_facts": ["closed local network", "authors' own hardware", "no connection to production systems"],
+      "guidelines": "One-sentence factual answer.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agent_mislead.pdf",
+          "chunk_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa_p10_3",
+          "chunk_index": 10,
+          "snippet": "All adversarial experiments were conducted on the authors’ own hardware in a closed local network with no connection to production systems or third-party infrastructure.",
+          "confidence": 0.97
+        }
+      ]
+    },
+    "source_excerpt": "All adversarial experiments were conducted on the authors’ own hardware in a closed local network with no connection to production systems or third-party infrastructure.",
+    "tags": { "eval_type": "agent-security", "topic": "experimental-setup" },
+    "source": { "human": { "annotator": "auto-ingest" } },
+    "create_time": "2026-04-26T04:00:40.403Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0055",
+    "inputs": {
+      "query": "Which grants and lab supported the POTEMKIN work?",
+      "context": "Work supported by CHIST-ERA grant CHIST-ERA-22-SPiDDS-02 (GRAPHS4SEC) and conducted within Networks and Systems Lab at Imperial College London",
+      "source_doc_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa",
+      "source_chunk_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa_p10_3",
+      "metadata": { "language": "en", "section": "acknowledgments" }
+    },
+    "expectations": {
+      "expected_response": "Identify CHIST-ERA-22-SPiDDS-02 (GRAPHS4SEC) as supporting grant and Networks and Systems Lab at Imperial College London as host.",
+      "expected_facts": ["CHIST-ERA-22-SPiDDS-02 (GRAPHS4SEC)", "Networks and Systems Lab, Imperial College London"],
+      "guidelines": "One-line factual answer.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agent_mislead.pdf",
+          "chunk_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa_p10_3",
+          "chunk_index": 10,
+          "snippet": "This work was supported by the CHIST-ERA grant CHIST-ERA-22-SPiDDS-02 (GRAPHS4SEC) and was conducted within the Networks and Systems Lab at Imperial College London.",
+          "confidence": 0.95
+        }
+      ]
+    },
+    "source_excerpt": "This work was supported by the CHIST-ERA grant CHIST-ERA-22-SPiDDS-02 (GRAPHS4SEC) and was conducted within the Networks and Systems Lab at Imperial College London.",
+    "tags": { "eval_type": "agent-security", "meta": "funding" },
+    "source": { "document": { "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agent_mislead.pdf" } },
+    "create_time": "2026-04-26T04:00:40.403Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0056",
+    "inputs": {
+      "query": "Which recent works on prompt injection and defenses are cited?",
+      "context": "References include AgentDojo, InjecAgent, spotlighting, and Phantom among others",
+      "source_doc_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa",
+      "source_chunk_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa_p10_4",
+      "metadata": { "language": "en", "section": "references" }
+    },
+    "expectations": {
+      "expected_response": "List cited works relevant to prompt injection and defenses: Phantom (2024), AgentDojo (2024), InjecAgent (2024), spotlighting (2024), and related surveys.",
+      "expected_facts": ["Phantom: trigger attacks on RAG (2024)", "AgentDojo (Debenedetti et al., 2024)", "InjecAgent (Zhan et al., 2024)", "spotlighting defense (Hines et al., 2024)"],
+      "guidelines": "Return 4–6 reference titles/authors as examples.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agent_mislead.pdf",
+          "chunk_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa_p10_4",
+          "chunk_index": 10,
+          "snippet": "Harsh Chaudhari ... Phantom: General trigger attacks on retrieval augmented language generation. ... Edoardo Debenedetti ... Agentdojo: A dynamic environment ... Qiusi Zhan ... Injecagent: Benchmarking indirect prompt injections ... Keegan Hines ... Defending against indirect prompt injection attacks with spotlighting.",
+          "confidence": 0.94
+        }
+      ]
+    },
+    "source_excerpt": "Harsh Chaudhari ... Phantom: General trigger attacks on retrieval augmented language generation. ... Edoardo Debenedetti ... Agentdojo: A dynamic environment ... Qiusi Zhan ... Injecagent: Benchmarking indirect prompt injections ... Keegan Hines ... Defending against indirect prompt injection attacks with spotlighting.",
+    "tags": { "eval_type": "agent-security", "topic": "references" },
+    "source": { "human": { "annotator": "auto-ingest" } },
+    "create_time": "2026-04-26T04:00:40.404Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0057",
+    "inputs": {
+      "query": "Which works on RAG and hallucinations are referenced?",
+      "context": "References include Retrieval-Augmented Generation (Lewis et al., 2020) and studies on hallucinated references",
+      "source_doc_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa",
+      "source_chunk_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa_p11_3",
+      "metadata": { "language": "en", "section": "references-rag" }
+    },
+    "expectations": {
+      "expected_response": "Mention Lewis et al. 2020 RAG and works on hallucinated references and legal fictions as cited.",
+      "expected_facts": ["Lewis et al. 2020 RAG", "Agrawal et al. 2024 on hallucinated references", "Dahl et al. 2024 on legal hallucinations"],
+      "guidelines": "Return 2–3 cited works with short context.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agent_mislead.pdf",
+          "chunk_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa_p11_3",
+          "chunk_index": 11,
+          "snippet": "Patrick Lewis ... Retrieval-augmented generation for knowledge-intensive nlp tasks. ... Ayush Agrawal ... Do language models know when they’re hallucinating references? ... Matthew Dahl ... Large legal fictions: Profiling legal hallucinations.",
+          "confidence": 0.93
+        }
+      ]
+    },
+    "source_excerpt": "Patrick Lewis ... Retrieval-augmented generation for knowledge-intensive nlp tasks. ... Ayush Agrawal ... Do language models know when they’re hallucinating references? ... Matthew Dahl ... Large legal fictions: Profiling legal hallucinations.",
+    "tags": { "eval_type": "rag", "topic": "hallucinations" },
+    "source": { "document": { "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agent_mislead.pdf" } },
+    "create_time": "2026-04-26T04:00:40.404Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0058",
+    "inputs": {
+      "query": "Which tool-agent and evaluation benchmarks are cited for agent testing?",
+      "context": "Cited resources include Agent-bench, AgentBench, ToolLLM, Deepseek, and AgentDojo",
+      "source_doc_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa",
+      "source_chunk_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa_p11_4",
+      "metadata": { "language": "en", "section": "benchmarks" }
+    },
+    "expectations": {
+      "expected_response": "List agent evaluation benchmarks and tooling cited: Agent-bench/AgentBench, ToolLLM, Deepseek-v3, AgentDojo, and Swe-bench.",
+      "expected_facts": ["Agent-bench (2023)", "ToolLLM (2023)", "Deepseek-v3 (2024/2025)", "AgentDojo (2024)", "Swe-bench (Swe-bench reference)"],
+      "guidelines": "Return 4–6 names and one-line why they matter.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agent_mislead.pdf",
+          "chunk_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa_p11_4",
+          "chunk_index": 11,
+          "snippet": "Xiao Liu ... Agent-bench: Evaluating llms as agents. ... Yujia Qin ... Toolllm: Facilitating large language models to master 16000+ real-world apis. ... Aixin Liu ... Deepseek-v3 technical report. ... Edoardo Debenedetti ... Agentdojo: A dynamic environment ...",
+          "confidence": 0.93
+        }
+      ]
+    },
+    "source_excerpt": "Xiao Liu ... Agent-bench: Evaluating llms as agents. ... Yujia Qin ... Toolllm: Facilitating large language models to master 16000+ real-world apis. ... Aixin Liu ... Deepseek-v3 technical report. ... Edoardo Debenedetti ... Agentdojo: A dynamic environment ...",
+    "tags": { "eval_type": "agent-security", "topic": "benchmarks" },
+    "source": { "human": { "annotator": "auto-ingest" } },
+    "create_time": "2026-04-26T04:00:40.408Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0059",
+    "inputs": {
+      "query": "Which recent system cards and model reports are referenced?",
+      "context": "References include GPT-4o system card, Qwen technical reports, and OpenAI/Anthropic model notes",
+      "source_doc_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa",
+      "source_chunk_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa_p11_2",
+      "metadata": { "language": "en", "section": "model-cards" }
+    },
+    "expectations": {
+      "expected_response": "List model/system cards cited: GPT-4o system card, Qwen2.5/Qwen3.5 reports, and GPT-5/OpenAI system notes where applicable.",
+      "expected_facts": ["Gpt-4o system card (2024)", "Qwen technical reports (2024/2026)", "OpenAI/Anthropic model announcements cited"],
+      "guidelines": "Return 3–4 model card references and their relevance to agent evaluation.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agent_mislead.pdf",
+          "chunk_id": "be9285e1a98f66e92058692e8687cc5a0531218672b415421e0069e07bd85faa_p11_2",
+          "chunk_index": 11,
+          "snippet": "Aaron Hurst ... Gpt-4o system card. ... Qwen. 2024. Qwen2.5 technical report. ... Qwen. 2026. Qwen3.5-397b-a17b. ... Openai gpt-5 system card (preprint references).",
+          "confidence": 0.92
+        }
+      ]
+    },
+    "source_excerpt": "Aaron Hurst ... Gpt-4o system card. ... Qwen. 2024. Qwen2.5 technical report. ... Qwen. 2026. Qwen3.5-397b-a17b.",
+    "tags": { "eval_type": "agent-security", "topic": "model-cards" },
+    "source": { "document": { "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agent_mislead.pdf" } },
+    "create_time": "2026-04-26T04:00:40.408Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0071",
+    "inputs": {
+      "query": "What is the governance-to-action closure gap described in the paper?",
+      "context": "Mismatch between governance obligations and where execution-time controls can be applied",
+      "source_doc_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056",
+      "source_chunk_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056_p1_1",
+      "metadata": { "language": "en", "section": "synthesis-intro" }
+    },
+    "expectations": {
+      "expected_response": "One-sentence definition of the governance-to-action closure gap and why it matters for agentic AI.",
+      "expected_facts": [
+        "Governance-to-action closure gap defined as mismatch between governance and execution-time control",
+        "Governance defines obligations but omits where actions can be blocked or proven later"
+      ],
+      "guidelines": "Single concise sentence plus one-sentence rationale.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agents_governance.pdf",
+          "chunk_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056_p1_1",
+          "chunk_index": 1,
+          "snippet": "The core finding is a governance-to-action closure gap: evaluation tells us whether outcomes were good, governance defines what should be allowed, but neither identifies where obligations bind to concrete actions or how compliance can later be proven.",
+          "confidence": 0.95
+        }
+      ]
+    },
+    "source_excerpt": "The core finding is a governance-to-action closure gap: evaluation tells us whether outcomes were good, governance defines what should be allowed, but neither identifies where obligations bind to concrete actions or how compliance can later be proven.",
+    "tags": { "eval_type": "synthesis", "topic": "governance-gap" },
+    "create_time": "2026-04-26T04:01:10.000Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0072",
+    "inputs": {
+      "query": "What are the three linked artifacts the paper introduces to close the gap?",
+      "context": "Four-layer framework, ODTA runtime-placement test, minimum action-evidence bundle",
+      "source_doc_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056",
+      "source_chunk_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056_p2_1",
+      "metadata": { "language": "en", "section": "contributions" }
+    },
+    "expectations": {
+      "expected_response": "List the three artifacts with one-line descriptions each.",
+      "expected_facts": [
+        "Four-layer framework spanning evaluation, governance, orchestration, assurance",
+        "ODTA runtime-placement test based on observability, decidability, timeliness, attestability",
+        "Minimum action-evidence bundle for state-changing actions"
+      ],
+      "guidelines": "Three short bullets, one sentence each.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agents_governance.pdf",
+          "chunk_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056_p2_1",
+          "chunk_index": 2,
+          "snippet": "To close that gap, the paper introduces three linked artifacts: (1) a four-layer framework spanning evaluation, governance, orchestration, and assurance; (2) an ODTA runtime-placement test based on observability, decidability, timeliness, and attestability; and (3) a minimum action-evidence bundle for state-changing actions.",
+          "confidence": 0.94
+        }
+      ]
+    },
+    "source_excerpt": "To close that gap, the paper introduces three linked artifacts: (1) a four-layer framework spanning evaluation, governance, orchestration, and assurance; (2) an ODTA runtime-placement test based on observability, decidability, timeliness, and attestability; and (3) a minimum action-evidence bundle for state-changing actions.",
+    "tags": { "eval_type": "synthesis", "topic": "contributions" },
+    "create_time": "2026-04-26T04:01:12.000Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0073",
+    "inputs": {
+      "query": "How was the corpus constructed and what was its scope?",
+      "context": "Manually coded corpus of 24 sources across evaluation, governance, orchestration, action-safety, assurance",
+      "source_doc_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056",
+      "source_chunk_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056_p2_2",
+      "metadata": { "language": "en", "section": "methodology-corpus" }
+    },
+    "expectations": {
+      "expected_response": "Two-sentence summary describing retrieval sources, query families, and the retained corpus size and composition.",
+      "expected_facts": [
+        "Targeted retrieval across arXiv, ACL Anthology, PMLR, NIST, ISO",
+        "Retained corpus contains 24 sources: 15 research papers and 9 official artifacts"
+      ],
+      "guidelines": "Two concise sentences.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agents_governance.pdf",
+          "chunk_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056_p2_2",
+          "chunk_index": 3,
+          "snippet": "Corpus construction followed a transparent, manually bounded protocol. The retained corpus contains twenty-four sources: fifteen research papers and nine official framework or standards artifacts.",
+          "confidence": 0.93
+        }
+      ]
+    },
+    "source_excerpt": "Corpus construction followed a transparent, manually bounded protocol. The retained corpus contains twenty-four sources: fifteen research papers and nine official framework or standards artifacts.",
+    "tags": { "eval_type": "methodology", "topic": "corpus" },
+    "create_time": "2026-04-26T04:01:14.000Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0074",
+    "inputs": {
+      "query": "What eight dimensions were used to manually code each retained source?",
+      "context": "Dimensions include literature stream, agent setting, unit of analysis, quality target, control locus, evidence type, failure mode, enforceability class",
+      "source_doc_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056",
+      "source_chunk_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056_p2_3",
+      "metadata": { "language": "en", "section": "coding-dimensions" }
+    },
+    "expectations": {
+      "expected_response": "List the eight coding dimensions as short labels.",
+      "expected_facts": [
+        "Literature stream",
+        "Agent setting",
+        "Primary unit of analysis",
+        "Main quality target",
+        "Control locus",
+        "Evidence type",
+        "Dominant failure mode",
+        "Implied enforceability class"
+      ],
+      "guidelines": "One-line comma-separated list or short bullets.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agents_governance.pdf",
+          "chunk_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056_p2_3",
+          "chunk_index": 4,
+          "snippet": "Each retained source was manually coded along eight dimensions: (i) literature stream, (ii) agent setting, (iii) primary unit of analysis, (iv) main quality target, (v) control locus, (vi) evidence type, (vii) dominant failure mode, and (viii) implied enforceability class.",
+          "confidence": 0.94
+        }
+      ]
+    },
+    "source_excerpt": "Each retained source was manually coded along eight dimensions: (i) literature stream, (ii) agent setting, (iii) primary unit of analysis, (iv) main quality target, (v) control locus, (vi) evidence type, (vii) dominant failure mode, and (viii) implied enforceability class.",
+    "tags": { "eval_type": "methodology", "topic": "coding" },
+    "create_time": "2026-04-26T04:01:16.000Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0075",
+    "inputs": {
+      "query": "How does the paper position orchestration in relation to governance?",
+      "context": "Orchestration as the action-time control plane where planning, policy enforcement, state management, and quality operations integrate",
+      "source_doc_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056",
+      "source_chunk_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056_p3_1",
+      "metadata": { "language": "en", "section": "orchestration" }
+    },
+    "expectations": {
+      "expected_response": "Two-sentence explanation of why orchestration is the locus for attaching runtime controls.",
+      "expected_facts": [
+        "Orchestration integrates planning, policy enforcement, state management, quality operations",
+        "It provides realistic loci for routing, scoped identities, tool permissions, approval gates, observability, rollback"
+      ],
+      "guidelines": "Two concise sentences.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agents_governance.pdf",
+          "chunk_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056_p3_1",
+          "chunk_index": 5,
+          "snippet": "The orchestration literature identifies where that translation can happen. The 2026 survey on orchestrated multi-agent systems formalizes a unified orchestration layer that integrates planning, policy enforcement, state management, and quality operations.",
+          "confidence": 0.93
+        }
+      ]
+    },
+    "source_excerpt": "The orchestration literature identifies where that translation can happen. The 2026 survey on orchestrated multi-agent systems formalizes a unified orchestration layer that integrates planning, policy enforcement, state management, and quality operations.",
+    "tags": { "eval_type": "architecture", "topic": "orchestration" },
+    "create_time": "2026-04-26T04:01:18.000Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0076",
+    "inputs": {
+      "query": "What does the paper say about prompt-level rules versus execution-path control?",
+      "context": "Runtime-governance argues execution path is the relevant object of control; prompts and static permissions are insufficient",
+      "source_doc_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056",
+      "source_chunk_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056_p3_2",
+      "metadata": { "language": "en", "section": "runtime-governance" }
+    },
+    "expectations": {
+      "expected_response": "One-sentence summary stating why execution-path policies are necessary and how they differ from prompt rules.",
+      "expected_facts": [
+        "Runtime governance formalizes policies as functions over identity, partial path, proposed next action, organizational state",
+        "Prompt-level rules and static access controls are insufficient for path-dependent systems"
+      ],
+      "guidelines": "Single concise sentence plus brief elaboration.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agents_governance.pdf",
+          "chunk_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056_p3_2",
+          "chunk_index": 6,
+          "snippet": "Recent runtime-governance work argues that the central object of control is not the prompt, but the execution path. \"Runtime Governance for AI Agents: Policies on Paths\" formalizes compliance policies as deterministic functions over agent identity, partial path, proposed next action, and organizational state.",
+          "confidence": 0.94
+        }
+      ]
+    },
+    "source_excerpt": "Recent runtime-governance work argues that the central object of control is not the prompt, but the execution path.",
+    "tags": { "eval_type": "governance", "topic": "runtime-control" },
+    "create_time": "2026-04-26T04:01:20.000Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0077",
+    "inputs": {
+      "query": "Which standards and frameworks are cited as governance baselines?",
+      "context": "ISO/IEC 42001, 23894, 42005, 5338, 38507 and NIST AI RMF and Generative AI Profile",
+      "source_doc_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056",
+      "source_chunk_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056_p1_4",
+      "metadata": { "language": "en", "section": "standards" }
+    },
+    "expectations": {
+      "expected_response": "List the ISO and NIST artifacts mentioned and note they stop short of execution-time control architecture.",
+      "expected_facts": [
+        "ISO/IEC 42001, 23894, 42005, 5338, 38507",
+        "NIST AI RMF and Generative AI Profile",
+        "These artifacts do not specify complete execution-time control architectures"
+      ],
+      "guidelines": "Short bullet list plus one-sentence caveat.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agents_governance.pdf",
+          "chunk_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056_p1_4",
+          "chunk_index": 7,
+          "snippet": "ISO/IEC 42001, ISO/IEC 23894, ISO/IEC 42005, ISO/IEC 5338, and ISO/IEC 38507 provide organizational baselines for AI management, risk, impact assessment, lifecycle discipline, and governance implications [17]–[21]. NIST’s AI Risk Management Framework (AI RMF 1.0), its Generative AI Profile, and the 2026 AI Agent Standards Initiative reinforce the point that trustworthy AI increasingly requires explicit treatment of risk, control, identity, interoperability, and evidence [22]–[24]. Yet these documents deliberately stop short of specifying a complete execution-time control architecture for agents.",
+          "confidence": 0.95
+        }
+      ]
+    },
+    "source_excerpt": "ISO/IEC 42001, ISO/IEC 23894, ISO/IEC 42005, ISO/IEC 5338, and ISO/IEC 38507 provide organizational baselines for AI management, risk, impact assessment, lifecycle discipline, and governance implications.",
+    "tags": { "eval_type": "governance", "topic": "standards" },
+    "create_time": "2026-04-26T04:01:22.000Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0078",
+    "inputs": {
+      "query": "What open gaps in evaluation does the paper highlight?",
+      "context": "Safety, robustness, trajectory-level measurement, cost-efficiency, scalable fine-grained measurement",
+      "source_doc_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056",
+      "source_chunk_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056_p2_4",
+      "metadata": { "language": "en", "section": "evaluation-gaps" }
+    },
+    "expectations": {
+      "expected_response": "Three short bullets listing the main unresolved gaps in agent evaluation.",
+      "expected_facts": [
+        "Safety and robustness remain unresolved",
+        "Trajectory-level measurement is weak",
+        "Cost-efficiency and scalable fine-grained methods are open gaps"
+      ],
+      "guidelines": "3 bullets, each 6–10 words.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agents_governance.pdf",
+          "chunk_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056_p2_4",
+          "chunk_index": 8,
+          "snippet": "Across sources, evaluation papers identify safety, robustness, and trajectory-level measurement as open gaps; governance frameworks define obligations but omit execution-time control logic; orchestration research positions the control plane as the locus of policy mediation, identity, and telemetry; runtime-governance work shows path-dependent behavior cannot be governed through prompts or static permissions alone; and action-safety studies show text alignment does not reliably transfer to tool actions.",
+          "confidence": 0.93
+        }
+      ]
+    },
+    "source_excerpt": "Across sources, evaluation papers identify safety, robustness, and trajectory-level measurement as open gaps.",
+    "tags": { "eval_type": "evaluation", "topic": "gaps" },
+    "create_time": "2026-04-26T04:01:24.000Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0079",
+    "inputs": {
+      "query": "What is the ODTA runtime-placement test and its components?",
+      "context": "ODTA stands for observability, decidability, timeliness, attestability",
+      "source_doc_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056",
+      "source_chunk_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056_p2_1",
+      "metadata": { "language": "en", "section": "odta" }
+    },
+    "expectations": {
+      "expected_response": "Define ODTA and give one-line explanation of each component.",
+      "expected_facts": [
+        "ODTA = observability, decidability, timeliness, attestability",
+        "Used to assign requirements to design-time, runtime mediation, assurance, or human oversight"
+      ],
+      "guidelines": "Four short lines, one per component.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agents_governance.pdf",
+          "chunk_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056_p2_1",
+          "chunk_index": 9,
+          "snippet": "It introduces the governance-to-action closure gap as the paper’s core synthesis finding. 3) It proposes a four-layer framework and a reusable ODTA runtime-placement test for assigning requirements to design-time, runtime mediation, assurance, or human oversight.",
+          "confidence": 0.92
+        }
+      ]
+    },
+    "source_excerpt": "It introduces the governance-to-action closure gap as the paper’s core synthesis finding. 3) It proposes a four-layer framework and a reusable ODTA runtime-placement test for assigning requirements to design-time, runtime mediation, assurance, or human oversight.",
+    "tags": { "eval_type": "framework", "topic": "odta" },
+    "create_time": "2026-04-26T04:01:26.000Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0080",
+    "inputs": {
+      "query": "What is the Minimum Action-Evidence Bundle (MAEB) and its role?",
+      "context": "MAEB is derived to show what evidence must accompany state-changing actions for later attestation",
+      "source_doc_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056",
+      "source_chunk_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056_p2_1",
+      "metadata": { "language": "en", "section": "maeb" }
+    },
+    "expectations": {
+      "expected_response": "One-sentence definition of MAEB and one-sentence on its purpose.",
+      "expected_facts": [
+        "MAEB = minimum action-evidence bundle for state-changing actions",
+        "Purpose: enable later proof/attestation of compliance for executed actions"
+      ],
+      "guidelines": "Two short sentences.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/agents_governance.pdf",
+          "chunk_id": "512743b6f02d70e4f585db175d3ce0db173819ac115bd47f17d3f4eb30c0a056_p2_1",
+          "chunk_index": 10,
+          "snippet": "It derives a minimum action-evidence bundle (MAEB) and demonstrates the framework through a worked enterprise procurement-agent scenario.",
+          "confidence": 0.91
+        }
+      ]
+    },
+    "source_excerpt": "It derives a minimum action-evidence bundle (MAEB) and demonstrates the framework through a worked enterprise procurement-agent scenario.",
+    "tags": { "eval_type": "assurance", "topic": "maeb" },
+    "create_time": "2026-04-26T04:01:28.000Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0081",
+    "inputs": {
+      "query": "Give an example of a consumer-facing S&P transparency artifact mentioned.",
+      "context": "AI Nutrition Facts Label as a standardized summary for GenAI data practices",
+      "source_doc_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0",
+      "source_chunk_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0_p11_5",
+      "metadata": { "language": "en", "section": "s&p-examples" }
+    },
+    "expectations": {
+      "expected_response": "Name the artifact and give a one-line description of its purpose.",
+      "expected_facts": [
+        "AI Nutrition Facts Label",
+        "Standardized summary of a GenAI model’s data practices for consumers"
+      ],
+      "guidelines": "One short sentence plus one-line purpose.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/rag_security.pdf",
+          "chunk_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0_p11_5",
+          "chunk_index": 11,
+          "snippet": "The AI nutrition fact label presents a standardized summary of a GenAI model’s data practices to help users quickly understand a model’s data training, sharing, retention, and related practices.",
+          "confidence": 0.94
+        }
+      ]
+    },
+    "source_excerpt": "The AI nutrition fact label presents a standardized summary of a GenAI model’s data practices to help users quickly understand a model’s data training, sharing, retention, and related practices.",
+    "tags": { "eval_type": "transparency", "topic": "artifacts" },
+    "create_time": "2026-04-26T04:02:00.000Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0082",
+    "inputs": {
+      "query": "What consumer-facing S&P disclosures did Manus publish?",
+      "context": "Manus published consumer-facing S&P compliance information including audits and subprocessor disclosures",
+      "source_doc_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0",
+      "source_chunk_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0_p11_5",
+      "metadata": { "language": "en", "section": "manus-example" }
+    },
+    "expectations": {
+      "expected_response": "List Manus disclosures in one line.",
+      "expected_facts": [
+        "Independent audit reports",
+        "Security controls",
+        "Subprocessor disclosures",
+        "Static FAQs"
+      ],
+      "guidelines": "Single-line comma-separated list.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/rag_security.pdf",
+          "chunk_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0_p11_5",
+          "chunk_index": 12,
+          "snippet": "More recently, Manus published consumer-facing information about its S&P compliance, including independent audit reports, security controls, subprocessor disclosures, and static FAQs.",
+          "confidence": 0.93
+        }
+      ]
+    },
+    "source_excerpt": "More recently, Manus published consumer-facing information about its S&P compliance, including independent audit reports, security controls, subprocessor disclosures, and static FAQs.",
+    "tags": { "eval_type": "transparency", "topic": "examples" },
+    "create_time": "2026-04-26T04:02:02.000Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0083",
+    "inputs": {
+      "query": "What emerging patterns in GenAI S&P transparency does the paper identify?",
+      "context": "Six patterns including expert-facing approaches, underexplored interactive modalities, timing issues, lack of reflection moments, absent independent evaluations, granularity trade-offs",
+      "source_doc_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0",
+      "source_chunk_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0_p12_1",
+      "metadata": { "language": "en", "section": "patterns" }
+    },
+    "expectations": {
+      "expected_response": "Return 6 short bullets summarizing the patterns.",
+      "expected_facts": [
+        "Most approaches are expert-facing",
+        "Interactive modalities underexplored",
+        "Timing dominated by persistent availability",
+        "Few moments for user reflection/confirmation",
+        "Independent evaluations mostly absent",
+        "Granularity not unified between summary and drill-down"
+      ],
+      "guidelines": "Six bullets, each 6–12 words.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/rag_security.pdf",
+          "chunk_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0_p12_1",
+          "chunk_index": 13,
+          "snippet": "Evaluating this small set of examples suggests several emerging patterns ... (1) most approaches are expert-facing ... (2) interactive modalities ... (3) timing is dominated by persistent availability ... (4) most approaches primarily convey information, but do not reliably create moments for users to reflect, confirm, or revise settings ... (5) independent evaluations are mostly absent; and (6) while many examples offer high granularity, fewer provide a unified experience ...",
+          "confidence": 0.95
+        }
+      ]
+    },
+    "source_excerpt": "Evaluating this small set of examples suggests several emerging patterns in the current GenAI S&P transparency landscape: across the examples, (1) most approaches are expert-facing ... (5) independent evaluations are mostly absent; and (6) while many examples offer high granularity, fewer provide a unified experience ...",
+    "tags": { "eval_type": "transparency", "topic": "patterns" },
+    "create_time": "2026-04-26T04:02:04.000Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0084",
+    "inputs": {
+      "query": "What specific future research directions does the paper recommend for S&P transparency?",
+      "context": "Evaluate real-world impact on perceptions and behaviors; translate credibility concerns into policy-relevant evidence and independent evaluation formats",
+      "source_doc_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0",
+      "source_chunk_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0_p12_2",
+      "metadata": { "language": "en", "section": "recommendations" }
+    },
+    "expectations": {
+      "expected_response": "List two numbered research recommendations with brief explanations.",
+      "expected_facts": [
+        "Evaluate real-world impact of S&P designs on user perceptions and behaviors",
+        "Translate credibility concerns into policy-relevant evidence and independent evaluation formats"
+      ],
+      "guidelines": "Two numbered items, one sentence each.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/rag_security.pdf",
+          "chunk_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0_p12_2",
+          "chunk_index": 14,
+          "snippet": "Specifically, future work should (1) evaluate the real-world impact of GenAI S&P transparency designs on users’ perceptions and behaviors ... and (2) extend this work by translating participants’ credibility concerns into policy-relevant evidence, examining what information and presentation formats for independent evaluation best support users’ needs ...",
+          "confidence": 0.94
+        }
+      ]
+    },
+    "source_excerpt": "Specifically, future work should (1) evaluate the real-world impact of GenAI S&P transparency designs on users’ perceptions and behaviors ... and (2) extend this work by translating participants’ credibility concerns into policy-relevant evidence ...",
+    "tags": { "eval_type": "research", "topic": "recommendations" },
+    "create_time": "2026-04-26T04:02:06.000Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0085",
+    "inputs": {
+      "query": "How should designers balance flexibility and user burden in S&P controls?",
+      "context": "Recommend secure defaults with additional granularity on demand; investigate users' mental models to inform defaults",
+      "source_doc_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0",
+      "source_chunk_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0_p12_3",
+      "metadata": { "language": "en", "section": "design-guidance" }
+    },
+    "expectations": {
+      "expected_response": "Two-sentence guidance: secure defaults and on-demand granularity plus rationale.",
+      "expected_facts": [
+        "Make default experiences secure",
+        "Offer additional granularity on demand",
+        "Study users' mental models to set sensible defaults"
+      ],
+      "guidelines": "Two concise sentences.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/rag_security.pdf",
+          "chunk_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0_p12_3",
+          "chunk_index": 15,
+          "snippet": "To balance these concerns, we recommend that designers make the default experiences secure, while offering additional granularity on demand. Moreover, prior work suggests that when data practices reasonably match users’ expectations, they can demand less attention from users.",
+          "confidence": 0.93
+        }
+      ]
+    },
+    "source_excerpt": "To balance these concerns, we recommend that designers make the default experiences secure, while offering additional granularity on demand.",
+    "tags": { "eval_type": "design", "topic": "defaults" },
+    "create_time": "2026-04-26T04:02:08.000Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0086",
+    "inputs": {
+      "query": "How does the paper contrast U.S. and non-U.S. transparency policy approaches?",
+      "context": "U.S. efforts prioritize organizational accountability; EU AI Act mandates certain consumer-facing transparency; other frameworks vary in scope",
+      "source_doc_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0",
+      "source_chunk_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0_p12_4",
+      "metadata": { "language": "en", "section": "policy-landscape" }
+    },
+    "expectations": {
+      "expected_response": "One-paragraph summary comparing U.S. and international approaches.",
+      "expected_facts": [
+        "U.S. state laws emphasize organizational accountability (e.g., Colorado SB24-205)",
+        "EU AI Act introduces legally binding transparency obligations for certain systems",
+        "Other efforts (Singapore, OECD) are largely non-binding"
+      ],
+      "guidelines": "3–4 sentences.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/rag_security.pdf",
+          "chunk_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0_p12_4",
+          "chunk_index": 16,
+          "snippet": "In the U.S., pressure for truthful S&P communication largely arrives through emerging state laws ... these U.S.-based efforts tend to prioritize organizational accountability ... Outside the U.S., transparency requirements also vary substantially ... the EU AI Act introduces legally binding transparency obligations ... while other efforts are largely non-binding, such as Singapore’s Model AI Governance Framework ... and the OECD’s Hiroshima AI Process Reporting Framework.",
+          "confidence": 0.94
+        }
+      ]
+    },
+    "source_excerpt": "In the U.S., pressure for truthful S&P communication largely arrives through emerging state laws ... Outside the U.S., transparency requirements also vary substantially in scope and intended audience – for example, the EU AI Act introduces legally binding transparency obligations ...",
+    "tags": { "eval_type": "policy", "topic": "comparative" },
+    "create_time": "2026-04-26T04:02:10.000Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0087",
+    "inputs": {
+      "query": "What is 'transparency washing' and why is it a concern?",
+      "context": "Vague or unverifiable claims, self-issued badges, interfaces that nudge users into disclosure while obscuring terms",
+      "source_doc_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0",
+      "source_chunk_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0_p12_5",
+      "metadata": { "language": "en", "section": "risks" }
+    },
+    "expectations": {
+      "expected_response": "Define transparency washing and give two examples of how it appears.",
+      "expected_facts": [
+        "Transparency washing includes vague or unverified claims",
+        "Examples: self-issued trust badges without auditable backing; interface designs that nudge users into disclosure while obscuring terms"
+      ],
+      "guidelines": "One-sentence definition plus two short examples.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/rag_security.pdf",
+          "chunk_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0_p12_5",
+          "chunk_index": 17,
+          "snippet": "Moving forward, policies could shift ... while guarding against “transparency washing,” such as vague or unverifiable claims, self-issued trust badges without auditable backing, or interface designs that nudge users into disclosure while obscuring critical terms.",
+          "confidence": 0.93
+        }
+      ]
+    },
+    "source_excerpt": "Moving forward, policies could shift ... while guarding against “transparency washing,” such as vague or unverifiable claims, self-issued trust badges without auditable backing, or interface designs that nudge users into disclosure while obscuring critical terms.",
+    "tags": { "eval_type": "policy", "topic": "risks" },
+    "create_time": "2026-04-26T04:02:12.000Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0088",
+    "inputs": {
+      "query": "What S&P information did participants most want clarity about?",
+      "context": "Data-access stakeholders, what data are stored, used for training, or inferred, and independent evaluations",
+      "source_doc_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0",
+      "source_chunk_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0_p12_6",
+      "metadata": { "language": "en", "section": "participant-needs" }
+    },
+    "expectations": {
+      "expected_response": "List the top S&P items participants wanted clarity on in one line.",
+      "expected_facts": [
+        "Data-access stakeholders",
+        "What data are stored",
+        "What data are used for training or inferred",
+        "Independent evaluations"
+      ],
+      "guidelines": "Single-line comma-separated list.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/rag_security.pdf",
+          "chunk_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0_p12_6",
+          "chunk_index": 18,
+          "snippet": "They most wanted clarity about data-access stakeholders, what data are stored, used for training, or inferred, and independent evaluations.",
+          "confidence": 0.95
+        }
+      ]
+    },
+    "source_excerpt": "They most wanted clarity about data-access stakeholders, what data are stored, used for training, or inferred, and independent evaluations.",
+    "tags": { "eval_type": "user-study", "topic": "preferences" },
+    "create_time": "2026-04-26T04:02:14.000Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0089",
+    "inputs": {
+      "query": "What role did participants assign to independent evaluations and trusted organizations?",
+      "context": "Participants preferred independent evaluations combining public oversight with accredited private auditors and trusted organizations like Consumer Reports or UL",
+      "source_doc_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0",
+      "source_chunk_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0_p12_3",
+      "metadata": { "language": "en", "section": "trust-evaluations" }
+    },
+    "expectations": {
+      "expected_response": "One-sentence summary naming example trusted organizations and the preferred evaluation model.",
+      "expected_facts": [
+        "Participants trust independent evaluations combining public oversight with accredited private auditors",
+        "Examples: Consumer Reports, Underwriters Laboratories"
+      ],
+      "guidelines": "Single concise sentence.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/rag_security.pdf",
+          "chunk_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0_p12_3",
+          "chunk_index": 19,
+          "snippet": "Participants suggested they would be more likely to trust independent evaluations that combine public oversight with accredited private auditors (Section 5.3.1), pointing to a role for policy in establishing industry-wide, consumer-legible S&P transparency standards.",
+          "confidence": 0.93
+        }
+      ]
+    },
+    "source_excerpt": "Participants suggested they would be more likely to trust independent evaluations that combine public oversight with accredited private auditors.",
+    "tags": { "eval_type": "trust", "topic": "independent-eval" },
+    "create_time": "2026-04-26T04:02:16.000Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0090",
+    "inputs": {
+      "query": "What five design dimensions did participants' envisioned transparency interfaces highlight?",
+      "context": "Participants' envisioned transparency interfaces highlighted five design dimensions (referenced but enumerated elsewhere in the paper)",
+      "source_doc_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0",
+      "source_chunk_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0_p12_6",
+      "metadata": { "language": "en", "section": "design-dimensions" }
+    },
+    "expectations": {
+      "expected_response": "State that five design dimensions were highlighted and note that details appear in Section 5.3.2.",
+      "expected_facts": [
+        "Participants' interfaces highlighted five design dimensions",
+        "Details are referenced in Section 5.3.2"
+      ],
+      "guidelines": "One short sentence plus a citation to the section.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/rag_security.pdf",
+          "chunk_id": "93521da563e8a3a4cde938de251fc711e2155ac851cb3a139648fbc3dfa43ba0_p12_6",
+          "chunk_index": 20,
+          "snippet": "Participants’ envisioned transparency interfaces highlighted five design dimensions. Grounded in our findings, we propose recommendations toward promoting S&P transparency for consumer-facing GenAI.",
+          "confidence": 0.91
+        }
+      ]
+    },
+    "source_excerpt": "Participants’ envisioned transparency interfaces highlighted five design dimensions.",
+    "tags": { "eval_type": "design", "topic": "dimensions" },
+    "create_time": "2026-04-26T04:02:18.000Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0091",
+    "inputs": {
+      "query": "What is generation coverage in RAGOps and how is it checked?",
+      "context": "Coverage checking compares live generated responses to test-set topics, intents, and styles using embeddings or topic models",
+      "source_doc_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3",
+      "source_chunk_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3_p12_2",
+      "metadata": { "language": "en", "section": "coverage-generation" }
+    },
+    "expectations": {
+      "expected_response": "Define generation coverage and list two automated checks (semantic similarity with embeddings; topic-distribution comparison with LDA).",
+      "expected_facts": [
+        "Generation coverage compares live responses to test-set topics, intents, and styles",
+        "Checks: semantic similarity using embeddings; topic modeling (LDA) to compare distributions"
+      ],
+      "guidelines": "One-sentence definition plus two short bullets for checks.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/RAGOps.pdf",
+          "chunk_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3_p12_2",
+          "chunk_index": 1,
+          "snippet": "At the generation stage, coverage checking examines whether generated responses from live queries align with the topics, intents, and styles covered in the test set. Variations can be detected through semantic similarity analysis using embedding models or by applying topic modeling (e.g., LDA) to compare topic distributions.",
+          "confidence": 0.95
+        }
+      ]
+    },
+    "source_excerpt": "At the generation stage, coverage checking examines whether generated responses from live queries align with the topics, intents, and styles covered in the test set.",
+    "tags": { "eval_type": "ragops", "topic": "coverage" },
+    "create_time": "2026-04-26T04:03:00.000Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0092",
+    "inputs": {
+      "query": "How can vocabulary and domain coverage drift be detected for RAG systems?",
+      "context": "Use TF-IDF to compare term frequencies between test and live data to flag new or underrepresented terms",
+      "source_doc_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3",
+      "source_chunk_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3_p12_2",
+      "metadata": { "language": "en", "section": "coverage-vocab" }
+    },
+    "expectations": {
+      "expected_response": "Explain TF-IDF based detection and when to trigger test-set updates.",
+      "expected_facts": [
+        "TF-IDF compares term frequencies between test and live data",
+        "Flag new or underrepresented terms for inclusion in updated test sets"
+      ],
+      "guidelines": "One short paragraph with an example threshold mention.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/RAGOps.pdf",
+          "chunk_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3_p12_2",
+          "chunk_index": 2,
+          "snippet": "Tools like TF-IDF are particularly useful for identifying vocabulary drift. By comparing term frequencies between test and live data, new or underrepresented terms can be flagged for inclusion in updated test sets.",
+          "confidence": 0.94
+        }
+      ]
+    },
+    "source_excerpt": "Tools like TF-IDF are particularly useful for identifying vocabulary drift.",
+    "tags": { "eval_type": "ragops", "topic": "vocabulary-drift" },
+    "create_time": "2026-04-26T04:03:02.000Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0093",
+    "inputs": {
+      "query": "What operational threshold example does the paper give for coverage checking?",
+      "context": "If less than 85% of live queries achieve a similarity score to test queries, prompt test set expansion",
+      "source_doc_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3",
+      "source_chunk_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3_p12_2",
+      "metadata": { "language": "en", "section": "coverage-thresholds" }
+    },
+    "expectations": {
+      "expected_response": "State the example threshold and its operational action.",
+      "expected_facts": [
+        "Example threshold: less than 85% similarity triggers review",
+        "Action: prompt test set expansion"
+      ],
+      "guidelines": "One sentence with threshold and action.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/RAGOps.pdf",
+          "chunk_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3_p12_2",
+          "chunk_index": 3,
+          "snippet": "For example, if less than 85% of live queries achieve a certain similarity score to test queries, the system should prompt a test set expansion.",
+          "confidence": 0.95
+        }
+      ]
+    },
+    "source_excerpt": "For example, if less than 85% of live queries achieve a certain similarity score to test queries, the system should prompt a test set expansion.",
+    "tags": { "eval_type": "ragops", "topic": "thresholds" },
+    "create_time": "2026-04-26T04:03:04.000Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0094",
+    "inputs": {
+      "query": "What quality attributes does Table 2 list for RAG systems?",
+      "context": "Adaptability, Monitorability, Observability, Traceability, Reliability and their operational considerations",
+      "source_doc_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3",
+      "source_chunk_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3_p13_1",
+      "metadata": { "language": "en", "section": "qualities-table" }
+    },
+    "expectations": {
+      "expected_response": "Return a short table (as JSON fields) listing each quality and one operational design consideration.",
+      "expected_facts": [
+        "Adaptability — data structure construction; granularity configuration",
+        "Monitorability — performance degradation detection; data source change detection",
+        "Observability — injection attack detection; context adherence",
+        "Traceability — versioning; retrieval routing; grounded source",
+        "Reliability — resource usage; bandwidth"
+      ],
+      "guidelines": "JSON object with five entries (quality: consideration).",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/RAGOps.pdf",
+          "chunk_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3_p13_1",
+          "chunk_index": 4,
+          "snippet": "Table 2 highlights the quality attributes of a RAG system that must be considered, along with the corresponding operational design considerations. Adaptability ... Monitorability ... Observability ... Traceability ... Reliability ...",
+          "confidence": 0.94
+        }
+      ]
+    },
+    "source_excerpt": "Table 2 highlights the quality attributes of a RAG system that must be considered, along with the corresponding operational design considerations.",
+    "tags": { "eval_type": "ragops", "topic": "qualities" },
+    "create_time": "2026-04-26T04:03:06.000Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0095",
+    "inputs": {
+      "query": "Define adaptability for RAG systems and key design choices that affect it.",
+      "context": "Adaptability requires automated updates to retrieval sources; influenced by knowledge graph construction and retrieval granularity",
+      "source_doc_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3",
+      "source_chunk_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3_p12_3",
+      "metadata": { "language": "en", "section": "adaptability" }
+    },
+    "expectations": {
+      "expected_response": "One-sentence definition of adaptability and two short bullets listing influencing design choices.",
+      "expected_facts": [
+        "Adaptability supports automated updates to retrieval sources when raw data changes",
+        "Influencing choices: knowledge graph construction; retrieval unit granularity"
+      ],
+      "guidelines": "One-sentence plus two bullets.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/RAGOps.pdf",
+          "chunk_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3_p12_3",
+          "chunk_index": 5,
+          "snippet": "Adaptability is a critical quality for managing the rapid technical evolution of the RAG system. ... Development design choices, such as the method of knowledge graph construction and the granularity of retrieval units, influence the efficiency of adaptation.",
+          "confidence": 0.94
+        }
+      ]
+    },
+    "source_excerpt": "Adaptability is a critical quality for managing the rapid technical evolution of the RAG system.",
+    "tags": { "eval_type": "ragops", "topic": "adaptability" },
+    "create_time": "2026-04-26T04:03:08.000Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0096",
+    "inputs": {
+      "query": "What observability requirements are emphasized for RAG systems?",
+      "context": "Comprehensive observability layer logging queries, responses, inputs/outputs; detect injection attacks and validate generated SQL",
+      "source_doc_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3",
+      "source_chunk_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3_p13_1",
+      "metadata": { "language": "en", "section": "observability" }
+    },
+    "expectations": {
+      "expected_response": "Three short bullets: logging layer, injection-attack detection, SQL validation example.",
+      "expected_facts": [
+        "Observability layer must log queries, responses, and component I/O",
+        "Detect injection attacks against retrieval sources",
+        "Validate SQL generated by LLMs to prevent SQL injection"
+      ],
+      "guidelines": "Three bullets, each 6–12 words.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/RAGOps.pdf",
+          "chunk_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3_p13_1",
+          "chunk_index": 6,
+          "snippet": "An observability infrastructure layer is essential and must span across all components. This layer logs all queries, responses, and the inputs and outputs of each component ... observability must also detect potential injection attacks ... the SQL queries generated by the LLM should be thoroughly validated to prevent SQL injection.",
+          "confidence": 0.95
+        }
+      ]
+    },
+    "source_excerpt": "An observability infrastructure layer is essential and must span across all components. This layer logs all queries, responses, and the inputs and outputs of each component.",
+    "tags": { "eval_type": "ragops", "topic": "observability" },
+    "create_time": "2026-04-26T04:03:10.000Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0097",
+    "inputs": {
+      "query": "What traceability practices are recommended for RAGOps?",
+      "context": "Versioning retrieval resources, documenting retriever and generator inputs/outputs, secure recording for debugging and reproducibility",
+      "source_doc_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3",
+      "source_chunk_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3_p13_2",
+      "metadata": { "language": "en", "section": "traceability" }
+    },
+    "expectations": {
+      "expected_response": "List three traceability items: versioning, input/output logging, secure recording.",
+      "expected_facts": [
+        "Versioning of retrieval resources",
+        "Document inputs/outputs of retriever and generator",
+        "Securely record traceability information for debugging"
+      ],
+      "guidelines": "Three short bullets.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/RAGOps.pdf",
+          "chunk_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3_p13_2",
+          "chunk_index": 7,
+          "snippet": "Traceability ... versioning is required to capture differences between updates of retrieval resources. Input and output data of each component ... should also be thoroughly documented to maintain transparency and reproducibility ... Such traceability information must be securely recorded to facilitate debugging ...",
+          "confidence": 0.94
+        }
+      ]
+    },
+    "source_excerpt": "Traceability ... versioning is required to capture differences between updates of retrieval resources.",
+    "tags": { "eval_type": "ragops", "topic": "traceability" },
+    "create_time": "2026-04-26T04:03:12.000Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0098",
+    "inputs": {
+      "query": "Which operational strategies improve RAG system reliability under load?",
+      "context": "Load balancing, auto scaling, and prioritization mechanisms to ensure consistent performance with varying workloads",
+      "source_doc_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3",
+      "source_chunk_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3_p13_3",
+      "metadata": { "language": "en", "section": "reliability-strategies" }
+    },
+    "expectations": {
+      "expected_response": "Three short bullets naming load balancing, auto scaling, prioritization and one-line rationale.",
+      "expected_facts": [
+        "Load balancing",
+        "Auto scaling",
+        "Prioritization mechanisms"
+      ],
+      "guidelines": "Three bullets plus one-line rationale.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/RAGOps.pdf",
+          "chunk_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3_p13_3",
+          "chunk_index": 8,
+          "snippet": "Operational strategies need to be implemented, such as load balancing, auto scaling, and prioritization mechanisms to ensure consistent performance even under varying workloads.",
+          "confidence": 0.93
+        }
+      ]
+    },
+    "source_excerpt": "Operational strategies need to be implemented, such as load balancing, auto scaling, and prioritization mechanisms to ensure consistent performance even under varying workloads.",
+    "tags": { "eval_type": "ragops", "topic": "reliability" },
+    "create_time": "2026-04-26T04:03:14.000Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0099",
+    "inputs": {
+      "query": "What are the two key design considerations for storing human feedback as passive retrieval sources?",
+      "context": "Decide whether to merge feedback into domain knowledge or store separately; choose storage format (vector DB or knowledge graph)",
+      "source_doc_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3",
+      "source_chunk_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3_p14_1",
+      "metadata": { "language": "en", "section": "human-feedback-storage" }
+    },
+    "expectations": {
+      "expected_response": "List the two considerations and give one-sentence guidance for each.",
+      "expected_facts": [
+        "Decision to merge feedback into existing domain knowledge or store separately",
+        "Choice of storage format: vector database or knowledge graph depending on nature/volume"
+      ],
+      "guidelines": "Two numbered items, one sentence each.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/RAGOps.pdf",
+          "chunk_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3_p14_1",
+          "chunk_index": 9,
+          "snippet": "The first involves deciding whether to integrate fragmented tacit knowledge into existing domain knowledge or to store it separately. The second consideration concerns the format or data structure used to store the feedback, particularly when it is kept separate. Depending on the nature and volume of the feedback, it may be embedded in a vector database or organized within a knowledge graph.",
+          "confidence": 0.94
+        }
+      ]
+    },
+    "source_excerpt": "The first involves deciding whether to integrate fragmented tacit knowledge into existing domain knowledge or to store it separately.",
+    "tags": { "eval_type": "ragops", "topic": "human-in-retrieval" },
+    "create_time": "2026-04-26T04:03:16.000Z",
+    "created_by": "auto-ingest"
+  },
+  {
+    "dataset_record_id": "rag-0100",
+    "inputs": {
+      "query": "Why must RAGOps extend testing and evaluation capabilities when incorporating human feedback?",
+      "context": "To assess impact of human feedback on RAG process and maintain quality, extend test datasets and incorporate user feedback into evaluation cycles",
+      "source_doc_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3",
+      "source_chunk_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3_p14_1",
+      "metadata": { "language": "en", "section": "testing-feedback" }
+    },
+    "expectations": {
+      "expected_response": "One short paragraph explaining the need to expand test datasets and fold user feedback into evaluation cycles.",
+      "expected_facts": [
+        "Testing must include comprehensive suite of test datasets",
+        "User feedback should be incorporated into evaluation cycles to assess impact"
+      ],
+      "guidelines": "2–3 sentences.",
+      "expected_retrieved_context": [
+        {
+          "doc_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3",
+          "doc_uri": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/RAGOps.pdf",
+          "chunk_id": "070804b55f5752b2458ee8dc60a2a9d576e9bdcb84fb1e7e77abcab51bfd70d3_p14_1",
+          "chunk_index": 10,
+          "snippet": "To enhance real-world applicability and reliability, the testing and evaluation capabilities of RAGOps must be extended with a comprehensive suite of test datasets and the incorporation of user feedback into evaluation cycles.",
+          "confidence": 0.94
+        }
+      ]
+    },
+    "source_excerpt": "To enhance real-world applicability and reliability, the testing and evaluation capabilities of RAGOps must be extended with a comprehensive suite of test datasets and the incorporation of user feedback into evaluation cycles.",
+    "tags": { "eval_type": "ragops", "topic": "testing" },
+    "create_time": "2026-04-26T04:03:18.000Z",
+    "created_by": "auto-ingest"
+  }
+]

@@ -43,7 +43,7 @@ DEFAULT_MANIFESTS_DIR = Path("src/manifests/sparse_service")
 DEFAULT_STATE_DIRNAME = ".state"
 DEFAULTS: dict[str, Any] = {
     "DEPLOY_ENV": "NONPROD",
-    "IMAGE": "ghcr.io/athithya-sakthivel/sparse:2026-04-24-16-22--7f601ca@sha256:c21bfaae3cb9b7399163c5a82b19521b4cd85f165261e27da522f8357de29b39",
+    "IMAGE": "ghcr.io/athithya-sakthivel/sparse:2026-04-26-08-57--a0cce10@sha256:c399305b860bb2a6c0d91f4e8d70c28cc459d909edac6988bcc4cc2ab1a8b347",
     "NAMESPACE": "models",
     "SERVICE_NAME": "sparse",
     "CONTAINER_PORT": 8201,
