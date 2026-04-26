@@ -38,7 +38,7 @@ LOG_LEVEL = os.environ.get("DENSE_GEN_LOGLEVEL", "INFO").upper()
 logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO), format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("gen_dense")
 
-DEFAULT_MANIFESTS_DIR = Path("src/manifests/dense_service")
+DEFAULT_MANIFESTS_DIR = Path("src/manifests/dense-service")
 DEFAULT_STATE_DIRNAME = ".state"
 DEFAULTS: dict[str, Any] = {
     "DEPLOY_ENV": "NONPROD",

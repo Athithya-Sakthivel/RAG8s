@@ -8,7 +8,7 @@ repoServer:
 dex:
   enabled: false
 redis:
-  enabled: false
+  enabled: true
 crds:
   install: false
 configs:

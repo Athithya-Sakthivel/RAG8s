@@ -131,6 +131,14 @@ if ! grep -qs 'export PATH=$HOME/.local/bin:$PATH' "${HOME}/.bashrc"; then
   echo 'export PATH=$HOME/.local/bin:$PATH' >> "${HOME}/.bashrc"
 fi
 
+VERSION=v3.3.8
+curl -sSL -o argocd \
+  "https://github.com/argoproj/argo-cd/releases/download/${VERSION}/argocd-linux-amd64"
+
+chmod +x argocd
+sudo mv argocd /usr/local/bin/
+
+
 curl -LsSf https://astral.sh/ruff/install.sh | sh && sudo mv "$HOME/.local/bin/ruff" /usr/local/bin/
 
 python3 -m pip install --no-cache-dir --break-system-packages pre-commit==4.6.0

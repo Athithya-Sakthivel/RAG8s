@@ -541,7 +541,7 @@ def wait_for_namespace(ns: str, timeout: int = 30) -> None:
 def render_and_apply(cfg: dict[str, str], dry_run: bool) -> None:
     ensure_kubectl_available()
     mode = detect_mode(cfg)
-    manifests_dir = Path(cfg["MANIFESTS_DIR"])
+    manifests_dir = "src/manifests/indexing-cronjob"
 
     docs: list[tuple[str, dict[str, Any]]] = [
         ("00-namespace.yaml", namespace_manifest(cfg["NAMESPACE"])),

@@ -39,7 +39,7 @@ LOG_LEVEL = os.environ.get("SPARSE_GEN_LOGLEVEL", "INFO").upper()
 logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO), format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("gen_sparse")
 
-DEFAULT_MANIFESTS_DIR = Path("src/manifests/sparse_service")
+DEFAULT_MANIFESTS_DIR = Path("src/manifests/sparse-service")
 DEFAULT_STATE_DIRNAME = ".state"
 DEFAULTS: dict[str, Any] = {
     "DEPLOY_ENV": "NONPROD",

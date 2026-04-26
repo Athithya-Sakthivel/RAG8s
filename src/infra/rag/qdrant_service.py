@@ -46,7 +46,7 @@ DEFAULT_CHART_REPO_URL = "https://qdrant.github.io/qdrant-helm"
 DEFAULT_CHART_NAME = "qdrant"
 DEFAULT_CHART_VERSION = "1.17.1"
 DEFAULT_HELM_TIMEOUT = "10m"
-DEFAULT_MANIFESTS_DIR = "src/manifests/qdrant"
+DEFAULT_MANIFESTS_DIR = "src/helm/qdrant"
 
 VERBOSE = os.environ.get("VERBOSE", "0").strip().lower() in ("1", "true", "yes", "y", "on")
 STRICT = os.environ.get("STRICT", "1").strip().lower() in ("1", "true", "yes", "y", "on")
