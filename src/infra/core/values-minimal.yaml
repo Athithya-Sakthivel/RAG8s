@@ -1,0 +1,23 @@
+server:
+  service:
+    type: ClusterIP
+controller:
+  replicas: 1
+repoServer:
+  replicas: 1
+dex:
+  enabled: false
+redis:
+  enabled: false
+crds:
+  install: false
+configs:
+  params:
+    server.insecure: true
+resources:
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+  limits:
+    cpu: "250m"
+    memory: "256Mi"

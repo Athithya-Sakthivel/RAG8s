@@ -1,0 +1,19 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: e2e-rag-system
+  namespace: argocd
+spec:
+  description: Project grouping all core services and Qdrant
+  sourceRepos:
+    - https://github.com/Athithya-Sakthivel/E2E-RAG-System.git
+    - https://qdrant.github.io/qdrant-helm
+  destinations:
+    - namespace: '*'
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: '*'
+      kind: '*'
+  namespaceResourceWhitelist:
+    - group: '*'
+      kind: '*'

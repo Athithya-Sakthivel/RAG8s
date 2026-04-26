@@ -1,0 +1,28 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: services-applicationset
+  namespace: argocd
+spec:
+  generators:
+    - git:
+        repoURL: https://github.com/Athithya-Sakthivel/E2E-RAG-System.git
+        revision: main
+        directories:
+          - path: src/manifests/*
+  template:
+    metadata:
+      name: '{{path.basename}}'
+    spec:
+      project: e2e-rag-system
+      source:
+        repoURL: https://github.com/Athithya-Sakthivel/E2E-RAG-System.git
+        targetRevision: main
+        path: '{{path}}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{path.basename}}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
