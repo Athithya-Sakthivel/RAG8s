@@ -10,9 +10,9 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+from helpers import build_semantic_cache_payload, is_payload_expired
 from qdrant_client import AsyncQdrantClient, models
 from qdrant_client.models import PointStruct
-from query_helpers import build_semantic_cache_payload, is_payload_expired
 
 logger = logging.getLogger("retrieval.qdrant")
 
@@ -601,3 +601,9 @@ class QdrantStore:
             return await self.sparse_search(query_vector=sparse_vector, query_filter=query_filter, limit=top_k)
 
         return []
+
+
+__all__ = [
+    "QdrantStore",
+    "QdrantStoreConfig",
+]

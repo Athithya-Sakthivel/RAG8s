@@ -6,17 +6,21 @@ import logging
 import os
 import sys
 import traceback
-from datetime import UTC
+from datetime import UTC, datetime
 from typing import Any
 
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
 SERVICE_NAME = os.getenv("SERVICE_NAME", "retrieval").strip() or "retrieval"
-ENV = os.getenv("ENV", "STAGING").strip().upper() or "STAGING"
+ENV = (os.getenv("ENV", "STAGING") or "STAGING").strip().upper()
+
+_CONFIGURED_LEVEL = "WARNING"
+_CONFIGURED_LEVEL_ORDER = 30
 
 
 def _canonical_level(level: str | None) -> str:
-    raw = (level or os.getenv("LOG_LEVEL") or os.getenv("LOGLEVEL") or "WARNING").strip().upper()
+    raw = (level or os.getenv("LOG_LEVEL") or os.getenv("LOGLEVEL") or "WARNING") or "WARNING"
+    raw = raw.strip().upper()
     aliases = {
         "WARN": "WARNING",
         "WARNING": "WARNING",
@@ -39,18 +43,31 @@ def _level_order(level: str) -> int:
 
 
 def _utc_now_iso_z() -> str:
-    from datetime import datetime
-
     return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-def setup_logging(level: str | None = None) -> None:
+def setup_logging(level: str | None = None) -> str:
+    """
+    Configure root logger and a set of common library loggers.
+
+    Returns the canonical configured level string (e.g., "WARNING").
+
+    IMPORTANT:
+    - Do NOT call this at module import time if you run under uvicorn CLI.
+    - Call this from your FastAPI lifespan/startup or before uvicorn.run(...) so it
+      runs after any framework-level logging configuration.
+    """
+    global _CONFIGURED_LEVEL, _CONFIGURED_LEVEL_ORDER
+
     configured = _canonical_level(level)
     log_level = getattr(logging, configured, logging.WARNING)
 
+    # Capture warnings from the warnings module
+    logging.captureWarnings(True)
+
     root = logging.getLogger()
-    for handler in list(root.handlers):
-        root.removeHandler(handler)
+    # Clear existing handlers to avoid duplicate logs when reloading
+    root.handlers.clear()
     root.setLevel(log_level)
 
     handler = logging.StreamHandler(sys.stderr)
@@ -58,6 +75,7 @@ def setup_logging(level: str | None = None) -> None:
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
     root.addHandler(handler)
 
+    # Ensure common third-party loggers follow the same level
     for name in (
         "httpx",
         "httpcore",
@@ -66,18 +84,40 @@ def setup_logging(level: str | None = None) -> None:
         "botocore",
         "qdrant_client",
         "asyncio",
+        "uvicorn",
+        "uvicorn.error",
         "uvicorn.access",
     ):
-        logging.getLogger(name).setLevel(logging.WARNING)
+        logging.getLogger(name).setLevel(log_level)
 
-    setup_logging._configured = True  # type: ignore[attr-defined]
-    setup_logging._configured_level = configured  # type: ignore[attr-defined]
+    _CONFIGURED_LEVEL = configured
+    _CONFIGURED_LEVEL_ORDER = _level_order(configured)
+    return configured
+
+
+def apply_after_uvicorn(level: str | None = None) -> str:
+    """
+    Convenience wrapper to reapply our logging configuration after uvicorn has
+    initialized its own logging. Call this from your FastAPI startup/lifespan.
+
+    Example (in your FastAPI app module):
+        @app.on_event("startup")
+        async def on_startup():
+            telemetry.apply_after_uvicorn()  # reapply telemetry logging config
+
+    This ensures LOG_LEVEL/LOGLEVEL is respected even when uvicorn was started
+    via the CLI (which configures logging after imports).
+    """
+    return setup_logging(level)
 
 
 def json_log(level: str, event: str, msg: str = "", **extra: Any) -> None:
-    configured = getattr(setup_logging, "_configured_level", _canonical_level(None))
+    """
+    Emit a single-line JSON log to stdout if the message level is at or above
+    the configured logging threshold.
+    """
     lvl = _canonical_level(level)
-    if _level_order(lvl) < _level_order(configured):
+    if _level_order(lvl) < _CONFIGURED_LEVEL_ORDER:
         return
 
     record: dict[str, Any] = {
@@ -97,6 +137,7 @@ def json_log(level: str, event: str, msg: str = "", **extra: Any) -> None:
         sys.stdout.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
         sys.stdout.flush()
     except Exception:
+        # Best-effort logging; do not raise from logging
         pass
 
 

@@ -40,12 +40,16 @@ kubectl port-forward -n models svc/sparse-svc 8201:8201 &
 kubectl port-forward -n models svc/reranker-svc 8202:8202 &
 kubectl port-forward -n qdrant svc/qdrant 6333:6333 &
 
-source .venv/bin/activate && cd /workspace/src/services/retriever
+curl -X DELETE http://localhost:6333/collections/default_rag_collection1__semantic_cache
+
+
+source .venv/bin/activate && cd /workspace/src/services/retriever && export PYTHONPATH=$(pwd)
+
 export DENSE_URL="http://localhost:8200"
 export SPARSE_URL="http://localhost:8201"
 export RERANKER_URL="http://localhost:8202"
 export QDRANT_URL="http://localhost:6333"
-uvicorn retriever:app \
+uvicorn main:app \
   --host 0.0.0.0 \
   --port 8203 \
   --loop uvloop \
@@ -53,6 +57,17 @@ uvicorn retriever:app \
   --proxy-headers \
   --forwarded-allow-ips "*"
 
-curl -N http://localhost:8203/stream \
+
+curl -N http://localhost:8203/retrieve \
   -H "Content-Type: application/json" \
-  -d '{"query":"Why must RAGOps extend testing and evaluation capabilities when incorporating human feedback?"}'
+  -d '{"query":"how to ensure autonomous system is safe?"}' | jq
+
+
+curl -N http://localhost:8203/generate/stream \
+  -H "Content-Type: application/json" \
+  -d '{"query":"how governance differs from guardrails?"}'
+
+
+curl -N http://localhost:8203/generate/stream \
+  -H "Content-Type: application/json" \
+  -d '{"query":"how gaurdrails differs from governance?"}'
