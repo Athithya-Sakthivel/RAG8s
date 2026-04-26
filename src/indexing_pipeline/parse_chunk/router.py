@@ -1,12 +1,3 @@
-"""
-Goals:
- - Deterministic startup and strict config validation.
- - Try to import user format modules; if import fails, record full traceback and
-   attach a fallback parser so files are not skipped. Every file gets a manifest:
-   either successful parse (saved_chunks > 0) or an error manifest (saved_chunks=0).
- - Log full tracebacks for import failures and parse exceptions.
- - Be defensive when reading numeric envs and when calling external libs.
-"""
 from __future__ import annotations
 
 import hashlib
@@ -39,6 +30,7 @@ try:
 except Exception:
     ClientError = Exception  # type: ignore[assignment]
 
+
 DATA_S3_BUCKET = (
     os.getenv("DATA_S3_BUCKET")
     or os.getenv("STORAGE_BUCKET")
@@ -64,7 +56,6 @@ CHUNKED_PREFIX = (os.getenv("STORAGE_CHUNKED_PREFIX") or os.getenv("S3_CHUNKED_P
 STRICT_BUCKET_VALIDATE = os.getenv("STRICT_BUCKET_VALIDATE", "false").strip().lower() == "true"
 PUT_RETRIES = int(os.getenv("PUT_RETRIES", "3") or 3)
 PUT_BACKOFF = float(os.getenv("PUT_BACKOFF", "0.3") or 0.3)
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").strip().lower()
 
 MODULE_CACHE: dict[str, Any] = {}
 _S3_CLIENT = None
@@ -74,13 +65,33 @@ def now_ts() -> str:
     return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
+def _fmt(v: Any) -> str:
+    if v is None:
+        return "null"
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (int, float)):
+        return str(v)
+    if isinstance(v, (dict, list, tuple, set)):
+        try:
+            return json.dumps(v, ensure_ascii=False, sort_keys=True, default=str)
+        except Exception:
+            return str(v)
+    s = str(v)
+    if not s:
+        return '""'
+    if any(ch.isspace() for ch in s) or "=" in s or "|" in s:
+        return json.dumps(s, ensure_ascii=False)
+    return s
+
+
 def log(level: str, event: str, msg: str = "", **extra: Any) -> None:
-    payload: dict[str, Any] = {"ts": now_ts(), "level": level.lower(), "event": event}
+    parts = [now_ts(), level.upper(), event]
     if msg:
-        payload["msg"] = msg
+        parts.append(msg)
     if extra:
-        payload.update(extra)
-    print(json.dumps(payload, ensure_ascii=False, default=str), flush=True)
+        parts.extend(f"{k}={_fmt(v)}" for k, v in sorted(extra.items()))
+    print(" | ".join(parts), flush=True)
 
 
 def _safe_str(v: Any, default: str = "") -> str:
@@ -142,7 +153,7 @@ def _require_runtime_envs() -> bool:
     if not AWS_REGION and not AWS_ENDPOINT_URL:
         missing.append("AWS_REGION")
     if missing:
-        log("error", "startup_missing_env", "Missing required env vars", missing=missing)
+        log("error", "startup_missing_env", "missing required env vars", missing=missing)
         return False
     return True
 
@@ -202,6 +213,26 @@ def _object_exists(key: str) -> bool:
         return False
 
 
+def _head_object(key: str) -> dict[str, Any]:
+    client = _get_s3_client()
+    try:
+        props = client.head_object(Bucket=DATA_S3_BUCKET, Key=key)
+        meta = props.get("Metadata", {}) or {}
+        content_type = props.get("ContentType", "") or ""
+        last_modified = props.get("LastModified", "")
+        if hasattr(last_modified, "isoformat"):
+            last_modified = last_modified.isoformat()
+        return {
+            "size": int(props.get("ContentLength", 0) or 0),
+            "etag": (props.get("ETag", "") or "").strip('"'),
+            "last_modified": last_modified,
+            "metadata": meta,
+            "content_type": content_type,
+        }
+    except Exception:
+        return {}
+
+
 def _read_json_object(key: str) -> dict[str, Any]:
     client = _get_s3_client()
     try:
@@ -245,28 +276,13 @@ def _list_keys(prefix: str) -> list[str]:
     return keys
 
 
-def list_raw_files() -> list[str]:
-    found: list[str] = []
-    try:
-        keys = _list_keys(RAW_PREFIX)
-    except Exception as e:
-        log("error", "list_failed", "failed to list raw prefix", error=str(e), prefix=RAW_PREFIX)
-        return found
-
-    for key in keys:
-        if not key or key.endswith("/") or key.lower().endswith(".manifest.json"):
-            continue
-        ext = detect_ext_from_key(key)
-        if ext in {"pdf", "html", "htm", "md", "markdown", "mdown"}:
-            found.append(key)
-        else:
-            found.append(key)
-    return found
-
-
 def detect_mime(key: str) -> str:
     mime, _ = mimetypes.guess_type(key)
-    return mime or "application/octet-stream"
+    if mime:
+        return mime
+    head = _head_object(key)
+    ctype = _safe_str(head.get("content_type"), "")
+    return ctype or "application/octet-stream"
 
 
 def detect_ext_from_key(key: str) -> str:
@@ -277,7 +293,30 @@ def detect_ext_from_key(key: str) -> str:
         return "md"
     if ext in ("htm",):
         return "html"
-    return ext
+    if ext:
+        return ext
+
+    head = _head_object(key)
+    meta = head.get("metadata") or {}
+    meta_fn = _safe_str(meta.get("filename") or meta.get("originalname") or meta.get("name") or "")
+    if meta_fn:
+        _base, mext = os.path.splitext(meta_fn)
+        mext = mext.lstrip(".").lower()
+        if mext in ("markdown", "mdown"):
+            return "md"
+        if mext in ("htm",):
+            return "html"
+        if mext:
+            return mext
+
+    ctype = _safe_str(head.get("content_type"), "").lower()
+    if "markdown" in ctype or "text/markdown" in ctype:
+        return "md"
+    if "text/html" in ctype:
+        return "html"
+    if "application/pdf" in ctype:
+        return "pdf"
+    return ""
 
 
 def file_sha256(s3_key: str) -> str:
@@ -295,38 +334,33 @@ def file_sha256(s3_key: str) -> str:
 
 
 def parse_manifest_for_key(s3_key: str) -> dict[str, Any]:
-    manifest_key = f"{s3_key}.manifest.json"
-    return _read_json_object(manifest_key)
+    return _read_json_object(f"{s3_key}.manifest.json")
 
 
-def write_error_manifest_if_missing(
+def write_manifest(
+    s3_key: str,
+    payload: dict[str, Any],
+) -> None:
+    _write_json_object(f"{s3_key}.manifest.json", payload)
+    log("info", "saved_manifest", "manifest written", key=f"{s3_key}.manifest.json")
+
+
+def make_manifest_base(
     s3_key: str,
     run_id: str,
     parser_version: str,
-    error: str,
-    extra: dict[str, Any] | None = None,
-) -> None:
-    manifest_key = f"{s3_key}.manifest.json"
-    if _object_exists(manifest_key):
-        return
-    payload: dict[str, Any] = {
-        "file_hash": None,
+    file_hash: str | None,
+) -> dict[str, Any]:
+    return {
+        "file_hash": file_hash,
         "s3_key": s3_key,
         "pipeline_run_id": run_id,
         "mime_type": detect_mime(s3_key),
         "timestamp": now_ts(),
         "parser_version": parser_version,
         "saved_chunks": 0,
-        "status": "error",
-        "error": error,
+        "status": "pending",
     }
-    if extra:
-        payload.update(extra)
-    try:
-        _write_json_object(manifest_key, payload)
-        log("info", "saved_manifest", "error manifest written", key=manifest_key)
-    except Exception as e:
-        log("warning", "manifest_write_failed", "failed to write error manifest", key=manifest_key, error=str(e))
 
 
 def load_module_by_name(candidates: list[str]) -> Any:
@@ -345,7 +379,7 @@ def load_module_from_path(module_name: str, path: Path) -> Any:
     loader_name = f"local_formats_{module_name}"
     spec = importlib.util.spec_from_file_location(loader_name, str(path))
     if not spec or not spec.loader:
-        raise ImportError(f"Cannot load module {module_name} from {path}")
+        raise ImportError(f"cannot load module {module_name} from {path}")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)  # type: ignore[attr-defined]
     return mod
@@ -357,10 +391,18 @@ def make_fallback_parser(module_name: str, ext: str, reason: str = ""):
 
     def parse_file(key: str, manifest: dict) -> dict:
         manifest.setdefault(
-            "error",
+            "status",
+            "skipped",
+        )
+        manifest.setdefault(
+            "reason",
             f"fallback parser used for module={module_name} ext={ext} reason={reason or 'unknown'}",
         )
-        return {"saved_chunks": 0}
+        return {
+            "status": "skipped",
+            "saved_chunks": 0,
+            "reason": manifest.get("reason"),
+        }
 
     mod.parse_file = parse_file
     return mod
@@ -432,6 +474,22 @@ def _import_format_module(module_name: str, ext_hint: str):
         return mod
 
 
+def list_raw_files() -> list[str]:
+    try:
+        keys = _list_keys(RAW_PREFIX)
+    except Exception as e:
+        log("error", "list_failed", "failed to list raw prefix", error=str(e), prefix=RAW_PREFIX)
+        return []
+
+    found: list[str] = []
+    for key in keys:
+        if not key or key.endswith("/") or key.lower().endswith(".manifest.json"):
+            continue
+        found.append(key)
+    found.sort()
+    return found
+
+
 def is_already_processed(file_hash: str) -> bool:
     if os.getenv("FORCE_PROCESS", "false").strip().lower() == "true":
         return False
@@ -449,9 +507,42 @@ def is_already_processed(file_hash: str) -> bool:
     return False
 
 
+def normalize_parse_result(result: dict[str, Any]) -> dict[str, Any]:
+    status = _safe_str(result.get("status"), "").strip().lower()
+    saved_chunks = _safe_int(result.get("saved_chunks", 0), 0)
+    error = _safe_str(result.get("error"), "").strip()
+    reason = _safe_str(result.get("reason"), "").strip()
+    skipped = bool(result.get("skipped", False)) or status == "skipped" or bool(result.get("skip_reason"))
+
+    if status in ("error", "failed", "failure"):
+        normalized_status = "error"
+    elif status in ("ok", "success", "parsed"):
+        normalized_status = "ok" if saved_chunks > 0 else "skipped"
+    elif skipped:
+        normalized_status = "skipped"
+    else:
+        normalized_status = "ok" if saved_chunks > 0 else "skipped"
+
+    if normalized_status == "error" and not error:
+        error = reason or _safe_str(result.get("skip_reason"), "") or "parse failed"
+
+    if normalized_status == "skipped" and not reason:
+        reason = _safe_str(result.get("skip_reason"), "") or _safe_str(result.get("message"), "") or "no chunks saved"
+
+    out = dict(result)
+    out["status"] = normalized_status
+    out["saved_chunks"] = saved_chunks
+    if error:
+        out["error"] = error
+    if reason:
+        out["reason"] = reason
+    return out
+
+
 def process_one_key(run_id: str, parser_version: str, key: str) -> dict[str, Any]:
     ext = detect_ext_from_key(key)
     module_name = get_format_module(ext)
+
     if not module_name:
         mod = make_fallback_parser("unknown", ext, reason="unsupported_ext")
         log("warning", "unsupported_ext", "unsupported file extension", key=key, ext=ext)
@@ -465,19 +556,15 @@ def process_one_key(run_id: str, parser_version: str, key: str) -> dict[str, Any
     try:
         file_hash = file_sha256(key)
     except Exception as e:
-        error_text = f"hash_failed: {e}"
-        manifest = {
-            "file_hash": None,
-            "s3_key": key,
-            "pipeline_run_id": run_id,
-            "mime_type": detect_mime(key),
-            "timestamp": now_ts(),
-            "parser_version": parser_version,
-            "saved_chunks": 0,
-            "status": "error",
-            "error": error_text,
-        }
-        write_error_manifest_if_missing(key, run_id, parser_version, error_text, extra={"traceback": traceback.format_exc()})
+        tb = traceback.format_exc()
+        manifest = make_manifest_base(key, run_id, parser_version, None)
+        manifest["status"] = "error"
+        manifest["error"] = f"hash_failed: {e}"
+        manifest["traceback"] = tb
+        try:
+            write_manifest(key, manifest)
+        except Exception as e2:
+            log("warning", "manifest_write_failed", "failed to write error manifest", key=key, error=str(e2))
         log("error", "hash_failed", "file hash failed", key=key, error=str(e))
         return manifest
 
@@ -493,36 +580,31 @@ def process_one_key(run_id: str, parser_version: str, key: str) -> dict[str, Any
             "saved_chunks": 0,
             "status": "skipped",
             "skipped": True,
+            "reason": "already_processed",
         }
 
     manifest = parse_manifest_for_key(key)
     if not isinstance(manifest, dict):
         manifest = {}
 
-    manifest.update(
-        {
-            "file_hash": file_hash,
-            "s3_key": key,
-            "pipeline_run_id": run_id,
-            "mime_type": detect_mime(key),
-            "timestamp": now_ts(),
-            "parser_version": parser_version,
-            "saved_chunks": 0,
-            "status": "pending",
-        }
-    )
+    manifest.update(make_manifest_base(key, run_id, parser_version, file_hash))
+    manifest["status"] = "pending"
 
     try:
         result = mod.parse_file(key, manifest)
         if not isinstance(result, dict) or "saved_chunks" not in result:
-            raise ValueError("Invalid parse_file() return. Expected dict with 'saved_chunks'.")
+            raise ValueError("invalid parse_file() return; expected dict with 'saved_chunks'")
+        result = normalize_parse_result(result)
     except Exception as e:
         tb = traceback.format_exc()
         manifest["saved_chunks"] = 0
         manifest["status"] = "error"
         manifest["error"] = str(e)
         manifest["traceback"] = tb
-        write_error_manifest_if_missing(key, run_id, parser_version, str(e), extra={"traceback": tb})
+        try:
+            write_manifest(key, manifest)
+        except Exception as e2:
+            log("warning", "manifest_write_failed", "failed to write error manifest", key=key, error=str(e2))
         log(
             "error",
             "parse_failed",
@@ -533,20 +615,32 @@ def process_one_key(run_id: str, parser_version: str, key: str) -> dict[str, Any
         )
         return manifest
 
-    saved_chunks = _safe_int(result.get("saved_chunks", 0), 0)
-    manifest["saved_chunks"] = saved_chunks
-    manifest["status"] = "ok" if saved_chunks > 0 else "error"
-    if saved_chunks <= 0:
-        manifest.setdefault("error", _safe_str(result.get("error"), "no chunks saved"))
-        write_error_manifest_if_missing(key, run_id, parser_version, manifest["error"], extra={"result": result})
-        log("info", "parsed", "parsed with zero saved chunks", key=key, saved_chunks=saved_chunks)
+    manifest["saved_chunks"] = _safe_int(result.get("saved_chunks", 0), 0)
+    manifest["status"] = _safe_str(result.get("status"), "skipped").strip().lower() or "skipped"
+
+    if "reason" in result and _safe_str(result.get("reason"), ""):
+        manifest["reason"] = _safe_str(result.get("reason"), "")
+    if "error" in result and _safe_str(result.get("error"), ""):
+        manifest["error"] = _safe_str(result.get("error"), "")
+    if "traceback" in result and _safe_str(result.get("traceback"), ""):
+        manifest["traceback"] = _safe_str(result.get("traceback"), "")
+
+    if manifest["status"] == "ok":
+        log("info", "parsed", "parsed_and_stored", key=key, saved_chunks=manifest["saved_chunks"])
+    elif manifest["status"] == "skipped":
+        log(
+            "info",
+            "parsed",
+            "parsed_with_zero_chunks",
+            key=key,
+            saved_chunks=manifest["saved_chunks"],
+            reason=_safe_str(manifest.get("reason"), "no chunks saved"),
+        )
     else:
-        log("info", "parsed", "parsed_and_stored", key=key, saved_chunks=saved_chunks)
+        log("error", "parsed_error", "parser reported error", key=key, error=_safe_str(manifest.get("error"), "unknown"))
 
     try:
-        manifest_key = f"{key}.manifest.json"
-        _write_json_object(manifest_key, manifest)
-        log("info", "saved_manifest", "manifest written", key=manifest_key)
+        write_manifest(key, manifest)
     except Exception as e:
         log("warning", "manifest_save_failed", "failed to save manifest after parse", key=key, error=str(e))
 
@@ -560,7 +654,7 @@ def main() -> int:
     run_id = os.getenv("RUN_ID") or str(uuid.uuid4())
     parser_version = os.getenv("PARSER_VERSION", "2.42.1")
 
-    log("info", "startup", "router starting", bucket=DATA_S3_BUCKET, region=AWS_REGION, run_id=run_id)
+    log("info", "startup", "router starting", bucket=DATA_S3_BUCKET, region=AWS_REGION or "none", run_id=run_id)
     if AWS_ENDPOINT_URL:
         log("info", "startup", "using custom AWS endpoint", endpoint=AWS_ENDPOINT_URL)
 
@@ -579,31 +673,26 @@ def main() -> int:
 
     for key in keys:
         try:
-            if key.lower().endswith(".manifest.json"):
-                skipped += 1
-                continue
             result = process_one_key(run_id, parser_version, key)
             processed += 1
             saved_total += _safe_int(result.get("saved_chunks", 0), 0)
-            if result.get("status") == "error":
+            status = _safe_str(result.get("status"), "skipped").strip().lower()
+            if status == "error":
                 failed += 1
-            if result.get("skipped"):
+            elif status == "skipped":
                 skipped += 1
         except Exception as e:
             failed += 1
             tb = traceback.format_exc()
             log("error", "loop_failure", "unexpected failure while processing key", key=key, error=str(e), traceback=tb)
             try:
-                write_error_manifest_if_missing(
-                    key,
-                    run_id,
-                    parser_version,
-                    str(e),
-                    extra={"traceback": tb, "pipeline_run_id": run_id},
-                )
+                manifest = make_manifest_base(key, run_id, parser_version, None)
+                manifest["status"] = "error"
+                manifest["error"] = str(e)
+                manifest["traceback"] = tb
+                write_manifest(key, manifest)
             except Exception:
                 pass
-            continue
 
     log(
         "info",

@@ -48,7 +48,7 @@ DEFAULTS: dict[str, Any] = {
     "SERVICE_NAME": "sparse",
     "CONTAINER_PORT": 8201,
     "HOST": "0.0.0.0",
-    "LOGLEVEL": "INFO",
+    "LOGLEVEL": "WARN",
     "SPARSE_MODEL_NAME": "Qdrant/minicoil-v1",
     "SPARSE_BATCH_SIZE": 8,
     "SPARSE_CUDA": False,

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 from __future__ import annotations
 
 import hashlib
@@ -30,6 +29,7 @@ try:
 except Exception:
     ClientError = Exception  # type: ignore[assignment]
 
+
 DATA_S3_BUCKET = (os.getenv("DATA_S3_BUCKET") or os.getenv("S3_BUCKET") or "").strip()
 AWS_REGION = (os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or "").strip()
 AWS_ENDPOINT_URL = (os.getenv("AWS_S3_ENDPOINT_URL") or os.getenv("S3_ENDPOINT_URL") or "").strip() or None
@@ -49,6 +49,7 @@ PDF_MIN_IMG_SIZE_BYTES = int(os.getenv("PDF_MIN_IMG_SIZE_BYTES", "3072") or 3072
 MAX_TOKENS_PER_CHUNK = int(os.getenv("MAX_TOKENS_PER_CHUNK", "512") or 512)
 MIN_TOKENS_PER_CHUNK = int(os.getenv("MIN_TOKENS_PER_CHUNK", "100") or 100)
 NUMBER_OF_OVERLAPPING_SENTENCES = int(os.getenv("NUMBER_OF_OVERLAPPING_SENTENCES", "2") or 2)
+
 PARSER_VERSION_PDF = os.getenv("PARSER_VERSION_PDF", "pdf-v2")
 CHUNKED_SCHEMA_VERSION = os.getenv("CHUNKED_SCHEMA_VERSION", "chunked_v1")
 
@@ -160,6 +161,27 @@ def try_decode_bytes(b: bytes) -> str:
         except Exception:
             continue
     return b.decode("utf-8", errors="replace")
+
+
+def retry_call(
+    fn,
+    retries: int = 3,
+    backoff_base: float = 0.5,
+    allowed_exceptions: tuple[type[Exception], ...] = (Exception,),
+):
+    last = None
+    for attempt in range(1, retries + 1):
+        try:
+            return fn()
+        except allowed_exceptions as e:
+            last = e
+            if attempt >= retries:
+                raise
+            sleep = backoff_base * (2 ** (attempt - 1))
+            time.sleep(sleep + random.random() * max(0.05, sleep * 0.25))
+    if last is not None:
+        raise last
+    raise RuntimeError("retry_call failed")
 
 
 def _ensure_optional_deps() -> None:
@@ -278,27 +300,6 @@ def _storage_exists(key: str) -> bool:
         return True
     except Exception:
         return False
-
-
-def retry_call(
-    fn,
-    retries: int = 3,
-    backoff_base: float = 0.5,
-    allowed_exceptions: tuple[type[Exception], ...] = (Exception,),
-):
-    last = None
-    for attempt in range(1, retries + 1):
-        try:
-            return fn()
-        except allowed_exceptions as e:
-            last = e
-            if attempt >= retries:
-                raise
-            sleep = backoff_base * (2 ** (attempt - 1))
-            time.sleep(sleep + random.random() * max(0.05, sleep * 0.25))
-    if last is not None:
-        raise last
-    raise RuntimeError("retry_call failed")
 
 
 def _token_len(text: str) -> int:
@@ -517,7 +518,7 @@ def _create_ocr_engine():
             _ocr_engine = pytesseract
             return _ocr_engine_name, _ocr_engine
         except Exception as e:
-            log("warning", "ocr.tesseract_failed", "Requested Tesseract OCR failed", error=str(e))
+            log("warning", "ocr.tesseract_failed", "requested Tesseract OCR failed", error=str(e))
             if PDF_OCR_STRICT or PDF_FORCE_OCR:
                 raise
             return "none", None
@@ -548,7 +549,7 @@ def _create_ocr_engine():
                 _ocr_engine = pytesseract
                 return _ocr_engine_name, _ocr_engine
             except Exception as e2:
-                log("warning", "ocr.tesseract_fallback_failed", "No OCR engine available", error=str(e2))
+                log("warning", "ocr.tesseract_fallback_failed", "no OCR engine available", error=str(e2))
                 if PDF_OCR_STRICT or PDF_FORCE_OCR:
                     raise
                 return "none", None
@@ -830,6 +831,8 @@ def _build_chunks_for_page(
     if not page_chunks:
         return rows, cumulative_tokens_before
 
+    safe_manifest = _sanitize_manifest(manifest or {})
+
     for idx, ch in enumerate(page_chunks):
         chunk_text = canonicalize_text(ch.get("text", ""))
         chunk_tokens = _safe_int(ch.get("token_count"), _token_len(chunk_text))
@@ -855,7 +858,7 @@ def _build_chunks_for_page(
             "line_range": [page_number, page_number],
             "token_range": [cumulative_tokens_before, cumulative_tokens_before + chunk_tokens],
             "semantic_region": region,
-            "original_manifest": manifest,
+            "original_manifest": safe_manifest,
         }
         rows.append(row)
         cumulative_tokens_before += chunk_tokens
@@ -868,15 +871,28 @@ def process_pdf_s3_object(s3_key: str, manifest: dict[str, Any]) -> dict[str, An
     local_pdf = None
     try:
         if not DATA_S3_BUCKET:
-            return {"saved_chunks": 0, "total_parse_duration_ms": int((time.perf_counter() - start_all) * 1000), "skipped": True, "error": "DATA_S3_BUCKET missing"}
+            return {
+                "saved_chunks": 0,
+                "total_parse_duration_ms": int((time.perf_counter() - start_all) * 1000),
+                "skipped": True,
+                "status": "error",
+                "error": "DATA_S3_BUCKET missing",
+            }
+
         _ensure_optional_deps()
 
         try:
             head = _storage_head(s3_key)
         except Exception as e:
             total_ms = int((time.perf_counter() - start_all) * 1000)
-            log("error", "head_failed", "Could not head object", key=s3_key, error=str(e))
-            return {"saved_chunks": 0, "total_parse_duration_ms": total_ms, "skipped": True, "error": str(e)}
+            log("error", "head_failed", "could not head object", key=s3_key, error=str(e))
+            return {
+                "saved_chunks": 0,
+                "total_parse_duration_ms": total_ms,
+                "skipped": True,
+                "status": "error",
+                "error": str(e),
+            }
 
         etag = _safe_str(head.get("ETag"), "")
         last_modified = _safe_str(head.get("LastModified"), "")
@@ -893,16 +909,34 @@ def process_pdf_s3_object(s3_key: str, manifest: dict[str, Any]) -> dict[str, An
             if _storage_exists(raw_manifest_key):
                 total_ms = int((time.perf_counter() - start_all) * 1000)
                 log("info", "skip_manifest_exists", "raw_manifest_exists", key=raw_manifest_key)
-                return {"saved_chunks": 0, "total_parse_duration_ms": total_ms, "skipped": True}
+                return {
+                    "saved_chunks": 0,
+                    "total_parse_duration_ms": total_ms,
+                    "skipped": True,
+                    "status": "skipped",
+                    "reason": "raw_manifest_exists",
+                }
             if _storage_exists(parquet_key):
                 total_ms = int((time.perf_counter() - start_all) * 1000)
                 log("info", "skip_parquet_exists", "parquet_exists", key=parquet_key)
-                return {"saved_chunks": 0, "total_parse_duration_ms": total_ms, "skipped": True}
+                return {
+                    "saved_chunks": 0,
+                    "total_parse_duration_ms": total_ms,
+                    "skipped": True,
+                    "status": "skipped",
+                    "reason": "parquet_exists",
+                }
 
         if content_len <= 0:
             total_ms = int((time.perf_counter() - start_all) * 1000)
-            log("info", "skip_empty_object", "Skipping empty object", key=s3_key)
-            return {"saved_chunks": 0, "total_parse_duration_ms": total_ms, "skipped": True}
+            log("info", "skip_empty_object", "skipping empty object", key=s3_key)
+            return {
+                "saved_chunks": 0,
+                "total_parse_duration_ms": total_ms,
+                "skipped": True,
+                "status": "skipped",
+                "reason": "empty_object",
+            }
 
         local_pdf = _download_to_temp(s3_key)
         fitz = _get_fitz()
@@ -919,7 +953,7 @@ def process_pdf_s3_object(s3_key: str, manifest: dict[str, Any]) -> dict[str, An
             try:
                 page_text, figures, used_ocr = _page_text_and_figures(local_pdf, pageno)
             except Exception as e:
-                log("warning", "page_extract_failed", "Page extraction failed", key=s3_key, page_number=pageno + 1, error=str(e))
+                log("warning", "page_extract_failed", "page extraction failed", key=s3_key, page_number=pageno + 1, error=str(e))
                 page_text, figures, used_ocr = "", [], False
             page_tokens = _token_len(page_text)
             page_infos.append(
@@ -942,7 +976,7 @@ def process_pdf_s3_object(s3_key: str, manifest: dict[str, Any]) -> dict[str, An
                 raw_key=s3_key,
                 file_name=file_name,
                 source_url=source_url,
-                manifest=_sanitize_manifest(manifest or {}),
+                manifest=manifest,
                 page_number=pageno,
                 total_pages=total_pages,
                 page_text=page_text,
@@ -955,7 +989,7 @@ def process_pdf_s3_object(s3_key: str, manifest: dict[str, Any]) -> dict[str, An
                 writer.write_payload(row)
                 saved += 1
             if page_rows:
-                log("info", "page_processed", "Processed page", key=s3_key, page_number=pageno, chunks=len(page_rows))
+                log("info", "page_processed", "processed page", key=s3_key, page_number=pageno, chunks=len(page_rows))
 
         try:
             doc.close()
@@ -964,24 +998,41 @@ def process_pdf_s3_object(s3_key: str, manifest: dict[str, Any]) -> dict[str, An
 
         if saved == 0:
             total_ms = int((time.perf_counter() - start_all) * 1000)
-            log("info", "no_chunks", "No chunks produced", key=s3_key)
-            return {"saved_chunks": 0, "total_parse_duration_ms": total_ms, "skipped": False}
+            log("info", "no_chunks", "no chunks produced", key=s3_key)
+            return {
+                "saved_chunks": 0,
+                "total_parse_duration_ms": total_ms,
+                "skipped": False,
+                "status": "skipped",
+                "reason": "no_chunks_saved",
+            }
 
         count, uploaded_key, sha, size = writer.finalize_and_upload(out_basename)
         try:
             raw_manifest = _build_raw_manifest(doc_id, s3_key, uploaded_key, count, sha, size)
             _storage_put_bytes(raw_manifest_key, json.dumps(raw_manifest).encode("utf-8"), content_type="application/json")
         except Exception as e:
-            log("warning", "manifest_write_failed", "Failed to write raw manifest", key=s3_key, error=str(e))
+            log("warning", "manifest_write_failed", "failed to write raw manifest", key=s3_key, error=str(e))
 
         total_ms = int((time.perf_counter() - start_all) * 1000)
-        log("info", "write_complete", "Wrote chunks", count=count, raw=s3_key, chunked=uploaded_key, duration_ms=total_ms)
-        return {"saved_chunks": count, "total_parse_duration_ms": total_ms, "skipped": False}
+        log("info", "write_complete", "wrote chunks", count=count, raw=s3_key, chunked=uploaded_key, duration_ms=total_ms)
+        return {
+            "saved_chunks": count,
+            "total_parse_duration_ms": total_ms,
+            "skipped": False,
+            "status": "ok",
+        }
 
     except Exception as e:
         total_ms = int((time.perf_counter() - start_all) * 1000)
         log("error", "parse_failed", "parse_file failed", key=s3_key, error=str(e), traceback=traceback.format_exc())
-        return {"saved_chunks": 0, "total_parse_duration_ms": total_ms, "skipped": True, "error": str(e)}
+        return {
+            "saved_chunks": 0,
+            "total_parse_duration_ms": total_ms,
+            "skipped": True,
+            "status": "error",
+            "error": str(e),
+        }
     finally:
         if local_pdf:
             try:
@@ -1001,7 +1052,7 @@ def _ensure_cli_env_or_exit() -> bool:
     if not AWS_REGION and not AWS_ENDPOINT_URL:
         missing.append("AWS_REGION")
     if missing:
-        log("error", "startup_missing_env", "Missing required env vars", missing=missing)
+        log("error", "startup_missing_env", "missing required env vars", missing=missing)
         return False
     return True
 
@@ -1021,15 +1072,15 @@ def _iter_pdf_keys() -> list[str]:
 
 
 def main() -> int:
-    log("info", "startup", "Starting PDF parser", bucket=DATA_S3_BUCKET, region=AWS_REGION)
+    log("info", "startup", "starting PDF parser", bucket=DATA_S3_BUCKET, region=AWS_REGION or "none")
     if not _ensure_cli_env_or_exit():
         return 2
 
     try:
         keys = _iter_pdf_keys()
-        log("info", "scan", "Found PDF files", count=len(keys))
+        log("info", "scan", "found PDF files", count=len(keys))
     except Exception as e:
-        log("error", "scan_failed", "Failed to list PDF keys", error=str(e))
+        log("error", "scan_failed", "failed to list PDF keys", error=str(e))
         return 1
 
     rc = 0
@@ -1044,10 +1095,10 @@ def main() -> int:
             manifest = {}
         try:
             result = parse_file(key, manifest)
-            log("info", "cli_result", "Parse result", key=key, result=result)
+            log("info", "cli_result", "parse result", key=key, result=result)
         except Exception as e:
             rc = 1
-            log("error", "cli_parse_failed", "Failed to parse file", key=key, error=str(e), traceback=traceback.format_exc())
+            log("error", "cli_parse_failed", "failed to parse file", key=key, error=str(e), traceback=traceback.format_exc())
 
     return rc
 

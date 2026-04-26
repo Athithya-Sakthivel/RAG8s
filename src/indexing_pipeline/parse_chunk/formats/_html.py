@@ -16,22 +16,34 @@ from datetime import UTC, datetime
 from typing import Any
 
 try:
-    import boto3
+    import boto3  # type: ignore
 except Exception:
     boto3 = None  # type: ignore[assignment]
 
 try:
-    from botocore.config import Config as BotocoreConfig
+    from botocore.config import Config as BotocoreConfig  # type: ignore
 except Exception:
     BotocoreConfig = None  # type: ignore[assignment]
+
+try:
+    from markdown_it import MarkdownIt  # type: ignore
+except Exception:
+    MarkdownIt = None  # type: ignore[assignment]
+
+try:
+    import tiktoken  # type: ignore
+except Exception:
+    tiktoken = None  # type: ignore[assignment]
 
 
 DATA_S3_BUCKET = (os.getenv("DATA_S3_BUCKET") or os.getenv("S3_BUCKET") or "").strip()
 AWS_REGION = (os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or "").strip()
+AWS_ENDPOINT_URL = (os.getenv("AWS_S3_ENDPOINT_URL") or os.getenv("S3_ENDPOINT_URL") or "").strip() or None
+
 STORAGE_RAW_PREFIX = (os.getenv("STORAGE_RAW_PREFIX") or os.getenv("S3_RAW_PREFIX") or "data/raw/").rstrip("/") + "/"
 STORAGE_CHUNKED_PREFIX = (os.getenv("STORAGE_CHUNKED_PREFIX") or os.getenv("S3_CHUNKED_PREFIX") or "data/chunked/").rstrip("/") + "/"
 
-PARSER_VERSION = os.getenv("PARSER_VERSION_HTML", "trafilatura-only-v3")
+PARSER_VERSION = os.getenv("PARSER_VERSION_HTML", "trafilatura-only-v4")
 CHUNKED_SCHEMA_VERSION = os.getenv("CHUNKED_SCHEMA_VERSION", "chunked_v1")
 FORCE_OVERWRITE = os.getenv("FORCE_OVERWRITE", "false").strip().lower() == "true"
 SAVE_SNAPSHOT = os.getenv("SAVE_SNAPSHOT", "false").strip().lower() == "true"
@@ -126,14 +138,19 @@ def _safe_json_list(v: Any) -> list[Any]:
 
 def _safe_json_text(v: Any) -> str:
     if v is None:
-        return ""
+        return "[]"
     try:
-        return json.dumps(v, ensure_ascii=False, sort_keys=True)
+        return json.dumps(v, ensure_ascii=False, sort_keys=True, default=str)
     except Exception:
-        return _safe_str(v, "")
+        return json.dumps(_safe_str(v, ""), ensure_ascii=False)
 
 
-def retry_call(fn, retries: int = 3, backoff_base: float = 0.5, allowed_exceptions: tuple[type[Exception], ...] = (Exception,)):
+def retry_call(
+    fn,
+    retries: int = 3,
+    backoff_base: float = 0.5,
+    allowed_exceptions: tuple[type[Exception], ...] = (Exception,),
+):
     last: Exception | None = None
     for attempt in range(1, retries + 1):
         try:
@@ -213,9 +230,9 @@ def _get_s3_client():
                 read_timeout=30,
                 retries={"max_attempts": 3, "mode": "standard"},
             )
-            client = session.client("s3", config=cfg)
+            client = session.client("s3", config=cfg, endpoint_url=AWS_ENDPOINT_URL)
         else:
-            client = session.client("s3")
+            client = session.client("s3", endpoint_url=AWS_ENDPOINT_URL)
         _S3_CLIENT = client
         return _S3_CLIENT
 
@@ -339,7 +356,7 @@ def _extract_html_text(html_text: str) -> tuple[str, dict[str, Any]]:
                     if callable(metadata_obj):
                         md = metadata_obj(html_text)
                         if md:
-                            metadata["source_url"] = _safe_str(getattr(md, "url", None), "")
+                            metadata["original_source_url"] = _safe_str(getattr(md, "url", None), "")
                             metadata["title"] = _safe_str(getattr(md, "title", None), "")
                 except Exception:
                     pass
@@ -414,14 +431,17 @@ def _chunk_text(text: str, max_tokens: int, min_tokens: int, overlap_sentences: 
         t = _normalize_text(text)
         if not t:
             return []
-        return [{
-            "text": t,
-            "token_start": 0,
-            "token_end": _token_len(t),
-            "token_count": _token_len(t),
-            "sentence_start": 0,
-            "sentence_end": 1,
-        }]
+        return [
+            {
+                "chunk_index": 0,
+                "text": t,
+                "token_count": _token_len(t),
+                "token_start": 0,
+                "token_end": _token_len(t),
+                "sentence_start": 0,
+                "sentence_end": 1,
+            }
+        ]
 
     expanded: list[str] = []
     for sent in sentences:
@@ -549,6 +569,7 @@ def _write_parquet_and_upload(rows: list[dict[str, Any]], out_basename: str) -> 
             pa.field("headings", pa.string()),
             pa.field("file_type", pa.string()),
             pa.field("source_url", pa.string()),
+            pa.field("original_source_url", pa.string()),
             pa.field("audio_range", pa.string()),
             pa.field("timestamp", pa.string()),
             pa.field("parser_version", pa.string()),
@@ -622,6 +643,7 @@ def _prepare_chunk_rows(
     raw_key: str,
     file_name: str,
     source_url: str,
+    original_source_url: str,
     original_manifest: dict[str, Any],
     windows: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -710,7 +732,7 @@ def parse_file(s3_key: str, manifest: dict[str, Any]) -> dict[str, Any]:
                 snapshot_key = STORAGE_CHUNKED_PREFIX + doc_id + ".snapshot.html"
                 _put_bytes(snapshot_key, raw_text.encode("utf-8"), content_type="text/html")
             except Exception as e:
-                log("warning", "snapshot_write_failed", "Failed to write HTML snapshot", key=s3_key, error=str(e))
+                log("warning", "snapshot_write_failed", "Failed to save HTML snapshot", key=s3_key, error=str(e))
 
         extracted_text, extracted_meta = _extract_html_text(raw_text)
         canonical_full = _normalize_text(extracted_text or raw_text)
@@ -733,17 +755,19 @@ def parse_file(s3_key: str, manifest: dict[str, Any]) -> dict[str, Any]:
             return {"saved_chunks": 0, "total_parse_duration_ms": total_ms, "skipped": False}
 
         file_name = _derive_file_name_from_source(
-            _safe_str(extracted_meta.get("source_url"), ""),
+            _safe_str(extracted_meta.get("original_source_url"), ""),
             s3_key,
         )
         if not file_name:
             file_name = os.path.basename(s3_key)
 
+        s3_source_url = _s3_key_to_full(s3_key)
         rows = _prepare_chunk_rows(
             doc_id=doc_id,
             raw_key=s3_key,
             file_name=file_name,
-            source_url=_safe_str(extracted_meta.get("source_url"), f"s3://{DATA_S3_BUCKET}/{s3_key}"),
+            source_url=s3_source_url,
+            original_source_url=_safe_str(extracted_meta.get("original_source_url"), ""),
             original_manifest=_sanitize_manifest_for_output(manifest),
             windows=windows,
         )
@@ -753,7 +777,11 @@ def parse_file(s3_key: str, manifest: dict[str, Any]) -> dict[str, Any]:
 
         try:
             raw_manifest = _build_raw_manifest(doc_id, s3_key, uploaded_key, count, sha256, size)
-            _put_bytes(raw_manifest_key, json.dumps(raw_manifest, ensure_ascii=False, sort_keys=True).encode("utf-8"), content_type="application/json")
+            _put_bytes(
+                raw_manifest_key,
+                json.dumps(raw_manifest, ensure_ascii=False, sort_keys=True).encode("utf-8"),
+                content_type="application/json",
+            )
         except Exception as e:
             log("warning", "manifest_write_failed", "Failed to write raw manifest", key=s3_key, error=str(e))
 

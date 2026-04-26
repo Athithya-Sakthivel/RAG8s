@@ -1,5 +1,5 @@
 # Pin Python 3.13 slim by digest for reproducibility
-FROM python:3.13.12-slim@sha256:f1927c75e81efd1e091dbd64b6c0ecaa5630b38635a3d1c04034ac636e1f94c8
+FROM docker.io/library/python:3.13.12-slim-bookworm@sha256:a58daefb915e1e03ad48f3ca4df8832065412c5c35cacb9d39f4229184de12b6
 
 # Build-time toggles for GPU and sparse model config
 ARG FASTEMBED_GPU=0
@@ -30,7 +30,7 @@ RUN mkdir -p /models_cache /app /var/log/sparse \
 
 # Install minimal runtime deps and patch openssl
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates openssl libssl3 jq curl git \
+ && apt-get install -y --no-install-recommends ca-certificates openssl libssl3 \
  && rm -rf /var/lib/apt/lists/*
 
 # Upgrade pip tooling

@@ -23,7 +23,7 @@ spec:
     metadata:
       labels: *id001
       annotations:
-        gen-dense/inputs-hash: f969d2d4207324a4730889edead9402b13e86b58b6cc83530fd0077f119a996a
+        gen-dense/inputs-hash: 239056d553af91e61f9a3e93662c3411c5c5ede22d9febd43dfe8a90865e941f
         prometheus.io/scrape: 'true'
         prometheus.io/port: '8200'
         prometheus.io/path: /metrics
@@ -42,7 +42,7 @@ spec:
         - name: DEPLOY_ENV
           value: NONPROD
         - name: DENSE_LOGLEVEL
-          value: INFO
+          value: WARN
         - name: DENSE_MODEL_NAME
           value: BAAI/bge-small-en-v1.5
         - name: DENSE_DIM

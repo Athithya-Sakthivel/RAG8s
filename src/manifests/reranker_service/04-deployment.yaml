@@ -23,7 +23,7 @@ spec:
     metadata:
       labels: *id001
       annotations:
-        gen-reranker/inputs-hash: f992c605f0e4b51e182d66c18758399faa534abcee3ea08d7c5c367a1f136af8
+        gen-reranker/inputs-hash: e090955dfb837e6f53b4636091abfdac2892207b6f8d31d7afa6cac525a50f64
         prometheus.io/scrape: 'true'
         prometheus.io/port: '8202'
         prometheus.io/path: /metrics
@@ -40,11 +40,11 @@ spec:
         - name: RERANKER_PORT
           value: '8202'
         - name: RERANKER_LOGLEVEL
-          value: INFO
+          value: WARN
         - name: RERANKER_MODEL_NAME
           value: Xenova/ms-marco-MiniLM-L-6-v2
         - name: RERANKER_MAX_DOCS
-          value: '50'
+          value: '20'
         - name: RERANKER_CUDA
           value: '0'
         - name: PRELOAD_MODEL
@@ -80,7 +80,7 @@ spec:
             memory: 512Mi
           limits:
             cpu: 1000m
-            memory: 1Gi
+            memory: 2Gi
         securityContext:
           runAsNonRoot: true
           runAsUser: 1000

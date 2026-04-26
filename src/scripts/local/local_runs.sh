@@ -27,7 +27,7 @@ python3 src/infra/rag/indexing_cronjob.py
 kubectl create job --from=cronjob/indexing-backup-cronjob indexing-backup-manual -n indexing
 kubectl get jobs -n indexing
 
-
+sleep 3600
 
 kubectl delete ns qdrant
 python3 src/infra/rag/qdrant_service.py --rollout
@@ -38,5 +38,30 @@ bash src/scripts/backups_and_restore.sh restore
 
 
 export RERANKER_MODEL_NAME=Xenova/ms-marco-MiniLM-L-6-v2
-export RERANKER_MAX_DOCS=50 # upper bound
+export RERANKER_MAX_DOCS=20 # upper bound
 python3 src/infra/rag/reranker_service.py --rollout
+
+kubectl port-forward -n models svc/dense-svc 8200:8200 &
+kubectl port-forward -n models svc/sparse-svc 8201:8201 &
+kubectl port-forward -n models svc/reranker-svc 8202:8202 &
+kubectl port-forward -n qdrant svc/qdrant 6333:6333 &
+
+source .venv/bin/activate && cd /workspace/src/services/retriever
+export DENSE_URL="http://localhost:8200"
+export SPARSE_URL="http://localhost:8201"
+export RERANKER_URL="http://localhost:8202"
+export QDRANT_URL="http://localhost:6333"
+uvicorn retriever:app \
+  --host 0.0.0.0 \
+  --port 8203 \
+  --loop uvloop \
+  --http httptools \
+  --proxy-headers \
+  --forwarded-allow-ips "*"
+
+curl -s -X POST http://localhost:8203/generate   -H "Content-Type: application/json"   -d '{"query":"what are the agent governance standards?"}' | jq
+
+curl -s -X POST http://localhost:8203/generate   -H "Content-Type: application/json"   -d '{"query":"why AI agents become popular now?"}' | jq
+
+
+curl -s -X POST http://localhost:8203/generate   -H "Content-Type: application/json"   -d '{"query":"what is parsing in RAG?"}' | jq

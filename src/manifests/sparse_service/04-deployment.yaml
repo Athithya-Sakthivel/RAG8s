@@ -23,7 +23,7 @@ spec:
     metadata:
       labels: *id001
       annotations:
-        gen-sparse/inputs-hash: 6166fcd0f4c0248353521c138c7082f154984cac807439e5f6d37f0dcd09a4b6
+        gen-sparse/inputs-hash: ebb4e098e7c349bfaf769762745b983de09498c7252fea1bc4b4264f6f52cdd8
         prometheus.io/scrape: 'true'
         prometheus.io/port: '8201'
         prometheus.io/path: /metrics
@@ -40,7 +40,7 @@ spec:
         - name: SPARSE_PORT
           value: '8201'
         - name: SPARSE_LOGLEVEL
-          value: INFO
+          value: WARN
         - name: SPARSE_MODEL_NAME
           value: Qdrant/minicoil-v1
         - name: SPARSE_BATCH_SIZE
