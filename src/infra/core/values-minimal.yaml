@@ -1,23 +1,76 @@
+# values-kind.yaml
+# Argo CD Helm values tuned for Kind local clusters with safer defaults
 server:
   service:
     type: ClusterIP
+  resources:
+    requests:
+      cpu: "150m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+  # keep insecure true for local dev only; see Security Notes below
+  configs:
+    params:
+      server.insecure: true
+
 controller:
   replicas: 1
+  resources:
+    requests:
+      cpu: "150m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+  # reduce controller log noise but keep enough concurrency for small clusters
+  extraArgs:
+    - --operation-processors=10
+
 repoServer:
   replicas: 1
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "400m"
+      memory: "512Mi"
+  # enable repo cache to reduce git traffic
+  cache:
+    enabled: true
+
 dex:
   enabled: false
+
 redis:
   enabled: true
+  # single replica is fine for Kind; increase for HA in real clusters
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "128Mi"
+    limits:
+      cpu: "200m"
+      memory: "256Mi"
+
 crds:
   install: false
+
 configs:
-  params:
-    server.insecure: true
+  # keep default timeouts reasonable for local clusters
+  resourceTrackingMethod: "annotation"
+
+# Global pod-level defaults to avoid runaway containers
 resources:
   requests:
-    cpu: "100m"
-    memory: "128Mi"
+    cpu: "50m"
+    memory: "64Mi"
   limits:
-    cpu: "250m"
-    memory: "256Mi"
+    cpu: "500m"
+    memory: "512Mi"
+
+# Optional: tune RBAC and network policies if you add them later
+rbac:
+  create: true
