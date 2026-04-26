@@ -101,9 +101,22 @@ sys.exit(0)
 PY
 }
 
+metrics_help_type_check() {
+  local metrics_file=$1
+  local needle=$2
+  if ! grep -qE "^# TYPE ${needle} " "${metrics_file}"; then
+    echo "[ERROR] missing TYPE line for ${needle}" >&2
+    return 1
+  fi
+  if ! grep -qE "^# HELP ${needle} " "${metrics_file}"; then
+    echo "[ERROR] missing HELP line for ${needle}" >&2
+    return 1
+  fi
+}
+
 cleanup
 
-echo "[1/7] Starting container ${CONTAINER_NAME}"
+echo "[1/8] Starting container ${CONTAINER_NAME}"
 docker run \
   --name "${CONTAINER_NAME}" \
   -d \
@@ -114,14 +127,14 @@ docker run \
   -e ENV="${ENV:-CI}" \
   "${IMAGE_LOCAL}" >/dev/null
 
-echo "[2/7] Waiting for /healthz (timeout ${WAIT_TIMEOUT}s)"
+echo "[2/8] Waiting for /healthz (timeout ${WAIT_TIMEOUT}s)"
 if ! wait_for_http "http://127.0.0.1:${HOST_PORT}/healthz" "${WAIT_TIMEOUT}" >/tmp/retriever-healthz.out; then
   echo "[ERROR] /healthz did not become available" >&2
   docker logs --tail 200 "${CONTAINER_NAME}" || true
   exit 4
 fi
 
-echo "[3/7] Checking /healthz and /readyz"
+echo "[3/8] Checking /healthz and /readyz"
 healthz=$(curl -fsS "http://127.0.0.1:${HOST_PORT}/healthz")
 readyz=$(curl -fsS "http://127.0.0.1:${HOST_PORT}/readyz")
 metrics_before=$(curl -fsS "http://127.0.0.1:${HOST_PORT}/metrics")
@@ -148,7 +161,7 @@ tmp_before=$(mktemp)
 tmp_after=$(mktemp)
 printf '%s\n' "${metrics_before}" > "${tmp_before}"
 
-echo "[4/7] Exercising /generate, /retrieve, /generate/stream"
+echo "[4/8] Exercising /generate, /retrieve, /generate/stream"
 gen_status=$(curl -sS -o /tmp/retriever-generate.out -w '%{http_code}' \
   -X POST "http://127.0.0.1:${HOST_PORT}/generate" \
   -H "Content-Type: application/json" \
@@ -183,7 +196,7 @@ do
   fi
 done
 
-echo "[5/7] Re-reading metrics after requests"
+echo "[5/8] Re-reading metrics after requests"
 metrics_after=$(curl -fsS "http://127.0.0.1:${HOST_PORT}/metrics")
 printf '%s\n' "${metrics_after}" > "${tmp_after}"
 
@@ -194,11 +207,26 @@ ret_total_after=$(metric_value "retrieval_requests_total" 'endpoint="/retrieve"'
 stream_total_before=$(metric_value "retrieval_requests_total" 'endpoint="/generate/stream"' "${tmp_before}")
 stream_total_after=$(metric_value "retrieval_requests_total" 'endpoint="/generate/stream"' "${tmp_after}")
 
-req_dur_before=$(metric_value "retrieval_request_duration_seconds_count" 'endpoint="/generate"' "${tmp_before}")
-req_dur_after=$(metric_value "retrieval_request_duration_seconds_count" 'endpoint="/generate"' "${tmp_after}")
+gen_hist_before=$(metric_value "retrieval_request_duration_seconds_count" 'endpoint="/generate"' "${tmp_before}")
+gen_hist_after=$(metric_value "retrieval_request_duration_seconds_count" 'endpoint="/generate"' "${tmp_after}")
+ret_hist_before=$(metric_value "retrieval_request_duration_seconds_count" 'endpoint="/retrieve"' "${tmp_before}")
+ret_hist_after=$(metric_value "retrieval_request_duration_seconds_count" 'endpoint="/retrieve"' "${tmp_after}")
+stream_hist_before=$(metric_value "retrieval_request_duration_seconds_count" 'endpoint="/generate/stream"' "${tmp_before}")
+stream_hist_after=$(metric_value "retrieval_request_duration_seconds_count" 'endpoint="/generate/stream"' "${tmp_after}")
 
-ready_before=$(metric_value "service_ready" "" "${tmp_before}")
-ready_after=$(metric_value "service_ready" "" "${tmp_after}")
+error_gen_before=$(metric_value "retrieval_errors_total" 'endpoint="/generate"' "${tmp_before}")
+error_gen_after=$(metric_value "retrieval_errors_total" 'endpoint="/generate"' "${tmp_after}")
+error_ret_before=$(metric_value "retrieval_errors_total" 'endpoint="/retrieve"' "${tmp_before}")
+error_ret_after=$(metric_value "retrieval_errors_total" 'endpoint="/retrieve"' "${tmp_after}")
+error_stream_before=$(metric_value "retrieval_errors_total" 'endpoint="/generate/stream"' "${tmp_before}")
+error_stream_after=$(metric_value "retrieval_errors_total" 'endpoint="/generate/stream"' "${tmp_after}")
+
+ready_metric=$(metric_value "service_ready" "" "${tmp_after}")
+ready_status=$(python3 - <<'PY'
+import json, sys
+print(json.load(open("/tmp/retriever-readyz.json"))["status"])
+PY
+)
 
 check_increment() {
   local name=$1 before=$2 after=$3
@@ -220,42 +248,55 @@ print(f"[OK] {name}: {before} -> {after}")
 PY
 }
 
-echo "[6/7] Validating Prometheus counters increased"
+echo "[6/8] Validating counters and histograms increased"
 check_increment "retrieval_requests_total{endpoint=/generate}" "${gen_total_before:-0}" "${gen_total_after:-0}"
 check_increment "retrieval_requests_total{endpoint=/retrieve}" "${ret_total_before:-0}" "${ret_total_after:-0}"
 check_increment "retrieval_requests_total{endpoint=/generate/stream}" "${stream_total_before:-0}" "${stream_total_after:-0}"
-check_increment "retrieval_request_duration_seconds_count{endpoint=/generate}" "${req_dur_before:-0}" "${req_dur_after:-0}"
+check_increment "retrieval_request_duration_seconds_count{endpoint=/generate}" "${gen_hist_before:-0}" "${gen_hist_after:-0}"
+check_increment "retrieval_request_duration_seconds_count{endpoint=/retrieve}" "${ret_hist_before:-0}" "${ret_hist_after:-0}"
+check_increment "retrieval_request_duration_seconds_count{endpoint=/generate/stream}" "${stream_hist_before:-0}" "${stream_hist_after:-0}"
 
-if [ -n "${ready_before}" ] && [ -n "${ready_after}" ]; then
+if [ "${gen_status}" != "200" ]; then
+  check_increment "retrieval_errors_total{endpoint=/generate}" "${error_gen_before:-0}" "${error_gen_after:-0}"
+fi
+if [ "${retrieve_status}" != "200" ]; then
+  check_increment "retrieval_errors_total{endpoint=/retrieve}" "${error_ret_before:-0}" "${error_ret_after:-0}"
+fi
+if [ "${stream_status}" != "200" ]; then
+  check_increment "retrieval_errors_total{endpoint=/generate/stream}" "${error_stream_before:-0}" "${error_stream_after:-0}"
+fi
+
+echo "[7/8] Validating readiness gauge"
+printf '%s\n' "${readyz}" > /tmp/retriever-readyz.json
+if [ "${ready_status}" = "ready" ]; then
   python3 - <<PY
-before = float("${ready_before}")
-after = float("${ready_after}")
-if before != after:
-    raise SystemExit(f"[ERROR] service_ready changed unexpectedly: before={before} after={after}")
-print(f"[OK] service_ready stable at {after}")
+value = float("${ready_metric:-0}")
+if value != 1.0:
+    raise SystemExit(f"[ERROR] service_ready should be 1 when /readyz is ready, got {value}")
+print(f"[OK] service_ready is {value} for ready state")
+PY
+else
+  python3 - <<PY
+value = float("${ready_metric:-0}")
+if value != 0.0:
+    raise SystemExit(f"[ERROR] service_ready should be 0 when /readyz is not ready, got {value}")
+print(f"[OK] service_ready is {value} for not-ready state")
 PY
 fi
 
-echo "[7/7] Validating metrics exposition format"
-if ! printf '%s' "${metrics_after}" | grep -q '^# TYPE retrieval_requests_total counter'; then
-  echo "[ERROR] Prometheus exposition missing retrieval_requests_total type line" >&2
-  docker logs --tail 200 "${CONTAINER_NAME}" || true
-  exit 10
-fi
-
-if ! printf '%s' "${metrics_after}" | grep -q '^# TYPE service_ready gauge'; then
-  echo "[ERROR] Prometheus exposition missing service_ready type line" >&2
-  docker logs --tail 200 "${CONTAINER_NAME}" || true
-  exit 11
-fi
-
-if ! printf '%s' "${metrics_after}" | grep -q '^# TYPE retrieval_request_duration_seconds histogram'; then
-  echo "[ERROR] Prometheus exposition missing retrieval_request_duration_seconds type line" >&2
-  docker logs --tail 200 "${CONTAINER_NAME}" || true
-  exit 12
-fi
+echo "[8/8] Validating Prometheus exposition format"
+metrics_help_type_check "${tmp_after}" "retrieval_requests_total"
+metrics_help_type_check "${tmp_after}" "retrieval_request_duration_seconds"
+metrics_help_type_check "${tmp_after}" "retrieval_errors_total"
+metrics_help_type_check "${tmp_after}" "service_ready"
+metrics_help_type_check "${tmp_after}" "semantic_cache_lookups_total"
+metrics_help_type_check "${tmp_after}" "semantic_cache_writes_total"
+metrics_help_type_check "${tmp_after}" "dense_embed_requests_total"
+metrics_help_type_check "${tmp_after}" "sparse_embed_requests_total"
+metrics_help_type_check "${tmp_after}" "qdrant_query_total"
+metrics_help_type_check "${tmp_after}" "llm_calls_total"
 
 echo "[SUCCESS] Prometheus setup validated for retriever service"
-rm -f "${tmp_before}" "${tmp_after}"
+rm -f "${tmp_before}" "${tmp_after}" /tmp/retriever-readyz.json
 docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
 exit 0

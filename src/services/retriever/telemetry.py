@@ -12,7 +12,7 @@ from typing import Any
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
 SERVICE_NAME = os.getenv("SERVICE_NAME", "retrieval").strip() or "retrieval"
-ENV = (os.getenv("ENV", "STAGING") or "STAGING").strip().upper()
+ENV = os.getenv("ENV", "STAGING").strip().upper() or "STAGING"
 
 _CONFIGURED_LEVEL = "WARNING"
 _CONFIGURED_LEVEL_ORDER = 30
@@ -48,25 +48,18 @@ def _utc_now_iso_z() -> str:
 
 def setup_logging(level: str | None = None) -> str:
     """
-    Configure root logger and a set of common library loggers.
+    Configure root logging in a way that respects LOG_LEVEL/LOGLEVEL.
 
-    Returns the canonical configured level string (e.g., "WARNING").
-
-    IMPORTANT:
-    - Do NOT call this at module import time if you run under uvicorn CLI.
-    - Call this from your FastAPI lifespan/startup or before uvicorn.run(...) so it
-      runs after any framework-level logging configuration.
+    Returns the canonical configured level string.
     """
     global _CONFIGURED_LEVEL, _CONFIGURED_LEVEL_ORDER
 
     configured = _canonical_level(level)
     log_level = getattr(logging, configured, logging.WARNING)
 
-    # Capture warnings from the warnings module
     logging.captureWarnings(True)
 
     root = logging.getLogger()
-    # Clear existing handlers to avoid duplicate logs when reloading
     root.handlers.clear()
     root.setLevel(log_level)
 
@@ -75,7 +68,6 @@ def setup_logging(level: str | None = None) -> str:
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
     root.addHandler(handler)
 
-    # Ensure common third-party loggers follow the same level
     for name in (
         "httpx",
         "httpcore",
@@ -97,25 +89,12 @@ def setup_logging(level: str | None = None) -> str:
 
 def apply_after_uvicorn(level: str | None = None) -> str:
     """
-    Convenience wrapper to reapply our logging configuration after uvicorn has
-    initialized its own logging. Call this from your FastAPI startup/lifespan.
-
-    Example (in your FastAPI app module):
-        @app.on_event("startup")
-        async def on_startup():
-            telemetry.apply_after_uvicorn()  # reapply telemetry logging config
-
-    This ensures LOG_LEVEL/LOGLEVEL is respected even when uvicorn was started
-    via the CLI (which configures logging after imports).
+    Reapply logging config after uvicorn has initialized its own logging.
     """
     return setup_logging(level)
 
 
 def json_log(level: str, event: str, msg: str = "", **extra: Any) -> None:
-    """
-    Emit a single-line JSON log to stdout if the message level is at or above
-    the configured logging threshold.
-    """
     lvl = _canonical_level(level)
     if _level_order(lvl) < _CONFIGURED_LEVEL_ORDER:
         return
@@ -137,7 +116,6 @@ def json_log(level: str, event: str, msg: str = "", **extra: Any) -> None:
         sys.stdout.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
         sys.stdout.flush()
     except Exception:
-        # Best-effort logging; do not raise from logging
         pass
 
 
@@ -285,3 +263,7 @@ RETRIEVED_DOCS = Histogram(
 
 def metrics_response() -> tuple[bytes, str]:
     return generate_latest(), CONTENT_TYPE_LATEST
+
+
+def set_service_ready(is_ready: bool) -> None:
+    SERVICE_READY.labels(service=SERVICE_NAME, env=ENV).set(1 if is_ready else 0)
