@@ -11,9 +11,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /build
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      build-essential openssl libssl3 \
-      ca-certificates \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./
@@ -39,6 +38,7 @@ WORKDIR /app
 RUN addgroup --system app \
     && adduser --system --ingroup app --home /app app \
     && apt-get update \
+    && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
