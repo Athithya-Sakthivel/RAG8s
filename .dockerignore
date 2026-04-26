@@ -49,7 +49,12 @@ data_sample
 # Development files not needed in Docker image
 notebooks/
 *.zip
-
+.env
+*.log
+*.sqlite3
+node_modules/
+dist/
+build/
 
 .venv/
 .venv2/
@@ -70,6 +75,14 @@ infra/pulumi-aws/pulumi-outputs.json
 *.pem
 
 trust-spotfleet.json
+
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.git
+.gitignore
+.env
 
 # Python cache
 __pycache__/
