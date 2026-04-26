@@ -73,6 +73,7 @@ with open(path, "r", encoding="utf-8") as f:
 label_tokens = {}
 if labels_filter:
     for part in labels_filter.split(","):
+        part = part.strip()
         if "=" in part:
             k, v = part.split("=", 1)
             label_tokens[k.strip()] = v.strip().strip('"')
@@ -222,9 +223,9 @@ error_stream_before=$(metric_value "retrieval_errors_total" 'endpoint="/generate
 error_stream_after=$(metric_value "retrieval_errors_total" 'endpoint="/generate/stream"' "${tmp_after}")
 
 ready_metric=$(metric_value "service_ready" "" "${tmp_after}")
-ready_status=$(python3 - <<'PY'
-import json, sys
-print(json.load(open("/tmp/retriever-readyz.json"))["status"])
+ready_status=$(python3 - <<PY
+import json
+print(json.loads("""${readyz}""")["status"])
 PY
 )
 
@@ -267,7 +268,6 @@ if [ "${stream_status}" != "200" ]; then
 fi
 
 echo "[7/8] Validating readiness gauge"
-printf '%s\n' "${readyz}" > /tmp/retriever-readyz.json
 if [ "${ready_status}" = "ready" ]; then
   python3 - <<PY
 value = float("${ready_metric:-0}")
@@ -297,6 +297,6 @@ metrics_help_type_check "${tmp_after}" "qdrant_query_total"
 metrics_help_type_check "${tmp_after}" "llm_calls_total"
 
 echo "[SUCCESS] Prometheus setup validated for retriever service"
-rm -f "${tmp_before}" "${tmp_after}" /tmp/retriever-readyz.json
+rm -f "${tmp_before}" "${tmp_after}"
 docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
 exit 0
