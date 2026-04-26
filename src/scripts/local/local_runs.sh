@@ -1,9 +1,6 @@
 rm -rf src/manifests
 aws s3 rm s3://s3-temp-bucket-mlsecops-681802563986/ --recursive
 
-aws s3 ls s3://s3-temp-bucket-mlsecops-681802563986/ --recursive
-
-
 python3 src/scripts/local/force_sync_s3_local_fs.py --upload
 
 

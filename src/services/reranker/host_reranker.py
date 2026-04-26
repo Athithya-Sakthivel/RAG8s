@@ -13,7 +13,7 @@ from fastembed.rerank.cross_encoder import TextCrossEncoder
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 from pydantic import BaseModel, Field
 
-logging.basicConfig(level=os.getenv("RERANKER_LOGLEVEL", "INFO"))
+logging.basicConfig(level=os.getenv("RERANKER_LOGLEVEL", "WARN"))
 log = logging.getLogger("host_reranker")
 
 RERANKER_MODEL_NAME = os.getenv("RERANKER_MODEL_NAME", "Xenova/ms-marco-MiniLM-L-6-v2")
@@ -207,5 +207,5 @@ if __name__ == "__main__":
         "host_reranker:app",
         host=os.getenv("RERANKER_HOST", "0.0.0.0"),
         port=int(os.getenv("RERANKER_PORT", "8202")),
-        log_level="info",
+        log_level="warn",
     )

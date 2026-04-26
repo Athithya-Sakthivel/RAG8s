@@ -27,7 +27,7 @@ def _env_int(name: str, default: str) -> int:
         return int(default)
 
 
-LOG_LEVEL = getattr(logging, os.getenv("SPARSE_LOGLEVEL", "INFO").upper(), logging.INFO)
+LOG_LEVEL = getattr(logging, os.getenv("SPARSE_LOGLEVEL", "WARN").upper(), logging.INFO)
 logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("host_sparse")
 
@@ -263,5 +263,5 @@ if __name__ == "__main__":
         "host_sparse:app",
         host=SPARSE_HOST,
         port=SPARSE_PORT,
-        log_level="info",
+        log_level="warn",
     )

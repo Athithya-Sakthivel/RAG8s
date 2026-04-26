@@ -12,7 +12,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_
 from pydantic import BaseModel
 
 # Logging
-logging.basicConfig(level=os.getenv("DENSE_LOGLEVEL", "INFO"))
+logging.basicConfig(level=os.getenv("DENSE_LOGLEVEL", "WARN"))
 log = logging.getLogger("host_dense")
 
 # Configuration from env
@@ -195,4 +195,4 @@ def on_startup():
 if __name__ == "__main__":
     import uvicorn
     # Do not pre-load model on startup in __main__ to keep startup fast for local dev.
-    uvicorn.run("host_dense:app", host=os.getenv("DENSE_HOST", "0.0.0.0"), port=int(os.getenv("DENSE_PORT", "8200")), log_level="info")
+    uvicorn.run("host_dense:app", host=os.getenv("DENSE_HOST", "0.0.0.0"), port=int(os.getenv("DENSE_PORT", "8200")), log_level="warn")
