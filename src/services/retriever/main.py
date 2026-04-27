@@ -68,10 +68,52 @@ from telemetry import (
     setup_logging,
 )
 
-# Do NOT call setup_logging() at import time when running under uvicorn CLI.
-# Reapply logging after uvicorn config in startup (see on_startup below).
-
 logger = logging.getLogger("retrieval")
+startup_bootstrap_error: str | None = None
+
+
+class RequestMetricsMiddleware:
+    def __init__(self, app: Any):
+        self.app = app
+        self.excluded_paths = {"/healthz", "/readyz", "/metrics"}
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        endpoint = scope.get("path") or ""
+        if endpoint in self.excluded_paths:
+            await self.app(scope, receive, send)
+            return
+
+        start = time.perf_counter()
+        status_code = 500
+        recorded = False
+
+        async def send_wrapper(message):
+            nonlocal status_code, recorded
+            if message["type"] == "http.response.start":
+                status_code = int(message["status"])
+            if message["type"] == "http.response.body" and not message.get("more_body", False) and not recorded:
+                elapsed = max(time.perf_counter() - start, 1e-6)
+                REQUEST_COUNT.labels(service=SERVICE_NAME, env=ENV, endpoint=endpoint, status_code=str(status_code)).inc()
+                REQUEST_LATENCY.labels(service=SERVICE_NAME, env=ENV, endpoint=endpoint, status_code=str(status_code)).observe(elapsed)
+                if status_code >= 500:
+                    ERROR_COUNT.labels(service=SERVICE_NAME, env=ENV, endpoint=endpoint, status_code=str(status_code)).inc()
+                recorded = True
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_wrapper)
+        except Exception:
+            if not recorded:
+                elapsed = max(time.perf_counter() - start, 1e-6)
+                REQUEST_COUNT.labels(service=SERVICE_NAME, env=ENV, endpoint=endpoint, status_code=str(status_code)).inc()
+                REQUEST_LATENCY.labels(service=SERVICE_NAME, env=ENV, endpoint=endpoint, status_code=str(status_code)).observe(elapsed)
+                if status_code >= 500:
+                    ERROR_COUNT.labels(service=SERVICE_NAME, env=ENV, endpoint=endpoint, status_code=str(status_code)).inc()
+            raise
 
 
 def _make_settings() -> dict[str, Any]:
@@ -108,8 +150,9 @@ def _build_bedrock_prompt(query: str, docs_for_llm: list[dict[str, Any]]) -> tup
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    settings = _make_settings()
+    setup_logging()
 
+    settings = _make_settings()
     store = QdrantStore(
         QdrantStoreConfig(
             url=QDRANT_URL,
@@ -171,9 +214,6 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        global SHUTDOWN
-        SHUTDOWN = True
-
         for task in app.state.background_tasks:
             task.cancel()
 
@@ -197,23 +237,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
-
-
-# Reapply telemetry logging after uvicorn configures logging (important when uvicorn is started via CLI).
-@app.on_event("startup")
-async def _reapply_logging_after_uvicorn():
-    try:
-        setup_logging()
-        # refresh local logger reference level/handlers if needed
-        global logger
-        logger = logging.getLogger("retrieval")
-        logger.debug("telemetry logging reapplied on startup")
-    except Exception:
-        # best-effort: log to the current logger if possible
-        try:
-            logging.getLogger("retrieval").exception("failed to reapply telemetry logging")
-        except Exception:
-            pass
+app.add_middleware(RequestMetricsMiddleware)
 
 
 async def _generate_core(req: GenerateRequest) -> GenerateResponse:
@@ -313,9 +337,11 @@ async def _stream_core(req: GenerateRequest, request: Request) -> StreamingRespo
     async def finalize_cache() -> None:
         if pipeline.cache_hit:
             return
+        if not pipeline.final_candidates:
+            return
         answer = str(cache_state.get("answer") or "").strip()
         chunks = cache_state.get("chunks") or []
-        if answer:
+        if answer and answer not in {"no documents retrieved", "llm unavailable"}:
             await write_stream_cache(
                 state,
                 pipeline=pipeline,
@@ -339,6 +365,8 @@ async def _stream_core(req: GenerateRequest, request: Request) -> StreamingRespo
         yield _sse("start", start_event)
 
         if pipeline.cache_hit and pipeline.answer is not None:
+            cache_state["answer"] = pipeline.answer
+            cache_state["chunks"] = pipeline.chunks if req.return_chunks else []
             yield _sse("delta", {"text": pipeline.answer})
             yield _sse(
                 "done",
@@ -353,8 +381,6 @@ async def _stream_core(req: GenerateRequest, request: Request) -> StreamingRespo
                     "hybrid_capable": pipeline.hybrid_capable,
                 },
             )
-            cache_state["answer"] = pipeline.answer
-            cache_state["chunks"] = pipeline.chunks if req.return_chunks else []
             return
 
         docs_for_llm = pipeline.final_candidates[: min(len(pipeline.final_candidates), MAX_CHUNKS_TO_LLM)]
@@ -467,85 +493,30 @@ async def _stream_core(req: GenerateRequest, request: Request) -> StreamingRespo
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    endpoint = getattr(request.url, "path", str(request.url))
-    status_code = 422
-    REQUEST_COUNT.labels(service=SERVICE_NAME, env=ENV, endpoint=endpoint, status_code=str(status_code)).inc()
-    ERROR_COUNT.labels(service=SERVICE_NAME, env=ENV, endpoint=endpoint, status_code=str(status_code)).inc()
     return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
     endpoint = getattr(request.url, "path", str(request.url))
-    status_code = 500
-    REQUEST_COUNT.labels(service=SERVICE_NAME, env=ENV, endpoint=endpoint, status_code=str(status_code)).inc()
-    ERROR_COUNT.labels(service=SERVICE_NAME, env=ENV, endpoint=endpoint, status_code=str(status_code)).inc()
     json_log("error", "unhandled_exception", "unhandled exception", endpoint=endpoint, error=str(exc), stack=safe_stack(exc))
     return JSONResponse(status_code=500, content={"detail": "internal server error"})
 
 
 @app.post("/generate", response_model=GenerateResponse)
 async def api_generate(req: GenerateRequest):
-    start = time.perf_counter()
-    endpoint = "/generate"
-    status_code = 200
-    try:
-        return await _generate_core(req)
-    except HTTPException as exc:
-        status_code = exc.status_code
-        raise
-    except Exception:
-        status_code = 500
-        raise
-    finally:
-        elapsed = max(time.perf_counter() - start, 1e-6)
-        REQUEST_COUNT.labels(service=SERVICE_NAME, env=ENV, endpoint=endpoint, status_code=str(status_code)).inc()
-        REQUEST_LATENCY.labels(service=SERVICE_NAME, env=ENV, endpoint=endpoint, status_code=str(status_code)).observe(elapsed)
-        if status_code >= 400:
-            ERROR_COUNT.labels(service=SERVICE_NAME, env=ENV, endpoint=endpoint, status_code=str(status_code)).inc()
+    return await _generate_core(req)
 
 
 @app.post("/retrieve", response_model=RetrieveResponse)
 async def api_retrieve(req: RetrieveRequest):
-    start = time.perf_counter()
-    endpoint = "/retrieve"
-    status_code = 200
-    try:
-        return await _retrieve_core(req)
-    except HTTPException as exc:
-        status_code = exc.status_code
-        raise
-    except Exception:
-        status_code = 500
-        raise
-    finally:
-        elapsed = max(time.perf_counter() - start, 1e-6)
-        REQUEST_COUNT.labels(service=SERVICE_NAME, env=ENV, endpoint=endpoint, status_code=str(status_code)).inc()
-        REQUEST_LATENCY.labels(service=SERVICE_NAME, env=ENV, endpoint=endpoint, status_code=str(status_code)).observe(elapsed)
-        if status_code >= 400:
-            ERROR_COUNT.labels(service=SERVICE_NAME, env=ENV, endpoint=endpoint, status_code=str(status_code)).inc()
+    return await _retrieve_core(req)
 
 
 @app.post("/generate/stream")
 @app.post("/stream")
 async def api_stream(req: GenerateRequest, request: Request):
-    start = time.perf_counter()
-    endpoint = "/generate/stream"
-    status_code = 200
-    try:
-        return await _stream_core(req, request)
-    except HTTPException as exc:
-        status_code = exc.status_code
-        raise
-    except Exception:
-        status_code = 500
-        raise
-    finally:
-        elapsed = max(time.perf_counter() - start, 1e-6)
-        REQUEST_COUNT.labels(service=SERVICE_NAME, env=ENV, endpoint=endpoint, status_code=str(status_code)).inc()
-        REQUEST_LATENCY.labels(service=SERVICE_NAME, env=ENV, endpoint=endpoint, status_code=str(status_code)).observe(elapsed)
-        if status_code >= 400:
-            ERROR_COUNT.labels(service=SERVICE_NAME, env=ENV, endpoint=endpoint, status_code=str(status_code)).inc()
+    return await _stream_core(req, request)
 
 
 @app.get("/healthz")
@@ -579,8 +550,6 @@ def metrics():
 
 
 if __name__ == "__main__":
-    # When running programmatically, apply logging before starting uvicorn so our
-    # desired LOG_LEVEL is applied consistently.
     try:
         setup_logging()
     except Exception:
@@ -595,5 +564,5 @@ if __name__ == "__main__":
         http=os.getenv("UVICORN_HTTP", "httptools"),
         proxy_headers=True,
         forwarded_allow_ips=os.getenv("FORWARDED_ALLOW_IPS", "*"),
-        access_log=False,  # disable uvicorn access log lines (e.g., 404 access entries)
+        access_log=False,
     )

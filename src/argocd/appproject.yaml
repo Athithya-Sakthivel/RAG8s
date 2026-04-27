@@ -3,8 +3,16 @@ kind: AppProject
 metadata:
   name: e2e-rag-system
   namespace: argocd
+  labels:
+    app.kubernetes.io/managed-by: argocd
+    app.kubernetes.io/name: e2e-rag-system
+  annotations:
+    description: "Project grouping all core services and Qdrant for the E2E RAG System"
 spec:
-  description: Project grouping all core services and Qdrant
+  description: >-
+    Project grouping all core services and Qdrant for the E2E RAG System.
+    Use this project to scope repositories, allowed destinations, and resource
+    access for Applications managed by Argo CD.
   sourceRepos:
     - https://github.com/Athithya-Sakthivel/E2E-RAG-System.git
     - https://qdrant.github.io/qdrant-helm

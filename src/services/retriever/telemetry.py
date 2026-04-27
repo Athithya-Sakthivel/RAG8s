@@ -21,15 +21,14 @@ _CONFIGURED_LEVEL_ORDER = 30
 def _canonical_level(level: str | None) -> str:
     raw = (level or os.getenv("LOG_LEVEL") or os.getenv("LOGLEVEL") or "WARNING") or "WARNING"
     raw = raw.strip().upper()
-    aliases = {
+    return {
         "WARN": "WARNING",
         "WARNING": "WARNING",
         "INFO": "INFO",
         "DEBUG": "DEBUG",
         "ERROR": "ERROR",
         "CRITICAL": "CRITICAL",
-    }
-    return aliases.get(raw, "WARNING")
+    }.get(raw, "WARNING")
 
 
 def _level_order(level: str) -> int:
@@ -47,27 +46,17 @@ def _utc_now_iso_z() -> str:
 
 
 def setup_logging(level: str | None = None) -> str:
-    """
-    Configure root logging in a way that respects LOG_LEVEL/LOGLEVEL.
-
-    Returns the canonical configured level string.
-    """
     global _CONFIGURED_LEVEL, _CONFIGURED_LEVEL_ORDER
-
     configured = _canonical_level(level)
     log_level = getattr(logging, configured, logging.WARNING)
-
     logging.captureWarnings(True)
-
     root = logging.getLogger()
     root.handlers.clear()
     root.setLevel(log_level)
-
     handler = logging.StreamHandler(sys.stderr)
     handler.setLevel(log_level)
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
     root.addHandler(handler)
-
     for name in (
         "httpx",
         "httpcore",
@@ -81,16 +70,12 @@ def setup_logging(level: str | None = None) -> str:
         "uvicorn.access",
     ):
         logging.getLogger(name).setLevel(log_level)
-
     _CONFIGURED_LEVEL = configured
     _CONFIGURED_LEVEL_ORDER = _level_order(configured)
     return configured
 
 
 def apply_after_uvicorn(level: str | None = None) -> str:
-    """
-    Reapply logging config after uvicorn has initialized its own logging.
-    """
     return setup_logging(level)
 
 
@@ -98,7 +83,6 @@ def json_log(level: str, event: str, msg: str = "", **extra: Any) -> None:
     lvl = _canonical_level(level)
     if _level_order(lvl) < _CONFIGURED_LEVEL_ORDER:
         return
-
     record: dict[str, Any] = {
         "ts": _utc_now_iso_z(),
         "level": lvl.lower() if lvl != "WARNING" else "warn",
@@ -111,7 +95,6 @@ def json_log(level: str, event: str, msg: str = "", **extra: Any) -> None:
         if key in {"ts", "level", "event", "msg", "service", "env"}:
             continue
         record[key] = value
-
     try:
         sys.stdout.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
         sys.stdout.flush()
@@ -160,6 +143,12 @@ SERVICE_READY = Gauge(
     "service_ready",
     "Service readiness gauge (1 ready, 0 not ready)",
     ["service", "env"],
+)
+
+INFLIGHT_REQUESTS = Gauge(
+    "retrieval_inflight_requests",
+    "Current in-flight requests",
+    ["service", "env", "endpoint"],
 )
 
 CACHE_LOOKUP_COUNT = Counter(
