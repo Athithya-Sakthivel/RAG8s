@@ -24,17 +24,17 @@ BEDROCK_MODEL_ID = os.getenv("BEDROCK_MODEL_ID") or os.getenv("AWS_BEDROCK_MODEL
 ANSWER_PROMPT_TEMPLATE = os.getenv(
     "LLM_PROMPT_TEMPLATE",
     (
-        "You are a knowledge assistant who must answer unambigiously referring ONLY to the provided passages below."
-        "Each factual sentence MUST end with a citation in the exact format [n], where n is one of the numbered passage blocks. "
-        "Use ONLY the provided passage numbers. Do NOT output filenames, URLs, page numbers, or any other metadata. Do NOT invent citations."
+        "You are a knowledge assistant who must explain explicitly to an end-user by referring ONLY to the provided passages BELOW"
+        "You MUST end every passage with a citation in the exact format [n], where n is one of the numbered passage blocks."
+        "Use ONLY the provided passage numbers. Do NOT output filenames, secrets, URLs, page numbers, or any other metadata. Do NOT invent citations."
         "PASSAGES:\n{passages}\n\n"
         "QUESTION: {question}\n\n"
         "Answer:"
     ),
 )
 
-LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "512"))
-LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.1"))
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "400"))
+LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.0"))
 
 BEDROCK_GUARDRAIL_IDENTIFIER = os.getenv("BEDROCK_GUARDRAIL_IDENTIFIER", "").strip()
 BEDROCK_GUARDRAIL_VERSION = os.getenv("BEDROCK_GUARDRAIL_VERSION", "").strip()
@@ -45,7 +45,7 @@ RETRIEVAL_VERSION = os.getenv("RETRIEVAL_VERSION", "retrieval-v1")
 TENANT_ID = os.getenv("TENANT_ID", "").strip() or None
 
 DENSE_DIM = int(os.getenv("DENSE_DIM", "384"))
-MAX_CHUNKS_TO_LLM = int(os.getenv("MAX_CHUNKS_TO_LLM", "6"))
+MAX_CHUNKS_TO_LLM = int(os.getenv("MAX_CHUNKS_TO_LLM", "5"))
 QUERY_TOPK_DENSE = int(os.getenv("QUERY_TOPK_DENSE", "50"))
 QUERY_TOPK_SPARSE = int(os.getenv("QUERY_TOPK_SPARSE", "50"))
 FETCH_K = int(os.getenv("FETCH_K", "20"))

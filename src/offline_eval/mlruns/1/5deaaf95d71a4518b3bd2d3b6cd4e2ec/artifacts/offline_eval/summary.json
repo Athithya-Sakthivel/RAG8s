@@ -1,0 +1,24 @@
+{
+  "meta": {
+    "records": 89
+  },
+  "performance": {
+    "success_rate": 1.0
+  },
+  "retrieval": {
+    "recall_at_k": 0.7416,
+    "hit_rate_at_k": 0.7416,
+    "mrr": 0.5875
+  },
+  "generation": {
+    "fact_coverage": 0.7933,
+    "groundedness": 0.9356,
+    "response_similarity": 0.2677
+  },
+  "citations": {
+    "citation_integrity": 0.8876
+  },
+  "errors": {
+    "rate": 0.0
+  }
+}
