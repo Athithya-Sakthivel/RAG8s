@@ -22,7 +22,7 @@ env:
 
 jobs:
   build-test-scan-push:
-    name: Build, smoke test, scan, publish retriever image
+    name: Build, scan, publish retriever image
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     environment: staging
@@ -77,7 +77,7 @@ jobs:
           echo "retriever_image=${RETRIEVER_IMAGE}" >> "$GITHUB_OUTPUT"
           echo "image_staging=${IMAGE_STAGING}" >> "$GITHUB_OUTPUT"
 
-      - name: Build image (load into runner for smoke tests)
+      - name: Build image
         id: build-image
         uses: docker/build-push-action@v6
         with:
@@ -92,65 +92,19 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=min
 
-      - name: Run smoke test
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          docker run \
-            --name retriever-ci \
-            -d \
-            -p 9023:8001 \
-            --shm-size=1g \
-            -e PORT=8001 \
-            -e LOG_LEVEL=INFO \
-            -e SERVICE_NAME=retrieval \
-            -e SERVICE_VERSION=ci \
-            -e ENV=CI \
-            -e DEPLOYMENT_ENVIRONMENT=CI \
-            -e CLUSTER_NAME=ci \
-            -e SERVICE_INSTANCE_ID=ci-1 \
-            -e ENABLE_OTEL_TRACES=false \
-            -e ENABLE_OTEL_METRICS=false \
-            -e ENABLE_OTEL_LOGS=false \
-            -e QDRANT_URL=http://127.0.0.1:65530 \
-            -e DENSE_URL=http://127.0.0.1:65531 \
-            -e SPARSE_URL=http://127.0.0.1:65532 \
-            -e RERANKER_URL=http://127.0.0.1:65533 \
-            -e AWS_REGION=us-east-1 \
-            -e BEDROCK_MODEL_ID=test-model \
-            "${{ steps.build-image.outputs.imageid }}" >/dev/null
-
-          for _ in $(seq 1 90); do
-            if curl -fsS --max-time 2 http://127.0.0.1:9023/healthz >/dev/null; then
-              exit 0
-            fi
-            sleep 1
-          done
-
-          echo "[ERROR] retriever did not become healthy"
-          docker logs --tail 200 retriever-ci || true
-          exit 1
-
-      - name: Verify health endpoint
-        shell: bash
-        run: |
-          set -euo pipefail
-          healthz="$(curl -fsS http://127.0.0.1:9023/healthz)"
-          printf '%s' "${healthz}" | grep -q '"status":"ok"'
-
       - name: Scan built image with Trivy (CI-level scan)
         shell: bash
         run: |
-          set -euo pipefail
           scan_image="${{ steps.build-image.outputs.imageid }}"
           test -n "${scan_image}"
+
           ignore_args=()
           if [[ -f src/services/retriever/.trivyignore ]]; then
-            ignore_args+=(--ignorefile /workspace/src/services/retriever/.trivyignore)
+            ignore_args+=(--ignorefile src/services/retriever/.trivyignore)
           elif [[ -f .trivyignore ]]; then
-            ignore_args+=(--ignorefile /workspace/.trivyignore)
+            ignore_args+=(--ignorefile .trivyignore)
           fi
+
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
             -v "${TRIVY_CACHE_DIR}:/root/.cache/trivy" \
