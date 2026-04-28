@@ -5,6 +5,7 @@ import asyncio
 import logging
 import os
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -32,6 +33,9 @@ from helpers import (
     stable_uuid_from_text,
     validate_and_filter_citations,
 )
+from opentelemetry import metrics, trace
+from opentelemetry.metrics import CallbackOptions, Observation
+from opentelemetry.trace import Status, StatusCode
 from qdrant_client import models
 from settings import (
     ANSWER_PROMPT_TEMPLATE,
@@ -42,6 +46,7 @@ from settings import (
     CACHE_SCORE_THRESHOLD,
     CACHE_TTL_SECONDS,
     CORPUS_VERSION,
+    DEPLOYMENT_ENVIRONMENT,
     ENV,
     LLM_TEMPERATURE,
     MAX_CHUNKS_TO_LLM,
@@ -60,15 +65,6 @@ from settings import (
     SERVICE_NAME,
     TENANT_ID,
 )
-from telemetry import (
-    CACHE_LOOKUP_COUNT,
-    CACHE_LOOKUP_LATENCY,
-    CACHE_WRITE_COUNT,
-    CACHE_WRITE_LATENCY,
-    QDRANT_QUERY_COUNT,
-    QDRANT_QUERY_LATENCY,
-    SERVICE_READY,
-)
 
 logger = logging.getLogger("retrieval.pipeline")
 
@@ -77,6 +73,106 @@ startup_bootstrap_error: str | None = None
 background_task: asyncio.Task | None = None
 cleanup_task: asyncio.Task | None = None
 _background_tasks: set[asyncio.Task[Any]] = set()
+
+_READY_VALUE = 0
+_METRICS_INITIALIZED = False
+
+_PIPELINE_DURATION = None
+_QDRANT_QUERY_COUNT = None
+_QDRANT_QUERY_LATENCY = None
+_CACHE_LOOKUP_COUNT = None
+_CACHE_LOOKUP_LATENCY = None
+_CACHE_WRITE_COUNT = None
+_CACHE_WRITE_LATENCY = None
+_SERVICE_READY = None
+
+
+def _metric_attrs(**extra: Any) -> dict[str, Any]:
+    base = {
+        "service.name": SERVICE_NAME,
+        "deployment.environment": DEPLOYMENT_ENVIRONMENT,
+        "env": ENV,
+    }
+    base.update({k: v for k, v in extra.items() if v is not None})
+    return base
+
+
+def _tracer():
+    return trace.get_tracer("retriever.pipeline")
+
+
+def _meter():
+    return metrics.get_meter("retriever.pipeline")
+
+
+def initialize_pipeline_metrics() -> None:
+    global _METRICS_INITIALIZED
+    global _PIPELINE_DURATION, _QDRANT_QUERY_COUNT, _QDRANT_QUERY_LATENCY
+    global _CACHE_LOOKUP_COUNT, _CACHE_LOOKUP_LATENCY, _CACHE_WRITE_COUNT, _CACHE_WRITE_LATENCY
+    global _SERVICE_READY
+
+    if _METRICS_INITIALIZED:
+        return
+
+    meter = _meter()
+
+    _PIPELINE_DURATION = meter.create_histogram(
+        name="retrieval.pipeline.duration",
+        description="Total pipeline duration",
+        unit="s",
+    )
+    _QDRANT_QUERY_COUNT = meter.create_counter(
+        name="retrieval.qdrant.query.count",
+        description="Qdrant query count",
+        unit="1",
+    )
+    _QDRANT_QUERY_LATENCY = meter.create_histogram(
+        name="retrieval.qdrant.query.duration",
+        description="Qdrant query latency",
+        unit="s",
+    )
+    _CACHE_LOOKUP_COUNT = meter.create_counter(
+        name="retrieval.cache.lookup.count",
+        description="Cache lookup count",
+        unit="1",
+    )
+    _CACHE_LOOKUP_LATENCY = meter.create_histogram(
+        name="retrieval.cache.lookup.duration",
+        description="Cache lookup latency",
+        unit="s",
+    )
+    _CACHE_WRITE_COUNT = meter.create_counter(
+        name="retrieval.cache.write.count",
+        description="Cache write count",
+        unit="1",
+    )
+    _CACHE_WRITE_LATENCY = meter.create_histogram(
+        name="retrieval.cache.write.duration",
+        description="Cache write latency",
+        unit="s",
+    )
+
+    def _readiness_callback(options: CallbackOptions) -> Iterable[Observation]:
+        yield Observation(
+            int(_READY_VALUE),
+            {
+                "service.name": SERVICE_NAME,
+                "deployment.environment": DEPLOYMENT_ENVIRONMENT,
+                "env": ENV,
+            },
+        )
+
+    _SERVICE_READY = meter.create_observable_gauge(
+        "retrieval.service.ready",
+        [_readiness_callback],
+    )
+
+    _METRICS_INITIALIZED = True
+
+
+def _set_ready(value: bool) -> None:
+    global _READY_VALUE
+    _READY_VALUE = 1 if value else 0
 
 
 @dataclass
@@ -361,14 +457,18 @@ async def _search_docs(
     mode = "none"
     dense_results: list[dict[str, Any]] = []
     sparse_results: list[dict[str, Any]] = []
+
+    tracer = _tracer()
     start = time.perf_counter()
 
     if dense_vec is not None and sparse_vec is not None and _hybrid_capable(state):
         async def _dense():
-            return await state.store.dense_search(query_vector=dense_vec, query_filter=q_filter, limit=fetch_k)
+            with tracer.start_as_current_span("qdrant.dense_search"):
+                return await state.store.dense_search(query_vector=dense_vec, query_filter=q_filter, limit=fetch_k)
 
         async def _sparse():
-            return await state.store.sparse_search(query_vector=sparse_vec, query_filter=q_filter, limit=fetch_k)
+            with tracer.start_as_current_span("qdrant.sparse_search"):
+                return await state.store.sparse_search(query_vector=sparse_vec, query_filter=q_filter, limit=fetch_k)
 
         dense_task = asyncio.create_task(call_with_retry("retrieval", state.breakers["retrieval"], _dense))
         sparse_task = asyncio.create_task(call_with_retry("retrieval", state.breakers["retrieval"], _sparse))
@@ -380,7 +480,8 @@ async def _search_docs(
         mode = "hybrid"
     elif dense_vec is not None:
         async def _dense():
-            return await state.store.dense_search(query_vector=dense_vec, query_filter=q_filter, limit=fetch_k)
+            with tracer.start_as_current_span("qdrant.dense_search"):
+                return await state.store.dense_search(query_vector=dense_vec, query_filter=q_filter, limit=fetch_k)
 
         try:
             dense_results = await call_with_retry("retrieval", state.breakers["retrieval"], _dense)
@@ -389,7 +490,8 @@ async def _search_docs(
         mode = "dense"
     elif sparse_vec is not None:
         async def _sparse():
-            return await state.store.sparse_search(query_vector=sparse_vec, query_filter=q_filter, limit=fetch_k)
+            with tracer.start_as_current_span("qdrant.sparse_search"):
+                return await state.store.sparse_search(query_vector=sparse_vec, query_filter=q_filter, limit=fetch_k)
 
         try:
             sparse_results = await call_with_retry("retrieval", state.breakers["retrieval"], _sparse)
@@ -403,8 +505,12 @@ async def _search_docs(
         "hybrid": bool(dense_results and sparse_results),
         "fusion_method": "rrf" if fused else "none",
     }
-    QDRANT_QUERY_COUNT.labels(service=SERVICE_NAME, env=ENV, mode=mode).inc()
-    QDRANT_QUERY_LATENCY.labels(service=SERVICE_NAME, env=ENV, mode=mode).observe(max(time.perf_counter() - start, 1e-6))
+
+    if _QDRANT_QUERY_COUNT is not None:
+        _QDRANT_QUERY_COUNT.add(1, attributes=_metric_attrs(mode=mode))
+    if _QDRANT_QUERY_LATENCY is not None:
+        _QDRANT_QUERY_LATENCY.record(max(time.perf_counter() - start, 1e-6), attributes=_metric_attrs(mode=mode))
+
     return fused, mode, debug
 
 
@@ -428,6 +534,8 @@ async def _semantic_cache_promote_exact(
     cache_score: float,
     hit_type: str = "semantic",
 ) -> None:
+    start = time.perf_counter()
+
     async def _write():
         return await state.store.semantic_cache_upsert(
             cache_id=cache_id,
@@ -447,9 +555,15 @@ async def _semantic_cache_promote_exact(
 
     try:
         await call_with_retry("cache", state.breakers["cache"], _write)
-        CACHE_WRITE_COUNT.labels(service=SERVICE_NAME, env=ENV, result="ok").inc()
+        if _CACHE_WRITE_COUNT is not None:
+            _CACHE_WRITE_COUNT.add(1, attributes=_metric_attrs(result="ok", cache_kind="promotion"))
     except Exception:
-        CACHE_WRITE_COUNT.labels(service=SERVICE_NAME, env=ENV, result="fail").inc()
+        if _CACHE_WRITE_COUNT is not None:
+            _CACHE_WRITE_COUNT.add(1, attributes=_metric_attrs(result="fail", cache_kind="promotion"))
+        raise
+    finally:
+        if _CACHE_WRITE_LATENCY is not None:
+            _CACHE_WRITE_LATENCY.record(max(time.perf_counter() - start, 1e-6), attributes=_metric_attrs(cache_kind="promotion"))
 
 
 async def write_stream_cache(
@@ -466,6 +580,7 @@ async def write_stream_cache(
     if not answer.strip():
         return False
 
+    start = time.perf_counter()
     try:
         ok = await state.store.semantic_cache_upsert(
             cache_id=pipeline.cache_id,
@@ -482,11 +597,16 @@ async def write_stream_cache(
             hit_type=hit_type,
             cache_score=cache_score,
         )
-        CACHE_WRITE_COUNT.labels(service=SERVICE_NAME, env=ENV, result="ok" if ok else "fail").inc()
+        if _CACHE_WRITE_COUNT is not None:
+            _CACHE_WRITE_COUNT.add(1, attributes=_metric_attrs(result="ok" if ok else "fail", cache_kind=hit_type))
         return ok
     except Exception:
-        CACHE_WRITE_COUNT.labels(service=SERVICE_NAME, env=ENV, result="fail").inc()
+        if _CACHE_WRITE_COUNT is not None:
+            _CACHE_WRITE_COUNT.add(1, attributes=_metric_attrs(result="fail", cache_kind=hit_type))
         return False
+    finally:
+        if _CACHE_WRITE_LATENCY is not None:
+            _CACHE_WRITE_LATENCY.record(max(time.perf_counter() - start, 1e-6), attributes=_metric_attrs(cache_kind=hit_type))
 
 
 async def _call_llm(
@@ -537,389 +657,436 @@ async def _build_pipeline_result(
     if not query:
         raise HTTPException(status_code=400, detail="query required")
 
-    resolved_tenant = _resolve_tenant_id(tenant_id)
-    query_norm = normalize_query(query)
-    cache_key = build_cache_key(
-        query_norm=query_norm,
-        corpus_version=corpus_version,
-        prompt_version=prompt_version,
-        retrieval_version=retrieval_version,
-        model_name=model_name,
-        tenant_id=resolved_tenant,
-        top_k=top_k,
-        fetch_k=fetch_k,
-    )
-    cache_id = stable_uuid_from_text(cache_key)
-    query_embed_text = canonicalize_text(query)
+    initialize_pipeline_metrics()
 
-    cache_ready = _is_cache_ready(state)
+    tracer = _tracer()
+    start = time.perf_counter()
+    span_outcome = "ok"
 
-    if cache_ready and allow_semantic_cache:
-        async def _exact_cache():
-            return await state.store.semantic_cache_get_by_id(cache_id)
+    with tracer.start_as_current_span("retrieval.pipeline.build") as span:
+        span.set_attribute("retrieval.query.length", len(query))
+        span.set_attribute("retrieval.top_k", int(top_k))
+        span.set_attribute("retrieval.fetch_k", int(fetch_k))
+        span.set_attribute("retrieval.include_answer", bool(include_answer))
+        span.set_attribute("retrieval.allow_semantic_cache", bool(allow_semantic_cache))
+        span.set_attribute("retrieval.allow_rerank", bool(allow_rerank))
+        span.set_attribute("retrieval.corpus_version", corpus_version)
+        span.set_attribute("retrieval.prompt_version", prompt_version)
+        span.set_attribute("retrieval.retrieval_version", retrieval_version)
+        span.set_attribute("retrieval.model_name", model_name)
 
-        exact = None
-        exact_start = time.perf_counter()
         try:
-            exact = await call_with_retry("cache", state.breakers["cache"], _exact_cache)
-        except Exception:
-            exact = None
-        CACHE_LOOKUP_COUNT.labels(service=SERVICE_NAME, env=ENV, result="exact_hit" if exact else "miss").inc()
-        CACHE_LOOKUP_LATENCY.labels(service=SERVICE_NAME, env=ENV).observe(max(time.perf_counter() - exact_start, 1e-6))
-
-        if exact and exact.get("payload") and not is_payload_expired(exact["payload"]):
-            pipe = _build_exact_cache_result(
-                payload=exact["payload"],
-                cache_kind="exact",
-                cache_score=1.0,
-                retrieval_mode="exact_cache",
-                hybrid_capable=_hybrid_capable(state),
-                fetch_k=fetch_k,
-                cache_id=cache_id,
-            )
-            pipe.query_text = query
-            pipe.query_norm = query_norm
-            pipe.corpus_version = corpus_version
-            pipe.prompt_version = prompt_version
-            pipe.retrieval_version = retrieval_version
-            pipe.model_name = model_name
-            pipe.tenant_id = resolved_tenant
-            return pipe
-
-    if not _is_ready_for_retrieval(state):
-        raise HTTPException(status_code=503, detail="no retriever backends available")
-
-    dense_task = None
-    sparse_task = None
-    if state.health.get("dense"):
-        async def _dense():
-            return await state.dense.embed([query_embed_text])
-
-        dense_task = asyncio.create_task(call_with_retry("dense", state.breakers["dense"], _dense))
-
-    if state.health.get("sparse"):
-        async def _sparse():
-            return await state.sparse.embed_chunked([query_embed_text])
-
-        sparse_task = asyncio.create_task(call_with_retry("sparse", state.breakers["sparse"], _sparse))
-
-    dense_vec: list[float] | None = None
-    sparse_vec: models.SparseVector | None = None
-
-    if dense_task is not None:
-        try:
-            dense_res = await dense_task
-            dense_vec = dense_res[0] if dense_res else None
-        except Exception as e:
-            logger.debug("dense_embed_failed: %s", e)
-            dense_vec = None
-
-    if sparse_task is not None:
-        try:
-            sparse_res = await sparse_task
-            if sparse_res:
-                s0 = sparse_res[0]
-                sparse_vec = models.SparseVector(
-                    indices=[int(x) for x in s0.get("indices", [])],
-                    values=[float(x) for x in s0.get("values", [])],
-                )
-        except Exception as e:
-            logger.debug("sparse_embed_failed: %s", e)
-            sparse_vec = None
-
-    if cache_ready and allow_semantic_cache and dense_vec is not None:
-        strict_threshold, relaxed_threshold = _semantic_cache_thresholds(state)
-
-        async def _semantic_lookup(min_score: float):
-            return await state.store.semantic_cache_lookup(
-                query_vector=dense_vec,
+            resolved_tenant = _resolve_tenant_id(tenant_id)
+            query_norm = normalize_query(query)
+            cache_key = build_cache_key(
+                query_norm=query_norm,
                 corpus_version=corpus_version,
                 prompt_version=prompt_version,
                 retrieval_version=retrieval_version,
                 model_name=model_name,
-                min_score=min_score,
-            )
-
-        semantic_start = time.perf_counter()
-        semantic_hit = None
-        semantic_kind = None
-
-        try:
-            semantic_hit = await call_with_retry("cache", state.breakers["cache"], lambda: _semantic_lookup(strict_threshold))
-            semantic_kind = "semantic_strict"
-        except Exception:
-            semantic_hit = None
-
-        if not semantic_hit:
-            try:
-                semantic_hit = await call_with_retry("cache", state.breakers["cache"], lambda: _semantic_lookup(relaxed_threshold))
-                if semantic_hit:
-                    semantic_kind = "semantic_relaxed"
-            except Exception:
-                semantic_hit = None
-
-        CACHE_LOOKUP_COUNT.labels(
-            service=SERVICE_NAME,
-            env=ENV,
-            result=semantic_kind if semantic_hit else "miss",
-        ).inc()
-        CACHE_LOOKUP_LATENCY.labels(service=SERVICE_NAME, env=ENV).observe(max(time.perf_counter() - semantic_start, 1e-6))
-
-        if semantic_hit and semantic_hit.get("payload"):
-            payload = semantic_hit["payload"]
-            cache_resp = cache_payload_to_response(
-                payload,
-                cache_score=float(semantic_hit.get("score") or payload.get("cache_score") or 1.0),
-            )
-            cache_kind = semantic_kind or "semantic"
-            cache_score = float(cache_resp.get("cache_score") or payload.get("cache_score") or 1.0)
-            retrieval = build_retrieval_metadata(
-                mode="semantic_cache",
-                hybrid=False,
-                hybrid_capable=_hybrid_capable(state),
-                dense_k=QUERY_TOPK_DENSE,
-                sparse_k=QUERY_TOPK_SPARSE,
+                tenant_id=resolved_tenant,
+                top_k=top_k,
                 fetch_k=fetch_k,
-                dense_count=0,
-                sparse_count=0,
-                fused_count=0,
-                rerank_enabled=False,
-                rerank_applied=False,
-                rerank_reason="semantic_cache",
-                rerank_model=None,
-                rerank_count=0,
             )
-            answer = cache_resp.get("answer") or ""
-            chunks = cache_resp.get("chunks") if isinstance(cache_resp.get("chunks"), list) else []
+            cache_id = stable_uuid_from_text(cache_key)
+            query_embed_text = canonicalize_text(query)
 
-            async def _promote() -> None:
+            cache_ready = _is_cache_ready(state)
+
+            if cache_ready and allow_semantic_cache:
+                async def _exact_cache():
+                    with tracer.start_as_current_span("cache.exact_lookup"):
+                        return await state.store.semantic_cache_get_by_id(cache_id)
+
+                exact = None
+                exact_start = time.perf_counter()
                 try:
-                    await _semantic_cache_promote_exact(
-                        state,
+                    exact = await call_with_retry("cache", state.breakers["cache"], _exact_cache)
+                except Exception:
+                    exact = None
+
+                if _CACHE_LOOKUP_COUNT is not None:
+                    _CACHE_LOOKUP_COUNT.add(1, attributes=_metric_attrs(result="exact_hit" if exact else "miss"))
+                if _CACHE_LOOKUP_LATENCY is not None:
+                    _CACHE_LOOKUP_LATENCY.record(max(time.perf_counter() - exact_start, 1e-6), attributes=_metric_attrs(result="exact"))
+
+                if exact and exact.get("payload") and not is_payload_expired(exact["payload"]):
+                    pipe = _build_exact_cache_result(
+                        payload=exact["payload"],
+                        cache_kind="exact",
+                        cache_score=1.0,
+                        retrieval_mode="exact_cache",
+                        hybrid_capable=_hybrid_capable(state),
+                        fetch_k=fetch_k,
                         cache_id=cache_id,
-                        dense_vec=dense_vec,
-                        query=query,
-                        query_norm=query_norm,
-                        corpus_version=corpus_version,
-                        prompt_version=prompt_version,
-                        retrieval_version=retrieval_version,
-                        model_name=model_name,
+                    )
+                    pipe.query_text = query
+                    pipe.query_norm = query_norm
+                    pipe.corpus_version = corpus_version
+                    pipe.prompt_version = prompt_version
+                    pipe.retrieval_version = retrieval_version
+                    pipe.model_name = model_name
+                    pipe.tenant_id = resolved_tenant
+                    span.set_status(Status(StatusCode.OK))
+                    return pipe
+
+            if not _is_ready_for_retrieval(state):
+                span.set_status(Status(StatusCode.ERROR))
+                raise HTTPException(status_code=503, detail="no retriever backends available")
+
+            dense_task = None
+            sparse_task = None
+            if state.health.get("dense"):
+                async def _dense():
+                    return await state.dense.embed([query_embed_text])
+
+                dense_task = asyncio.create_task(call_with_retry("dense", state.breakers["dense"], _dense))
+
+            if state.health.get("sparse"):
+                async def _sparse():
+                    return await state.sparse.embed_chunked([query_embed_text])
+
+                sparse_task = asyncio.create_task(call_with_retry("sparse", state.breakers["sparse"], _sparse))
+
+            dense_vec: list[float] | None = None
+            sparse_vec: models.SparseVector | None = None
+
+            if dense_task is not None:
+                try:
+                    dense_res = await dense_task
+                    dense_vec = dense_res[0] if dense_res else None
+                except Exception as e:
+                    logger.debug("dense_embed_failed: %s", e)
+                    dense_vec = None
+
+            if sparse_task is not None:
+                try:
+                    sparse_res = await sparse_task
+                    if sparse_res:
+                        s0 = sparse_res[0]
+                        sparse_vec = models.SparseVector(
+                            indices=[int(x) for x in s0.get("indices", [])],
+                            values=[float(x) for x in s0.get("values", [])],
+                        )
+                except Exception as e:
+                    logger.debug("sparse_embed_failed: %s", e)
+                    sparse_vec = None
+
+            if cache_ready and allow_semantic_cache and dense_vec is not None:
+                strict_threshold, relaxed_threshold = _semantic_cache_thresholds(state)
+
+                async def _semantic_lookup(min_score: float):
+                    with tracer.start_as_current_span("cache.semantic_lookup") as lookup_span:
+                        lookup_span.set_attribute("cache.min_score", float(min_score))
+                        return await state.store.semantic_cache_lookup(
+                            query_vector=dense_vec,
+                            corpus_version=corpus_version,
+                            prompt_version=prompt_version,
+                            retrieval_version=retrieval_version,
+                            model_name=model_name,
+                            min_score=min_score,
+                        )
+
+                semantic_start = time.perf_counter()
+                semantic_hit = None
+                semantic_kind = None
+
+                try:
+                    semantic_hit = await call_with_retry("cache", state.breakers["cache"], lambda: _semantic_lookup(strict_threshold))
+                    semantic_kind = "semantic_strict"
+                except Exception:
+                    semantic_hit = None
+
+                if not semantic_hit:
+                    try:
+                        semantic_hit = await call_with_retry("cache", state.breakers["cache"], lambda: _semantic_lookup(relaxed_threshold))
+                        if semantic_hit:
+                            semantic_kind = "semantic_relaxed"
+                    except Exception:
+                        semantic_hit = None
+
+                if _CACHE_LOOKUP_COUNT is not None:
+                    _CACHE_LOOKUP_COUNT.add(
+                        1,
+                        attributes=_metric_attrs(result=semantic_kind if semantic_hit else "miss"),
+                    )
+                if _CACHE_LOOKUP_LATENCY is not None:
+                    _CACHE_LOOKUP_LATENCY.record(max(time.perf_counter() - semantic_start, 1e-6), attributes=_metric_attrs(result="semantic"))
+
+                if semantic_hit and semantic_hit.get("payload"):
+                    payload = semantic_hit["payload"]
+                    cache_resp = cache_payload_to_response(
+                        payload,
+                        cache_score=float(semantic_hit.get("score") or payload.get("cache_score") or 1.0),
+                    )
+                    cache_kind = semantic_kind or "semantic"
+                    cache_score = float(cache_resp.get("cache_score") or payload.get("cache_score") or 1.0)
+                    retrieval = build_retrieval_metadata(
+                        mode="semantic_cache",
+                        hybrid=False,
+                        hybrid_capable=_hybrid_capable(state),
+                        dense_k=QUERY_TOPK_DENSE,
+                        sparse_k=QUERY_TOPK_SPARSE,
+                        fetch_k=fetch_k,
+                        dense_count=0,
+                        sparse_count=0,
+                        fused_count=0,
+                        rerank_enabled=False,
+                        rerank_applied=False,
+                        rerank_reason="semantic_cache",
+                        rerank_model=None,
+                        rerank_count=0,
+                    )
+                    answer = cache_resp.get("answer") or ""
+                    chunks = cache_resp.get("chunks") if isinstance(cache_resp.get("chunks"), list) else []
+
+                    async def _promote() -> None:
+                        try:
+                            await _semantic_cache_promote_exact(
+                                state,
+                                cache_id=cache_id,
+                                dense_vec=dense_vec,
+                                query=query,
+                                query_norm=query_norm,
+                                corpus_version=corpus_version,
+                                prompt_version=prompt_version,
+                                retrieval_version=retrieval_version,
+                                model_name=model_name,
+                                answer=answer,
+                                chunks=chunks,
+                                top_k=top_k,
+                                fetch_k=fetch_k,
+                                retrieval_mode="semantic_cache",
+                                rerank_applied=False,
+                                cache_score=cache_score,
+                                hit_type="semantic",
+                            )
+                        except Exception as exc:
+                            logger.debug("semantic exact promotion failed: %s", exc)
+
+                    task = asyncio.create_task(_promote())
+                    _background_tasks.add(task)
+                    task.add_done_callback(_background_tasks.discard)
+
+                    span.set_status(Status(StatusCode.OK))
+                    return PipelineResult(
                         answer=answer,
                         chunks=chunks,
-                        top_k=top_k,
-                        fetch_k=fetch_k,
-                        retrieval_mode="semantic_cache",
-                        rerank_applied=False,
+                        retrieval=retrieval,
+                        cache={
+                            "hit": True,
+                            "type": cache_kind,
+                            "score": cache_score,
+                            "id": cache_resp.get("cache_id"),
+                        },
+                        cache_hit=True,
                         cache_score=cache_score,
-                        hit_type="semantic",
-                    )
-                except Exception as exc:
-                    logger.debug("semantic exact promotion failed: %s", exc)
-
-            task = asyncio.create_task(_promote())
-            _background_tasks.add(task)
-            task.add_done_callback(_background_tasks.discard)
-
-            return PipelineResult(
-                answer=answer,
-                chunks=chunks,
-                retrieval=retrieval,
-                cache={
-                    "hit": True,
-                    "type": cache_kind,
-                    "score": cache_score,
-                    "id": cache_resp.get("cache_id"),
-                },
-                cache_hit=True,
-                cache_score=cache_score,
-                retrieval_mode="semantic_cache",
-                hybrid_capable=_hybrid_capable(state),
-                prompt=None,
-                llm_lines=[],
-                ui_chunks=chunks,
-                final_candidates=[],
-                dense_vector=dense_vec,
-                cache_id=cache_id,
-                query_text=query,
-                query_norm=query_norm,
-                corpus_version=corpus_version,
-                prompt_version=prompt_version,
-                retrieval_version=retrieval_version,
-                model_name=model_name,
-                tenant_id=resolved_tenant,
-            )
-
-    async with state.semaphore:
-        fused, retrieval_mode, retrieval_debug = await _search_docs(state, dense_vec, sparse_vec, fetch_k)
-
-        if not fused:
-            retrieval = build_retrieval_metadata(
-                mode=retrieval_mode,
-                hybrid=bool(dense_vec is not None and sparse_vec is not None and _hybrid_capable(state)),
-                hybrid_capable=_hybrid_capable(state),
-                dense_k=QUERY_TOPK_DENSE,
-                sparse_k=QUERY_TOPK_SPARSE,
-                fetch_k=fetch_k,
-                dense_count=retrieval_debug["candidates"]["dense"],
-                sparse_count=retrieval_debug["candidates"]["sparse"],
-                fused_count=retrieval_debug["candidates"]["fused"],
-                rerank_enabled=False,
-                rerank_applied=False,
-                rerank_reason="no_results",
-                rerank_model=None,
-                rerank_count=0,
-            )
-            return PipelineResult(
-                answer="no documents retrieved" if include_answer else None,
-                chunks=[],
-                retrieval=retrieval,
-                cache=_safe_cache_object(False, "miss" if cache_ready else "disabled", None, None),
-                cache_hit=False,
-                cache_score=None,
-                retrieval_mode=retrieval_mode,
-                hybrid_capable=_hybrid_capable(state),
-                prompt=None,
-                llm_lines=[],
-                ui_chunks=[],
-                final_candidates=[],
-                dense_vector=dense_vec,
-                cache_id=cache_id,
-                query_text=query,
-                query_norm=query_norm,
-                corpus_version=corpus_version,
-                prompt_version=prompt_version,
-                retrieval_version=retrieval_version,
-                model_name=model_name,
-                tenant_id=resolved_tenant,
-            )
-
-        if allow_rerank:
-            rerank_info = await _rerank_candidates(state, query, fused, fetch_k)
-        else:
-            for idx, item in enumerate(fused, start=1):
-                item["post_rerank_rank"] = idx
-            rerank_info = {
-                "candidates": fused,
-                "enabled": False,
-                "applied": False,
-                "reason": "request_disabled",
-                "model": None,
-                "count": 0,
-            }
-
-        final_candidates = list(rerank_info["candidates"])
-        final_candidates = final_candidates[: max(1, min(top_k, len(final_candidates)))]
-        for idx, item in enumerate(final_candidates, start=1):
-            item["post_rerank_rank"] = idx
-            if item.get("rerank_score") is None and not rerank_info["applied"]:
-                item["rerank_score"] = None
-
-        docs_for_llm = final_candidates[: min(len(final_candidates), MAX_CHUNKS_TO_LLM)]
-        retrieval = build_retrieval_metadata(
-            mode=retrieval_mode,
-            hybrid=bool(dense_vec is not None and sparse_vec is not None and _hybrid_capable(state)),
-            hybrid_capable=_hybrid_capable(state),
-            dense_k=QUERY_TOPK_DENSE,
-            sparse_k=QUERY_TOPK_SPARSE,
-            fetch_k=fetch_k,
-            dense_count=retrieval_debug["candidates"]["dense"],
-            sparse_count=retrieval_debug["candidates"]["sparse"],
-            fused_count=retrieval_debug["candidates"]["fused"],
-            rerank_enabled=bool(rerank_info["enabled"]),
-            rerank_applied=bool(rerank_info["applied"]),
-            rerank_reason=str(rerank_info["reason"]),
-            rerank_model=rerank_info["model"],
-            rerank_count=int(rerank_info["count"]),
-        )
-
-        if not include_answer:
-            chunks = _visible_chunk_list(final_candidates, 1600)
-            return PipelineResult(
-                answer=None,
-                chunks=chunks,
-                retrieval=retrieval,
-                cache=_safe_cache_object(False, "disabled" if not cache_ready else "miss", None, None),
-                cache_hit=False,
-                cache_score=None,
-                retrieval_mode=retrieval_mode,
-                hybrid_capable=_hybrid_capable(state),
-                prompt=build_prompt_and_ui_chunks(docs_for_llm, query, max_content_chars=PROMPT_MAX_CONTENT_CHARS)[0],
-                llm_lines=[],
-                ui_chunks=chunks,
-                final_candidates=final_candidates,
-                dense_vector=dense_vec,
-                cache_id=cache_id,
-                query_text=query,
-                query_norm=query_norm,
-                corpus_version=corpus_version,
-                prompt_version=prompt_version,
-                retrieval_version=retrieval_version,
-                model_name=model_name,
-                tenant_id=resolved_tenant,
-            )
-
-        answer, llm_lines, ui_chunks = await _call_llm(state, query, docs_for_llm, max_tokens=max_tokens)
-        valid_indexes = [c["index"] for c in ui_chunks if isinstance(c, dict) and c.get("index") is not None]
-        answer = validate_and_filter_citations(answer, valid_indexes)
-        if not answer.strip():
-            answer = deterministic_summarize(llm_lines)
-        if len(answer) > MAX_PROMPT_CHARS:
-            answer = answer[:MAX_PROMPT_CHARS].rstrip()
-
-        output_chunks = _visible_chunk_list(final_candidates, 1600)
-        if cache_ready and dense_vec is not None:
-            try:
-                final_chunks_for_cache = []
-                for idx, cand in enumerate(final_candidates, start=1):
-                    final_chunks_for_cache.append(candidate_to_public_chunk(cand, rank=idx, max_content_chars=1600))
-
-                async def _cache_write():
-                    return await state.store.semantic_cache_upsert(
+                        retrieval_mode="semantic_cache",
+                        hybrid_capable=_hybrid_capable(state),
+                        prompt=None,
+                        llm_lines=[],
+                        ui_chunks=chunks,
+                        final_candidates=[],
+                        dense_vector=dense_vec,
                         cache_id=cache_id,
-                        query_vector=dense_vec,
                         query_text=query,
                         query_norm=query_norm,
                         corpus_version=corpus_version,
                         prompt_version=prompt_version,
                         retrieval_version=retrieval_version,
                         model_name=model_name,
-                        answer=answer,
-                        ui_chunks=final_chunks_for_cache,
-                        ttl_seconds=state.store.config.cache_ttl_seconds,
-                        hit_type="llm",
-                        cache_score=1.0,
+                        tenant_id=resolved_tenant,
                     )
 
-                write_start = time.perf_counter()
-                await call_with_retry("cache", state.breakers["cache"], _cache_write)
-                CACHE_WRITE_COUNT.labels(service=SERVICE_NAME, env=ENV, result="ok").inc()
-                CACHE_WRITE_LATENCY.labels(service=SERVICE_NAME, env=ENV).observe(max(time.perf_counter() - write_start, 1e-6))
-            except Exception:
-                CACHE_WRITE_COUNT.labels(service=SERVICE_NAME, env=ENV, result="fail").inc()
+            async with state.semaphore:
+                fused, retrieval_mode, retrieval_debug = await _search_docs(state, dense_vec, sparse_vec, fetch_k)
 
-        return PipelineResult(
-            answer=answer,
-            chunks=output_chunks,
-            retrieval=retrieval,
-            cache=_safe_cache_object(False, "miss" if cache_ready else "disabled", None, None),
-            cache_hit=False,
-            cache_score=None,
-            retrieval_mode=retrieval_mode,
-            hybrid_capable=_hybrid_capable(state),
-            prompt=build_prompt_and_ui_chunks(docs_for_llm, query, max_content_chars=PROMPT_MAX_CONTENT_CHARS)[0],
-            llm_lines=llm_lines,
-            ui_chunks=ui_chunks,
-            final_candidates=final_candidates,
-            dense_vector=dense_vec,
-            cache_id=cache_id,
-            query_text=query,
-            query_norm=query_norm,
-            corpus_version=corpus_version,
-            prompt_version=prompt_version,
-            retrieval_version=retrieval_version,
-            model_name=model_name,
-            tenant_id=resolved_tenant,
-        )
+                if not fused:
+                    retrieval = build_retrieval_metadata(
+                        mode=retrieval_mode,
+                        hybrid=bool(dense_vec is not None and sparse_vec is not None and _hybrid_capable(state)),
+                        hybrid_capable=_hybrid_capable(state),
+                        dense_k=QUERY_TOPK_DENSE,
+                        sparse_k=QUERY_TOPK_SPARSE,
+                        fetch_k=fetch_k,
+                        dense_count=retrieval_debug["candidates"]["dense"],
+                        sparse_count=retrieval_debug["candidates"]["sparse"],
+                        fused_count=retrieval_debug["candidates"]["fused"],
+                        rerank_enabled=False,
+                        rerank_applied=False,
+                        rerank_reason="no_results",
+                        rerank_model=None,
+                        rerank_count=0,
+                    )
+                    span.set_status(Status(StatusCode.OK))
+                    return PipelineResult(
+                        answer="no documents retrieved" if include_answer else None,
+                        chunks=[],
+                        retrieval=retrieval,
+                        cache=_safe_cache_object(False, "miss" if cache_ready else "disabled", None, None),
+                        cache_hit=False,
+                        cache_score=None,
+                        retrieval_mode=retrieval_mode,
+                        hybrid_capable=_hybrid_capable(state),
+                        prompt=None,
+                        llm_lines=[],
+                        ui_chunks=[],
+                        final_candidates=[],
+                        dense_vector=dense_vec,
+                        cache_id=cache_id,
+                        query_text=query,
+                        query_norm=query_norm,
+                        corpus_version=corpus_version,
+                        prompt_version=prompt_version,
+                        retrieval_version=retrieval_version,
+                        model_name=model_name,
+                        tenant_id=resolved_tenant,
+                    )
+
+                if allow_rerank:
+                    rerank_info = await _rerank_candidates(state, query, fused, fetch_k)
+                else:
+                    for idx, item in enumerate(fused, start=1):
+                        item["post_rerank_rank"] = idx
+                    rerank_info = {
+                        "candidates": fused,
+                        "enabled": False,
+                        "applied": False,
+                        "reason": "request_disabled",
+                        "model": None,
+                        "count": 0,
+                    }
+
+                final_candidates = list(rerank_info["candidates"])
+                final_candidates = final_candidates[: max(1, min(top_k, len(final_candidates)))]
+                for idx, item in enumerate(final_candidates, start=1):
+                    item["post_rerank_rank"] = idx
+                    if item.get("rerank_score") is None and not rerank_info["applied"]:
+                        item["rerank_score"] = None
+
+                docs_for_llm = final_candidates[: min(len(final_candidates), MAX_CHUNKS_TO_LLM)]
+                retrieval = build_retrieval_metadata(
+                    mode=retrieval_mode,
+                    hybrid=bool(dense_vec is not None and sparse_vec is not None and _hybrid_capable(state)),
+                    hybrid_capable=_hybrid_capable(state),
+                    dense_k=QUERY_TOPK_DENSE,
+                    sparse_k=QUERY_TOPK_SPARSE,
+                    fetch_k=fetch_k,
+                    dense_count=retrieval_debug["candidates"]["dense"],
+                    sparse_count=retrieval_debug["candidates"]["sparse"],
+                    fused_count=retrieval_debug["candidates"]["fused"],
+                    rerank_enabled=bool(rerank_info["enabled"]),
+                    rerank_applied=bool(rerank_info["applied"]),
+                    rerank_reason=str(rerank_info["reason"]),
+                    rerank_model=rerank_info["model"],
+                    rerank_count=int(rerank_info["count"]),
+                )
+
+                if not include_answer:
+                    chunks = _visible_chunk_list(final_candidates, 1600)
+                    span.set_status(Status(StatusCode.OK))
+                    return PipelineResult(
+                        answer=None,
+                        chunks=chunks,
+                        retrieval=retrieval,
+                        cache=_safe_cache_object(False, "disabled" if not cache_ready else "miss", None, None),
+                        cache_hit=False,
+                        cache_score=None,
+                        retrieval_mode=retrieval_mode,
+                        hybrid_capable=_hybrid_capable(state),
+                        prompt=build_prompt_and_ui_chunks(docs_for_llm, query, max_content_chars=PROMPT_MAX_CONTENT_CHARS)[0],
+                        llm_lines=[],
+                        ui_chunks=chunks,
+                        final_candidates=final_candidates,
+                        dense_vector=dense_vec,
+                        cache_id=cache_id,
+                        query_text=query,
+                        query_norm=query_norm,
+                        corpus_version=corpus_version,
+                        prompt_version=prompt_version,
+                        retrieval_version=retrieval_version,
+                        model_name=model_name,
+                        tenant_id=resolved_tenant,
+                    )
+
+                answer, llm_lines, ui_chunks = await _call_llm(state, query, docs_for_llm, max_tokens=max_tokens)
+                valid_indexes = [c["index"] for c in ui_chunks if isinstance(c, dict) and c.get("index") is not None]
+                answer = validate_and_filter_citations(answer, valid_indexes)
+                if not answer.strip():
+                    answer = deterministic_summarize(llm_lines)
+                if len(answer) > MAX_PROMPT_CHARS:
+                    answer = answer[:MAX_PROMPT_CHARS].rstrip()
+
+                output_chunks = _visible_chunk_list(final_candidates, 1600)
+                if cache_ready and dense_vec is not None:
+                    try:
+                        final_chunks_for_cache = []
+                        for idx, cand in enumerate(final_candidates, start=1):
+                            final_chunks_for_cache.append(candidate_to_public_chunk(cand, rank=idx, max_content_chars=1600))
+
+                        async def _cache_write():
+                            return await state.store.semantic_cache_upsert(
+                                cache_id=cache_id,
+                                query_vector=dense_vec,
+                                query_text=query,
+                                query_norm=query_norm,
+                                corpus_version=corpus_version,
+                                prompt_version=prompt_version,
+                                retrieval_version=retrieval_version,
+                                model_name=model_name,
+                                answer=answer,
+                                ui_chunks=final_chunks_for_cache,
+                                ttl_seconds=state.store.config.cache_ttl_seconds,
+                                hit_type="llm",
+                                cache_score=1.0,
+                            )
+
+                        write_start = time.perf_counter()
+                        await call_with_retry("cache", state.breakers["cache"], _cache_write)
+                        if _CACHE_WRITE_COUNT is not None:
+                            _CACHE_WRITE_COUNT.add(1, attributes=_metric_attrs(result="ok", cache_kind="llm"))
+                        if _CACHE_WRITE_LATENCY is not None:
+                            _CACHE_WRITE_LATENCY.record(max(time.perf_counter() - write_start, 1e-6), attributes=_metric_attrs(cache_kind="llm"))
+                    except Exception:
+                        if _CACHE_WRITE_COUNT is not None:
+                            _CACHE_WRITE_COUNT.add(1, attributes=_metric_attrs(result="fail", cache_kind="llm"))
+
+                span.set_status(Status(StatusCode.OK))
+                return PipelineResult(
+                    answer=answer,
+                    chunks=output_chunks,
+                    retrieval=retrieval,
+                    cache=_safe_cache_object(False, "miss" if cache_ready else "disabled", None, None),
+                    cache_hit=False,
+                    cache_score=None,
+                    retrieval_mode=retrieval_mode,
+                    hybrid_capable=_hybrid_capable(state),
+                    prompt=build_prompt_and_ui_chunks(docs_for_llm, query, max_content_chars=PROMPT_MAX_CONTENT_CHARS)[0],
+                    llm_lines=llm_lines,
+                    ui_chunks=ui_chunks,
+                    final_candidates=final_candidates,
+                    dense_vector=dense_vec,
+                    cache_id=cache_id,
+                    query_text=query,
+                    query_norm=query_norm,
+                    corpus_version=corpus_version,
+                    prompt_version=prompt_version,
+                    retrieval_version=retrieval_version,
+                    model_name=model_name,
+                    tenant_id=resolved_tenant,
+                )
+
+        except Exception as exc:
+            span_outcome = "error"
+            span.record_exception(exc)
+            span.set_status(Status(StatusCode.ERROR))
+            raise
+        finally:
+            if _PIPELINE_DURATION is not None:
+                _PIPELINE_DURATION.record(
+                    max(time.perf_counter() - start, 1e-6),
+                    attributes=_metric_attrs(outcome=span_outcome),
+                )
 
 
 async def _cache_cleanup_loop(state: ServiceState) -> None:
@@ -964,7 +1131,7 @@ async def _health_loop(state: ServiceState) -> None:
                 "ready": bool(state.store.docs_ready and (dense_ok or sparse_ok) and qdrant_ok),
             }
             state.health = snapshot
-            SERVICE_READY.labels(service=SERVICE_NAME, env=ENV).set(1 if snapshot["ready"] else 0)
+            _set_ready(snapshot["ready"])
             if snapshot != last_snapshot:
                 logger.debug("dependency health %s", snapshot)
                 last_snapshot = dict(snapshot)
@@ -982,7 +1149,7 @@ async def _health_loop(state: ServiceState) -> None:
                 "hybrid_capable": False,
                 "ready": False,
             }
-            SERVICE_READY.labels(service=SERVICE_NAME, env=ENV).set(0)
+            _set_ready(False)
             logger.warning("health loop failed: %s", e)
         await asyncio.sleep(10)
 
@@ -999,6 +1166,7 @@ __all__ = [
     "_safe_cache_object",
     "background_task",
     "cleanup_task",
+    "initialize_pipeline_metrics",
     "startup_bootstrap_error",
     "write_stream_cache",
 ]

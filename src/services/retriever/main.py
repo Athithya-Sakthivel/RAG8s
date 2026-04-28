@@ -6,22 +6,29 @@ import json
 import logging
 import os
 import time
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
+import settings as settings_module
 import uvicorn
 from clients import AsyncBedrockClient, AsyncDenseClient, AsyncRerankerClient, AsyncSparseClient
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from helpers import build_prompt_and_ui_chunks, deterministic_summarize, validate_and_filter_citations
+from opentelemetry import metrics, trace
+from opentelemetry.context import attach, detach
+from opentelemetry.propagate import extract
+from opentelemetry.trace import SpanKind, Status, StatusCode, get_current_span
 from pipeline import (
     ServiceState,
     _build_pipeline_result,
     _cache_cleanup_loop,
     _health_loop,
     _new_breakers,
+    initialize_pipeline_metrics,
     write_stream_cache,
 )
 from settings import (
@@ -32,13 +39,17 @@ from settings import (
     BEDROCK_MODEL_ID,
     CACHE_SCORE_THRESHOLD,
     CACHE_TTL_SECONDS,
+    CLUSTER_NAME,
     COLLECTION_NAME,
     CORPUS_VERSION,
     DENSE_URL,
+    DEPLOYMENT_ENVIRONMENT,
     ENV,
     HTTP_TIMEOUT,
+    INSTANCE_ID,
     LLM_MAX_TOKENS,
     LLM_TEMPERATURE,
+    LOG_LEVEL,
     MAX_CHUNKS_TO_LLM,
     MAX_CONCURRENT_REQUESTS,
     PROMPT_MAX_CONTENT_CHARS,
@@ -48,6 +59,7 @@ from settings import (
     RERANKER_URL,
     RETRIEVAL_VERSION,
     SERVICE_NAME,
+    SERVICE_VERSION,
     SPARSE_URL,
     GenerateRequest,
     GenerateResponse,
@@ -56,64 +68,197 @@ from settings import (
 )
 from starlette.background import BackgroundTask
 from store import QdrantStore, QdrantStoreConfig
-from telemetry import (
-    ERROR_COUNT,
-    REQUEST_COUNT,
-    REQUEST_LATENCY,
-    RETRIEVED_DOCS,
-    SERVICE_READY,
-    json_log,
-    metrics_response,
-    safe_stack,
-    setup_logging,
-)
+from telemetry import initialize_telemetry, json_log, safe_stack, setup_logging
 
 logger = logging.getLogger("retrieval")
 startup_bootstrap_error: str | None = None
 
+_HTTP_METRICS_INITIALIZED = False
+_HTTP_REQUEST_COUNT = None
+_HTTP_ERROR_COUNT = None
+_HTTP_DURATION = None
+_HTTP_ACTIVE_REQUESTS = None
+_RETRIEVED_DOCS = None
 
-class RequestMetricsMiddleware:
+
+def _tracer():
+    return trace.get_tracer("retriever.main")
+
+
+def _meter():
+    return metrics.get_meter("retriever.http")
+
+
+def _http_metric_attrs(**extra: Any) -> dict[str, Any]:
+    attrs = {
+        "service.name": SERVICE_NAME,
+        "deployment.environment": DEPLOYMENT_ENVIRONMENT,
+        "env": ENV,
+    }
+    attrs.update({k: v for k, v in extra.items() if v is not None})
+    return attrs
+
+
+def initialize_http_metrics() -> None:
+    global _HTTP_METRICS_INITIALIZED
+    global _HTTP_REQUEST_COUNT, _HTTP_ERROR_COUNT, _HTTP_DURATION, _HTTP_ACTIVE_REQUESTS, _RETRIEVED_DOCS
+
+    if _HTTP_METRICS_INITIALIZED:
+        return
+
+    meter = _meter()
+    _HTTP_REQUEST_COUNT = meter.create_counter(
+        name="http.server.request.count",
+        description="Total HTTP requests",
+        unit="1",
+    )
+    _HTTP_ERROR_COUNT = meter.create_counter(
+        name="http.server.errors",
+        description="Total failed HTTP requests",
+        unit="1",
+    )
+    _HTTP_DURATION = meter.create_histogram(
+        name="http.server.request.duration",
+        description="HTTP request latency",
+        unit="s",
+        explicit_bucket_boundaries_advisory=[0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10],
+    )
+    _HTTP_ACTIVE_REQUESTS = meter.create_up_down_counter(
+        name="http.server.active_requests",
+        description="Number of in-flight HTTP requests",
+        unit="1",
+    )
+    _RETRIEVED_DOCS = meter.create_histogram(
+        name="retrieval.docs.returned",
+        description="Returned documents per retrieval response",
+        unit="1",
+    )
+    _HTTP_METRICS_INITIALIZED = True
+
+
+def _record_docs_returned(operation: str, result: Any) -> None:
+    if _RETRIEVED_DOCS is None:
+        return
+    count = len(result.chunks or []) if hasattr(result, "chunks") else 0
+    _RETRIEVED_DOCS.record(
+        count,
+        attributes=_http_metric_attrs(
+            operation=operation,
+            retrieval_mode=getattr(result, "retrieval_mode", None),
+            cache_hit=getattr(result, "cache_hit", None),
+            hybrid_capable=getattr(result, "hybrid_capable", None),
+        ),
+    )
+
+
+class RequestTelemetryMiddleware:
     def __init__(self, app: Any):
         self.app = app
-        self.excluded_paths = {"/healthz", "/readyz", "/metrics"}
+        self.excluded_paths = {"/healthz", "/readyz"}
 
     async def __call__(self, scope, receive, send):
         if scope.get("type") != "http":
             await self.app(scope, receive, send)
             return
 
-        endpoint = scope.get("path") or ""
+        endpoint = scope.get("path") or "/"
         if endpoint in self.excluded_paths:
             await self.app(scope, receive, send)
             return
 
+        initialize_http_metrics()
+
+        method = (scope.get("method") or "GET").upper()
+        request_id = uuid.uuid4().hex
+        headers = {
+            (key.decode("latin-1") if isinstance(key, (bytes, bytearray)) else str(key)).lower(): (
+                value.decode("latin-1") if isinstance(value, (bytes, bytearray)) else str(value)
+            )
+            for key, value in (scope.get("headers") or [])
+        }
+        if headers.get("x-request-id"):
+            request_id = headers["x-request-id"].strip() or request_id
+
+        extracted = extract(headers)
+        token = attach(extracted)
         start = time.perf_counter()
         status_code = 500
         recorded = False
 
-        async def send_wrapper(message):
-            nonlocal status_code, recorded
-            if message["type"] == "http.response.start":
-                status_code = int(message["status"])
-            if message["type"] == "http.response.body" and not message.get("more_body", False) and not recorded:
-                elapsed = max(time.perf_counter() - start, 1e-6)
-                REQUEST_COUNT.labels(service=SERVICE_NAME, env=ENV, endpoint=endpoint, status_code=str(status_code)).inc()
-                REQUEST_LATENCY.labels(service=SERVICE_NAME, env=ENV, endpoint=endpoint, status_code=str(status_code)).observe(elapsed)
-                if status_code >= 500:
-                    ERROR_COUNT.labels(service=SERVICE_NAME, env=ENV, endpoint=endpoint, status_code=str(status_code)).inc()
-                recorded = True
-            await send(message)
+        attrs = _http_metric_attrs(route=endpoint, method=method)
+        if _HTTP_ACTIVE_REQUESTS is not None:
+            _HTTP_ACTIVE_REQUESTS.add(1, attributes=attrs)
+        if _HTTP_REQUEST_COUNT is not None:
+            _HTTP_REQUEST_COUNT.add(1, attributes=attrs)
 
-        try:
-            await self.app(scope, receive, send_wrapper)
-        except Exception:
-            if not recorded:
-                elapsed = max(time.perf_counter() - start, 1e-6)
-                REQUEST_COUNT.labels(service=SERVICE_NAME, env=ENV, endpoint=endpoint, status_code=str(status_code)).inc()
-                REQUEST_LATENCY.labels(service=SERVICE_NAME, env=ENV, endpoint=endpoint, status_code=str(status_code)).observe(elapsed)
-                if status_code >= 500:
-                    ERROR_COUNT.labels(service=SERVICE_NAME, env=ENV, endpoint=endpoint, status_code=str(status_code)).inc()
-            raise
+        tracer = _tracer()
+
+        with tracer.start_as_current_span(
+            f"{method} {endpoint}",
+            context=extracted,
+            kind=SpanKind.SERVER,
+        ) as span:
+            span.set_attribute("http.request.method", method)
+            span.set_attribute("http.route", endpoint)
+            span.set_attribute("url.path", endpoint)
+            span.set_attribute("http.request.id", request_id)
+            span.set_attribute("service.name", SERVICE_NAME)
+            span.set_attribute("service.version", SERVICE_VERSION)
+            span.set_attribute("deployment.environment", DEPLOYMENT_ENVIRONMENT)
+            span.set_attribute("k8s.cluster.name", CLUSTER_NAME)
+            span.set_attribute("service.instance.id", INSTANCE_ID)
+
+            async def send_wrapper(message):
+                nonlocal status_code, recorded
+                if message["type"] == "http.response.start":
+                    status_code = int(message["status"])
+                    headers_list = list(message.get("headers") or [])
+                    headers_list.append((b"x-request-id", request_id.encode("utf-8")))
+                    message = dict(message)
+                    message["headers"] = headers_list
+                    span.set_attribute("http.response.status_code", status_code)
+                elif message["type"] == "http.response.body" and not message.get("more_body", False) and not recorded:
+                    recorded = True
+                    elapsed = max(time.perf_counter() - start, 1e-6)
+                    if _HTTP_DURATION is not None:
+                        _HTTP_DURATION.record(
+                            elapsed,
+                            attributes=_http_metric_attrs(route=endpoint, method=method, status_code=status_code),
+                        )
+                    if status_code >= 500 and _HTTP_ERROR_COUNT is not None:
+                        _HTTP_ERROR_COUNT.add(
+                            1,
+                            attributes=_http_metric_attrs(route=endpoint, method=method, status_code=status_code),
+                        )
+                    if status_code >= 500:
+                        span.set_status(Status(StatusCode.ERROR))
+                await send(message)
+
+            try:
+                await self.app(scope, receive, send_wrapper)
+            except asyncio.CancelledError:
+                span.set_status(Status(StatusCode.ERROR))
+                raise
+            except Exception as exc:
+                span.record_exception(exc)
+                span.set_status(Status(StatusCode.ERROR))
+                raise
+            finally:
+                detach(token)
+                if not recorded:
+                    elapsed = max(time.perf_counter() - start, 1e-6)
+                    if _HTTP_DURATION is not None:
+                        _HTTP_DURATION.record(
+                            elapsed,
+                            attributes=_http_metric_attrs(route=endpoint, method=method, status_code=status_code),
+                        )
+                    if status_code >= 500 and _HTTP_ERROR_COUNT is not None:
+                        _HTTP_ERROR_COUNT.add(
+                            1,
+                            attributes=_http_metric_attrs(route=endpoint, method=method, status_code=status_code),
+                        )
+                if _HTTP_ACTIVE_REQUESTS is not None:
+                    _HTTP_ACTIVE_REQUESTS.add(-1, attributes=attrs)
 
 
 def _make_settings() -> dict[str, Any]:
@@ -150,7 +295,21 @@ def _build_bedrock_prompt(query: str, docs_for_llm: list[dict[str, Any]]) -> tup
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    setup_logging()
+    setup_logging(LOG_LEVEL)
+
+    try:
+        initialize_telemetry(settings_module)
+    except Exception as exc:
+        json_log(
+            "error",
+            "telemetry.initialize_failed",
+            "telemetry initialization failed",
+            error_type=type(exc).__name__,
+            error_message=str(exc),
+        )
+
+    initialize_http_metrics()
+    initialize_pipeline_metrics()
 
     settings = _make_settings()
     store = QdrantStore(
@@ -233,11 +392,15 @@ async def lifespan(app: FastAPI):
         except Exception:
             pass
 
-        SERVICE_READY.labels(service=SERVICE_NAME, env=ENV).set(0)
+        try:
+            if hasattr(app.state, "state"):
+                app.state.state.health["ready"] = False
+        except Exception:
+            pass
 
 
 app = FastAPI(lifespan=lifespan)
-app.add_middleware(RequestMetricsMiddleware)
+app.add_middleware(RequestTelemetryMiddleware)
 
 
 async def _generate_core(req: GenerateRequest) -> GenerateResponse:
@@ -246,22 +409,32 @@ async def _generate_core(req: GenerateRequest) -> GenerateResponse:
     if not query:
         raise HTTPException(status_code=400, detail="query required")
 
-    result = await _build_pipeline_result(
-        state,
-        query=query,
-        top_k=int(req.top_k),
-        fetch_k=int(req.fetch_k),
-        corpus_version=req.corpus_version or CORPUS_VERSION,
-        prompt_version=req.prompt_version or PROMPT_VERSION,
-        retrieval_version=req.retrieval_version or RETRIEVAL_VERSION,
-        model_name=req.model_name or BEDROCK_MODEL_ID,
-        tenant_id=req.tenant_id,
-        allow_semantic_cache=bool(req.allow_semantic_cache),
-        allow_rerank=True,
-        include_answer=True,
-        max_tokens=int(req.max_tokens or LLM_MAX_TOKENS),
-    )
-    RETRIEVED_DOCS.labels(service=SERVICE_NAME, env=ENV).observe(len(result.chunks or []))
+    with _tracer().start_as_current_span("generate") as span:
+        span.set_attribute("retrieval.operation", "generate")
+        span.set_attribute("retrieval.top_k", int(req.top_k))
+        span.set_attribute("retrieval.fetch_k", int(req.fetch_k))
+        span.set_attribute("retrieval.return_chunks", bool(req.return_chunks))
+        span.set_attribute("retrieval.allow_semantic_cache", bool(req.allow_semantic_cache))
+        span.set_attribute("retrieval.model_name", req.model_name or BEDROCK_MODEL_ID)
+
+        result = await _build_pipeline_result(
+            state,
+            query=query,
+            top_k=int(req.top_k),
+            fetch_k=int(req.fetch_k),
+            corpus_version=req.corpus_version or CORPUS_VERSION,
+            prompt_version=req.prompt_version or PROMPT_VERSION,
+            retrieval_version=req.retrieval_version or RETRIEVAL_VERSION,
+            model_name=req.model_name or BEDROCK_MODEL_ID,
+            tenant_id=req.tenant_id,
+            allow_semantic_cache=bool(req.allow_semantic_cache),
+            allow_rerank=True,
+            include_answer=True,
+            max_tokens=int(req.max_tokens or LLM_MAX_TOKENS),
+        )
+        _record_docs_returned("generate", result)
+        span.set_status(Status(StatusCode.OK))
+
     chunks = result.chunks if req.return_chunks else None
     return GenerateResponse(
         answer=result.answer or "",
@@ -281,22 +454,31 @@ async def _retrieve_core(req: RetrieveRequest) -> RetrieveResponse:
     if not query:
         raise HTTPException(status_code=400, detail="query required")
 
-    result = await _build_pipeline_result(
-        state,
-        query=query,
-        top_k=int(req.top_k),
-        fetch_k=int(req.fetch_k),
-        corpus_version=req.corpus_version or CORPUS_VERSION,
-        prompt_version=PROMPT_VERSION,
-        retrieval_version=req.retrieval_version or RETRIEVAL_VERSION,
-        model_name=BEDROCK_MODEL_ID,
-        tenant_id=req.tenant_id,
-        allow_semantic_cache=True,
-        allow_rerank=bool(req.rerank),
-        include_answer=False,
-        max_tokens=LLM_MAX_TOKENS,
-    )
-    RETRIEVED_DOCS.labels(service=SERVICE_NAME, env=ENV).observe(len(result.chunks or []))
+    with _tracer().start_as_current_span("retrieve") as span:
+        span.set_attribute("retrieval.operation", "retrieve")
+        span.set_attribute("retrieval.top_k", int(req.top_k))
+        span.set_attribute("retrieval.fetch_k", int(req.fetch_k))
+        span.set_attribute("retrieval.rerank", bool(req.rerank))
+        span.set_attribute("retrieval.model_name", BEDROCK_MODEL_ID)
+
+        result = await _build_pipeline_result(
+            state,
+            query=query,
+            top_k=int(req.top_k),
+            fetch_k=int(req.fetch_k),
+            corpus_version=req.corpus_version or CORPUS_VERSION,
+            prompt_version=PROMPT_VERSION,
+            retrieval_version=req.retrieval_version or RETRIEVAL_VERSION,
+            model_name=BEDROCK_MODEL_ID,
+            tenant_id=req.tenant_id,
+            allow_semantic_cache=True,
+            allow_rerank=bool(req.rerank),
+            include_answer=False,
+            max_tokens=LLM_MAX_TOKENS,
+        )
+        _record_docs_returned("retrieve", result)
+        span.set_status(Status(StatusCode.OK))
+
     return RetrieveResponse(
         query=query,
         chunks=result.chunks,
@@ -330,7 +512,7 @@ async def _stream_core(req: GenerateRequest, request: Request) -> StreamingRespo
         include_answer=False,
         max_tokens=int(req.max_tokens or LLM_MAX_TOKENS),
     )
-    RETRIEVED_DOCS.labels(service=SERVICE_NAME, env=ENV).observe(len(pipeline.chunks or []))
+    _record_docs_returned("stream", pipeline)
 
     cache_state: dict[str, Any] = {"answer": None, "chunks": None}
 
@@ -352,6 +534,7 @@ async def _stream_core(req: GenerateRequest, request: Request) -> StreamingRespo
             )
 
     async def event_gen() -> AsyncIterator[str]:
+        current_span = get_current_span()
         start_event = {
             "query": query,
             "retrieval": pipeline.retrieval,
@@ -434,6 +617,8 @@ async def _stream_core(req: GenerateRequest, request: Request) -> StreamingRespo
                 temperature=LLM_TEMPERATURE,
             ):
                 if await request.is_disconnected():
+                    if current_span is not None:
+                        current_span.add_event("request.client_disconnected")
                     return
                 if delta:
                     answer_parts.append(delta)
@@ -493,13 +678,34 @@ async def _stream_core(req: GenerateRequest, request: Request) -> StreamingRespo
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    json_log(
+        "warning",
+        "request.validation_failed",
+        "request validation failed",
+        error=str(exc),
+        endpoint=getattr(request.url, "path", str(request.url)),
+    )
     return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
     endpoint = getattr(request.url, "path", str(request.url))
-    json_log("error", "unhandled_exception", "unhandled exception", endpoint=endpoint, error=str(exc), stack=safe_stack(exc))
+    span = get_current_span()
+    if span is not None:
+        try:
+            span.record_exception(exc)
+            span.set_status(Status(StatusCode.ERROR))
+        except Exception:
+            pass
+    json_log(
+        "error",
+        "unhandled_exception",
+        "unhandled exception",
+        endpoint=endpoint,
+        error=str(exc),
+        stack=safe_stack(exc),
+    )
     return JSONResponse(status_code=500, content={"detail": "internal server error"})
 
 
@@ -543,15 +749,9 @@ async def readyz():
     }
 
 
-@app.get("/metrics")
-def metrics():
-    body, content_type = metrics_response()
-    return Response(body, media_type=content_type)
-
-
 if __name__ == "__main__":
     try:
-        setup_logging()
+        setup_logging(LOG_LEVEL)
     except Exception:
         logging.getLogger("retrieval").exception("failed to apply telemetry logging before uvicorn.run")
 

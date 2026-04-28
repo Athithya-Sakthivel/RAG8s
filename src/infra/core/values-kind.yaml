@@ -10,7 +10,7 @@ server:
     limits:
       cpu: "500m"
       memory: "512Mi"
-  # keep insecure true for local dev only; see Security Notes below
+  # keep insecure true if using service mesh
   configs:
     params:
       server.insecure: true
