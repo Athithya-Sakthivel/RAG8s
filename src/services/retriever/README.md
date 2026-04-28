@@ -321,3 +321,5 @@ A healthy request flow should produce:
 4. structured logs with trace correlation
 5. OTLP metrics at the collector
 6. SigNoz views that can pivot from a spike to the related trace and log line
+
+That is the intended observability design of the retriever service.
