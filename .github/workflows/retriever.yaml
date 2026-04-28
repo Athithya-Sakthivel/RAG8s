@@ -5,9 +5,11 @@ on:
     branches: [main]
     paths:
       - src/services/retriever/**
+      - .github/workflows/retriever.yaml
   pull_request:
     paths:
       - src/services/retriever/**
+      - .github/workflows/retriever.yaml
 
 permissions:
   contents: read
@@ -19,6 +21,7 @@ concurrency:
 env:
   TRIVY_IMAGE: ghcr.io/athithya-sakthivel/trivy:0.69.3-safe@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c
   TRIVY_CACHE_DIR: ${{ github.workspace }}/.trivy-cache
+  COLLECTOR_IMAGE: otel/opentelemetry-collector-contrib@sha256:a516c26968aa1feb5e5fc0562e3338ea13755cb4f373603226bcc4e276374ad0
 
 jobs:
   build-test-scan-push:
@@ -49,6 +52,7 @@ jobs:
       - name: Prepare Trivy cache
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p "${TRIVY_CACHE_DIR}"
 
       - name: Restore Trivy cache
@@ -91,15 +95,154 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=min
 
-      - name: Run smoke test
+      - name: Start isolated test network
         shell: bash
         run: |
           set -euo pipefail
-          cd src/services/retriever
-          chmod +x test_retriever.sh
-          IMAGE_REPO="${{ steps.image-meta.outputs.ghcr_user }}/${{ steps.image-meta.outputs.image_name }}" \
-          IMAGE_TAG="${{ steps.image-meta.outputs.image_tag }}" \
-          ./test_retriever.sh
+          docker network create retriever-otel-ci >/dev/null 2>&1 || true
+
+      - name: Start OTEL Collector
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cat >/tmp/retriever-collector.yaml <<'YAML'
+          receivers:
+            otlp:
+              protocols:
+                grpc:
+                http:
+
+          processors:
+            batch: {}
+
+          exporters:
+            debug:
+              verbosity: detailed
+
+          service:
+            pipelines:
+              traces:
+                receivers: [otlp]
+                processors: [batch]
+                exporters: [debug]
+              metrics:
+                receivers: [otlp]
+                processors: [batch]
+                exporters: [debug]
+              logs:
+                receivers: [otlp]
+                processors: [batch]
+                exporters: [debug]
+          YAML
+
+          docker run \
+            --name retriever-otel-collector \
+            -d \
+            --network retriever-otel-ci \
+            -v /tmp/retriever-collector.yaml:/etc/otelcol-contrib/config.yaml:ro \
+            "${COLLECTOR_IMAGE}" \
+            --config /etc/otelcol-contrib/config.yaml >/dev/null
+
+      - name: Start retriever container
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          docker run \
+            --name retriever-ci \
+            -d \
+            --network retriever-otel-ci \
+            -p 9023:8001 \
+            --shm-size=1g \
+            -e PORT=8001 \
+            -e LOG_LEVEL=INFO \
+            -e SERVICE_NAME=retrieval \
+            -e SERVICE_VERSION=ci \
+            -e ENV=CI \
+            -e DEPLOYMENT_ENVIRONMENT=CI \
+            -e CLUSTER_NAME=ci \
+            -e SERVICE_INSTANCE_ID=ci-1 \
+            -e OTEL_EXPORTER_OTLP_ENDPOINT=http://retriever-otel-collector:4317 \
+            -e OTEL_TIMEOUT_SECONDS=2 \
+            -e OTEL_METRIC_EXPORT_INTERVAL_MS=1000 \
+            -e OTEL_METRIC_EXPORT_TIMEOUT_MS=1000 \
+            -e OTEL_TRACES_SAMPLER=parentbased_traceidratio \
+            -e OTEL_TRACES_SAMPLER_ARG=1.0 \
+            -e ENABLE_OTEL_TRACES=true \
+            -e ENABLE_OTEL_METRICS=true \
+            -e ENABLE_OTEL_LOGS=true \
+            -e QDRANT_URL=http://127.0.0.1:65530 \
+            -e DENSE_URL=http://127.0.0.1:65531 \
+            -e SPARSE_URL=http://127.0.0.1:65532 \
+            -e RERANKER_URL=http://127.0.0.1:65533 \
+            -e AWS_REGION=us-east-1 \
+            -e BEDROCK_MODEL_ID=test-model \
+            "${{ steps.build-image.outputs.imageid }}" >/dev/null
+
+      - name: Wait for health endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 90); do
+            if curl -fsS --max-time 2 http://127.0.0.1:9023/healthz >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "[ERROR] retriever did not become healthy"
+          docker logs --tail 200 retriever-ci || true
+          docker logs --tail 200 retriever-otel-collector || true
+          exit 1
+
+      - name: Smoke test OTEL path
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          healthz="$(curl -fsS http://127.0.0.1:9023/healthz)"
+          readyz="$(curl -fsS http://127.0.0.1:9023/readyz || true)"
+
+          printf '%s' "${healthz}" | grep -q '"status":"ok"'
+          printf '%s' "${readyz}" | grep -q '"status"'
+
+          code="$(
+            curl -sS --max-time 10 \
+              -o /tmp/retriever-invalid.out \
+              -w '%{http_code}' \
+              -X POST http://127.0.0.1:9023/generate \
+              -H 'Content-Type: application/json' \
+              -d '{}' || true
+          )"
+
+          if [ "${code}" != "422" ]; then
+            cat /tmp/retriever-invalid.out || true
+            docker logs --tail 200 retriever-ci || true
+            docker logs --tail 200 retriever-otel-collector || true
+            exit 1
+          fi
+
+      - name: Flush and verify telemetry
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          docker stop -t 15 retriever-ci >/dev/null || true
+          sleep 2
+
+          app_logs="$(docker logs retriever-ci 2>&1 || true)"
+          collector_logs="$(docker logs retriever-otel-collector 2>&1 || true)"
+
+          printf '%s' "${app_logs}" | grep -q 'request.validation_failed'
+          printf '%s' "${app_logs}" | grep -q '"trace_id"'
+          printf '%s' "${app_logs}" | grep -q '"span_id"'
+
+          printf '%s' "${collector_logs}" | grep -Eq 'ResourceSpans|resourceSpans'
+          printf '%s' "${collector_logs}" | grep -Eq 'ResourceMetrics|resourceMetrics'
+          printf '%s' "${collector_logs}" | grep -Eq 'ResourceLogs|resourceLogs'
+          printf '%s' "${collector_logs}" | grep -q 'http.server.request.count'
+          printf '%s' "${collector_logs}" | grep -q 'http.server.request.duration'
+          printf '%s' "${collector_logs}" | grep -q 'retrieval.pipeline.duration'
 
       - name: Scan built image with Trivy (CI-level scan)
         shell: bash
