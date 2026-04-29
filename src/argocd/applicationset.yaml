@@ -9,27 +9,32 @@ spec:
         repoURL: https://github.com/Athithya-Sakthivel/E2E-RAG-System.git
         revision: main
         directories:
-          - path: src/manifests/*
+          - path: src/manifests/dense-service
+          - path: src/manifests/reranker-service
+          - path: src/manifests/retriever
+          - path: src/manifests/sparse-service
+
   template:
     metadata:
       name: '{{path.basename}}'
     spec:
       project: e2e-rag-system
+
       source:
         repoURL: https://github.com/Athithya-Sakthivel/E2E-RAG-System.git
         targetRevision: main
         path: '{{path}}'
+
       destination:
         server: https://kubernetes.default.svc
         namespace: '{{path.basename}}'
+
       syncPolicy:
         automated:
           prune: true
           selfHeal: true
+
         syncOptions:
           - CreateNamespace=true
-          - ApplyOutOfSyncOnly=true
           - PrunePropagationPolicy=foreground
           - PruneLast=true
-          - RespectIgnoreDifferences=true
-          - Replace=true

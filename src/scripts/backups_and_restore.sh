@@ -8,7 +8,7 @@ if [[ -z "$MODE" ]]; then
 fi
 
 PYTHON="${PYTHON:-python3}"
-BACKUP_RUNNER="${BACKUP_RUNNER:-infra/runners/run_qdrant_backup.py}"
+BACKUP_RUNNER="${BACKUP_RUNNER:-src/scripts/run_qdrant_backup.py}"
 RESTORE_RUNNER="${RESTORE_RUNNER:-src/scripts/qdrant_restore.py}"
 
 QDRANT_NAMESPACE="${QDRANT_NAMESPACE:-${NAMESPACE:-qdrant}}"

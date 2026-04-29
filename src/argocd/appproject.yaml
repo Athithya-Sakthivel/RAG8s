@@ -7,21 +7,26 @@ metadata:
     app.kubernetes.io/managed-by: argocd
     app.kubernetes.io/name: e2e-rag-system
   annotations:
-    description: "Project grouping all core services and Qdrant for the E2E RAG System"
+    description: "E2E RAG System project scope"
 spec:
-  description: >-
-    Project grouping all core services and Qdrant for the E2E RAG System.
-    Use this project to scope repositories, allowed destinations, and resource
-    access for Applications managed by Argo CD.
+  description: "Controlled project for E2E RAG system services"
+
   sourceRepos:
     - https://github.com/Athithya-Sakthivel/E2E-RAG-System.git
     - https://qdrant.github.io/qdrant-helm
+
   destinations:
-    - namespace: '*'
-      server: https://kubernetes.default.svc
-  clusterResourceWhitelist:
-    - group: '*'
-      kind: '*'
+    - server: https://kubernetes.default.svc
+      namespace: "*"
+
   namespaceResourceWhitelist:
-    - group: '*'
-      kind: '*'
+    - group: "*"
+      kind: "*"
+
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRole
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRoleBinding

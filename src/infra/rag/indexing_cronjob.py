@@ -1,7 +1,9 @@
-#!/usr/bin/env python3
+# python3 src/infra/rag/indexing_cronjob.py delete
+# python3 src/infra/rag/indexing_cronjob.py rollout
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -27,7 +29,7 @@ DEFAULTS: dict[str, str] = {
     "CRONJOB_FAILED_JOBS_HISTORY_LIMIT": "1",
     "CRONJOB_TIMEZONE": "",
     "SERVICE_ACCOUNT_NAME": "indexer-cron-sa",
-    "MANIFESTS_DIR": "src/manifests/indexing_cronjob",
+    "MANIFESTS_DIR": "src/manifests/indexing-cronjob",
     "INDEXING_PIPELINE_CPU_IMAGE_REPO": "ghcr.io/athithya-sakthivel/indexing-pipeline",
     "INDEXING_PIPELINE_CPU_IMAGE_TAG": "2026-04-26-08-49--9f1fd27@sha256:24500f496416950110c3f3b46469d236ee42b2d24ce2696a9799eddfd5612e40",
     "INDEXING_BACKUP_CRONJOB_CPU_REQUEST": "2",
@@ -310,7 +312,7 @@ def detect_mode(cfg: dict[str, str]) -> str:
     return "kind"
 
 
-def validate_cfg(cfg: dict[str, str]) -> None:
+def validate_rollout_cfg(cfg: dict[str, str]) -> None:
     missing: list[str] = []
     mode = detect_mode(cfg)
 
@@ -334,6 +336,11 @@ def validate_cfg(cfg: dict[str, str]) -> None:
     else:
         if not cfg.get("IRSA_ROLE_ARN"):
             fatal("EKS/IRSA mode requires IRSA_ROLE_ARN")
+
+
+def validate_delete_cfg(cfg: dict[str, str]) -> None:
+    if not cfg.get("NAMESPACE"):
+        fatal("missing required env vars: NAMESPACE")
 
 
 def secret_env_item(name: str, secret_name: str, secret_key: str | None = None) -> dict[str, Any]:
@@ -463,9 +470,7 @@ def build_cronjob_manifest(cfg: dict[str, str], mode: str) -> dict[str, Any]:
                             "serviceAccountName": cfg["SERVICE_ACCOUNT_NAME"],
                             "restartPolicy": "Never",
                             "securityContext": pod_security_context,
-                            "volumes": [
-                                {"name": "tmp", "emptyDir": {}},
-                            ],
+                            "volumes": [{"name": "tmp", "emptyDir": {}}],
                             "containers": [
                                 {
                                     "name": "indexer",
@@ -505,7 +510,16 @@ def build_cronjob_manifest(cfg: dict[str, str], mode: str) -> dict[str, Any]:
     return cronjob
 
 
-def write_manifests(manifests_dir: Path, docs: list[tuple[str, dict[str, Any]]]) -> list[Path]:
+def manifest_docs(cfg: dict[str, str], mode: str) -> list[tuple[str, dict[str, Any]]]:
+    return [
+        ("00-namespace.yaml", namespace_manifest(cfg["NAMESPACE"])),
+        ("10-serviceaccount.yaml", serviceaccount_manifest(cfg["NAMESPACE"], cfg["SERVICE_ACCOUNT_NAME"], mode, cfg["IRSA_ROLE_ARN"])),
+        ("50-cronjob.yaml", build_cronjob_manifest(cfg, mode)),
+    ]
+
+
+def write_manifests(manifests_dir: Path | str, docs: list[tuple[str, dict[str, Any]]]) -> list[Path]:
+    manifests_dir = Path(manifests_dir)
     manifests_dir.mkdir(parents=True, exist_ok=True)
     out: list[Path] = []
     for filename, doc in docs:
@@ -515,53 +529,117 @@ def write_manifests(manifests_dir: Path, docs: list[tuple[str, dict[str, Any]]])
     return out
 
 
-def apply_yaml(yaml_text: str, *, timeout: int = 60) -> None:
+def kubectl_apply_yaml(yaml_text: str, *, timeout: int = 60) -> None:
     rc, out, err = run_cmd(["kubectl", "apply", "-f", "-"], input_text=yaml_text, timeout=timeout)
     if rc != 0:
         fatal(err or out or "kubectl apply failed", 4)
 
 
-def apply_direct_secret(ns: str, name: str, data: dict[str, str], timeout: int = 30) -> None:
-    if not data:
-        return
-    apply_yaml(yaml_dump(secret_manifest(ns, name, data)), timeout=timeout)
+def namespace_phase(ns: str) -> str | None:
+    rc, out, _ = run_cmd(["kubectl", "get", "namespace", ns, "-o", "json"], timeout=20)
+    if rc != 0:
+        return None
+    try:
+        data = json.loads(out)
+    except Exception:
+        return None
+    return str(data.get("status", {}).get("phase", "") or "")
 
 
-def wait_for_namespace(ns: str, timeout: int = 30) -> None:
+def wait_for_namespace_absent(ns: str, timeout: int = 60) -> None:
     start = time.monotonic()
     while True:
-        rc, _, _ = run_cmd(["kubectl", "get", "namespace", ns], timeout=10)
-        if rc == 0:
+        phase = namespace_phase(ns)
+        if phase is None:
             return
         if time.monotonic() - start >= timeout:
-            fatal(f"namespace '{ns}' was not observable after creation", 5)
+            fatal(f"namespace '{ns}' was not removed in time", 5)
         time.sleep(1)
 
 
-def render_and_apply(cfg: dict[str, str], dry_run: bool) -> None:
+def wait_for_namespace_active(ns: str, timeout: int = 60) -> None:
+    start = time.monotonic()
+    while True:
+        phase = namespace_phase(ns)
+        if phase == "Active":
+            return
+        if phase == "Terminating":
+            if time.monotonic() - start >= timeout:
+                fatal(f"namespace '{ns}' stayed in Terminating state", 5)
+        elif phase is None:
+            if time.monotonic() - start >= timeout:
+                fatal(f"namespace '{ns}' was not created in time", 5)
+        if time.monotonic() - start >= timeout:
+            fatal(f"namespace '{ns}' was not ready after creation", 5)
+        time.sleep(1)
+
+
+def force_finalize_namespace(ns: str) -> None:
+    rc, out, _err = run_cmd(["kubectl", "get", "namespace", ns, "-o", "json"], timeout=20)
+    if rc != 0:
+        return
+    try:
+        data = json.loads(out)
+    except Exception as exc:
+        fatal(f"failed to parse namespace json for '{ns}': {exc}", 5)
+
+    data.setdefault("spec", {})
+    data["spec"]["finalizers"] = []
+
+    rc, out2, err2 = run_cmd(
+        ["kubectl", "replace", "--raw", f"/api/v1/namespaces/{ns}/finalize", "-f", "-"],
+        input_text=json.dumps(data),
+        timeout=30,
+    )
+    if rc != 0:
+        fatal(err2 or out2 or f"failed to force finalize namespace '{ns}'", 5)
+
+
+def ensure_namespace_ready(ns: str) -> None:
+    phase = namespace_phase(ns)
+
+    if phase == "Terminating":
+        force_finalize_namespace(ns)
+        wait_for_namespace_absent(ns, timeout=30)
+        phase = None
+
+    if phase is None:
+        kubectl_apply_yaml(yaml_dump(namespace_manifest(ns)), timeout=20)
+        wait_for_namespace_active(ns, timeout=30)
+        return
+
+    if phase == "Active":
+        kubectl_apply_yaml(yaml_dump(namespace_manifest(ns)), timeout=20)
+        wait_for_namespace_active(ns, timeout=30)
+        return
+
+    fatal(f"namespace '{ns}' is in unexpected phase '{phase}'", 5)
+
+
+def apply_secret(ns: str, name: str, data: dict[str, str]) -> None:
+    if not data:
+        return
+    kubectl_apply_yaml(yaml_dump(secret_manifest(ns, name, data)), timeout=30)
+
+
+def rollout(cfg: dict[str, str]) -> None:
     ensure_kubectl_available()
+    validate_rollout_cfg(cfg)
+
     mode = detect_mode(cfg)
-    manifests_dir = "src/manifests/indexing-cronjob"
+    manifests_dir = Path(cfg["MANIFESTS_DIR"])
 
-    docs: list[tuple[str, dict[str, Any]]] = [
-        ("00-namespace.yaml", namespace_manifest(cfg["NAMESPACE"])),
-        ("10-serviceaccount.yaml", serviceaccount_manifest(cfg["NAMESPACE"], cfg["SERVICE_ACCOUNT_NAME"], mode, cfg["IRSA_ROLE_ARN"])),
-        ("50-cronjob.yaml", build_cronjob_manifest(cfg, mode)),
-    ]
-
+    docs = manifest_docs(cfg, mode)
     rendered_files = write_manifests(manifests_dir, docs)
+
     log(f"Rendered manifests to {manifests_dir}")
     for p in rendered_files:
         log(str(p))
 
-    if dry_run:
-        return
-
-    apply_yaml(yaml_dump(namespace_manifest(cfg["NAMESPACE"])), timeout=20)
-    wait_for_namespace(cfg["NAMESPACE"], timeout=30)
+    ensure_namespace_ready(cfg["NAMESPACE"])
 
     if cfg.get("QDRANT_API_KEY"):
-        apply_direct_secret(cfg["NAMESPACE"], cfg["QDRANT_SECRET_NAME"], {"QDRANT_API_KEY": cfg["QDRANT_API_KEY"]})
+        apply_secret(cfg["NAMESPACE"], cfg["QDRANT_SECRET_NAME"], {"QDRANT_API_KEY": cfg["QDRANT_API_KEY"]})
 
     if mode == "kind":
         aws_data: dict[str, str] = {}
@@ -571,41 +649,94 @@ def render_and_apply(cfg: dict[str, str], dry_run: bool) -> None:
             aws_data["AWS_SECRET_ACCESS_KEY"] = os.environ["AWS_SECRET_ACCESS_KEY"]
         if os.environ.get("AWS_SESSION_TOKEN"):
             aws_data["AWS_SESSION_TOKEN"] = os.environ["AWS_SESSION_TOKEN"]
-        apply_direct_secret(cfg["NAMESPACE"], cfg["AWS_CREDENTIALS_SECRET_NAME"], aws_data)
+        apply_secret(cfg["NAMESPACE"], cfg["AWS_CREDENTIALS_SECRET_NAME"], aws_data)
 
-    apply_yaml(
-        "\n---\n".join(
-            yaml_dump(doc)
-            for doc in (
-                serviceaccount_manifest(cfg["NAMESPACE"], cfg["SERVICE_ACCOUNT_NAME"], mode, cfg["IRSA_ROLE_ARN"]),
-                build_cronjob_manifest(cfg, mode),
-            )
-        ),
+    kubectl_apply_yaml(
+        "\n---\n".join(yaml_dump(doc) for _, doc in docs[1:]),
+        timeout=120,
+    )
+    log("Rollout completed successfully")
+
+
+def delete_managed_resources(ns: str) -> None:
+    run_cmd(
+        [
+            "kubectl",
+            "delete",
+            "-n",
+            ns,
+            "--ignore-not-found",
+            "--wait=false",
+            "cronjob",
+            DEFAULTS["CRONJOB_NAME"],
+            "serviceaccount",
+            DEFAULTS["SERVICE_ACCOUNT_NAME"],
+            "secret",
+            DEFAULTS["QDRANT_SECRET_NAME"],
+            "secret",
+            DEFAULTS["AWS_CREDENTIALS_SECRET_NAME"],
+        ],
         timeout=60,
     )
-    log("Applied manifests successfully")
+
+
+def delete(cfg: dict[str, str]) -> None:
+    ensure_kubectl_available()
+    validate_delete_cfg(cfg)
+
+    ns = cfg["NAMESPACE"]
+    phase = namespace_phase(ns)
+
+    if phase == "Terminating":
+        force_finalize_namespace(ns)
+        wait_for_namespace_absent(ns, timeout=60)
+        log(f"Deleted namespace '{ns}'")
+        return
+
+    if phase is None:
+        log(f"Namespace '{ns}' is already absent")
+        return
+
+    delete_managed_resources(ns)
+
+    run_cmd(["kubectl", "delete", "namespace", ns, "--ignore-not-found", "--wait=false"], timeout=30)
+    start = time.monotonic()
+    while True:
+        phase = namespace_phase(ns)
+        if phase is None:
+            log(f"Deleted namespace '{ns}' and managed resources")
+            return
+        if phase == "Terminating":
+            force_finalize_namespace(ns)
+        if time.monotonic() - start >= 60:
+            force_finalize_namespace(ns)
+            wait_for_namespace_absent(ns, timeout=30)
+            log(f"Deleted namespace '{ns}' and managed resources")
+            return
+        time.sleep(1)
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Render and optionally apply Kubernetes manifests for the indexing cronjob."
-    )
-    parser.add_argument("--dry-run", action="store_true", help="Render manifests to disk but do not apply them.")
-    parser.add_argument("--manifests-dir", type=str, default="", help="Override output manifests directory.")
-    parser.add_argument("--validate-only", action="store_true", help="Validate configuration and exit.")
+    parser = argparse.ArgumentParser(description="Manage the indexing cronjob.")
+    sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("rollout", help="Render manifests, apply secrets directly, and reconcile the workload.")
+    sub.add_parser("delete", help="Delete all managed resources and force-remove the namespace if needed.")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str]) -> None:
     args = parse_args(argv)
     cfg = build_cfg()
-    if args.manifests_dir:
-        cfg["MANIFESTS_DIR"] = args.manifests_dir
-    validate_cfg(cfg)
-    if args.validate_only:
-        log("Configuration validated successfully.")
+
+    if args.command == "rollout":
+        rollout(cfg)
         return
-    render_and_apply(cfg, dry_run=args.dry_run)
+
+    if args.command == "delete":
+        delete(cfg)
+        return
+
+    fatal(f"unknown command: {args.command}")
 
 
 if __name__ == "__main__":
@@ -615,3 +746,5 @@ if __name__ == "__main__":
         raise
     except Exception as exc:
         fatal(f"Unhandled error: {exc}", 99)
+
+

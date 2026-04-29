@@ -1,3 +1,7 @@
 # indexing cronjob
-CVE-2023-45853 # Ignore zlib false positive (Debian marks CVE-2023-45853 as will_not_fix)
+CVE-2023-45853 # Ignore zlib false positive (Debian marks CVE-2023-45853 as `will_not_fix`)
 CVE-2025-7458 # does not process untrusted SQL. CronJob is internal, the attack surface is limited.
+
+# False positive: `LLM_MAX_TOKENS` is a non-sensitive numeric config, not a secret; suppressing KSV-0109 for this ConfigMap.
+KSV-0109:src/manifests/retriever/02-configmap-retriever.yaml
+KSV-0109:src/manifests/retriever/.state/rendered.yaml

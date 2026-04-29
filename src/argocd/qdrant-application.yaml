@@ -7,7 +7,7 @@ metadata:
     app.kubernetes.io/name: qdrant
     app.kubernetes.io/managed-by: argocd
   annotations:
-    description: "Qdrant Helm chart deployment for E2E RAG System"
+    description: Qdrant Helm deployment
 spec:
   project: e2e-rag-system
   source:
@@ -15,8 +15,49 @@ spec:
     chart: qdrant
     targetRevision: v1.17.1
     helm:
-      valueFiles:
-        - src/helm/qdrant/values.yaml
+      values: |
+        replicaCount: 1
+        image:
+          repository: docker.io/qdrant/qdrant
+          tag: v1.17.1
+          pullPolicy: IfNotPresent
+        service:
+          type: ClusterIP
+        persistence:
+          enabled: true
+          size: 20Gi
+          accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            cpu: '1'
+            memory: 2Gi
+          limits:
+            cpu: '1'
+            memory: 2Gi
+        config:
+          cluster:
+            enabled: true
+            p2p:
+              port: 6335
+              enable_tls: false
+            consensus:
+              tick_period_ms: 100
+          service:
+            enable_tls: false
+          log_level: INFO
+          on_disk_payload: false
+        updateVolumeFsOwnership: true
+        podManagementPolicy: Parallel
+        lifecycle:
+          preStop:
+            exec:
+              command:
+              - sleep
+              - '3'
+        podAnnotations:
+          app.kubernetes.io/managed-by: argocd
+          qdrant.argoproj.io/config-checksum: a2db7b7344a558d8db621b7eaf8bfbdf4f45fd04ae27bd7833d3729da18ead88
   destination:
     server: https://kubernetes.default.svc
     namespace: qdrant
@@ -25,24 +66,21 @@ spec:
       prune: true
       selfHeal: true
     syncOptions:
-      - CreateNamespace=true
-      - ApplyOutOfSyncOnly=true
-      - PrunePropagationPolicy=foreground
-      - PruneLast=true
-      - RespectIgnoreDifferences=true
-      - Replace=true
+    - CreateNamespace=true
+    - PrunePropagationPolicy=foreground
+    - PruneLast=true
     retry:
-      limit: 5
+      limit: 3
       backoff:
-        duration: 5s
+        duration: 10s
         factor: 2
         maxDuration: 3m
   ignoreDifferences:
-    - group: apiextensions.k8s.io
-      kind: CustomResourceDefinition
-      jsonPointers:
-        - /spec/versions
-    - group: ""
-      kind: ConfigMap
-      jsonPointers:
-        - /data
+  - group: apiextensions.k8s.io
+    kind: CustomResourceDefinition
+    jsonPointers:
+    - /spec/versions
+  - group: ''
+    kind: ConfigMap
+    jsonPointers:
+    - /data

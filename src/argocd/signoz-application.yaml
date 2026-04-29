@@ -1,0 +1,80 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: signoz
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: signoz
+    app.kubernetes.io/managed-by: argocd
+  annotations:
+    description: SigNoz Helm deployment
+    signoz.argoproj.io/environment: prod
+spec:
+  project: e2e-rag-system
+  source:
+    repoURL: https://charts.signoz.io
+    chart: signoz/signoz
+    targetRevision: 0.118.0
+    helm:
+      values: |
+        global:
+          storageClass: default-storage-class
+          clusterDomain: cluster.local
+          clusterName: production-cluster
+          cloud: aws
+          configChecksum: 13f6ae7439e8e518ce92d68274e987907e432121834f84c486567dbb7e46a073
+        clusterName: production-cluster
+        clickhouse:
+          enabled: false
+        externalClickhouse:
+          host: my-clickhouse.default.svc.cluster.local
+          user: admin
+          existingSecret: signoz-clickhouse-auth
+          existingSecretPasswordKey: password
+        signoz:
+          name: signoz
+          replicaCount: 1
+          env:
+            signoz_telemetrystore_provider: clickhouse
+            signoz_include_only_log_namespaces: inference
+          podSecurityContext:
+            fsGroup: 1000
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          persistence:
+            enabled: true
+            existingClaim: ''
+            storageClass: default-storage-class
+            accessModes:
+            - ReadWriteOnce
+            size: 1Gi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: signoz
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+    - PrunePropagationPolicy=foreground
+    - PruneLast=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
