@@ -20,7 +20,7 @@ except Exception as exc:  # pragma: no cover
 
 
 DEFAULT_OUTPUT = Path("src/argocd/qdrant-application.yaml")
-DEFAULT_VALUES_OUTPUT = Path("src/argocd/qdrant-values.yaml")
+DEFAULT_VALUES_OUTPUT = Path("src/scripts/archive/qdrant-values.yaml")
 
 DEFAULT_APP_NAME = "qdrant"
 DEFAULT_APP_NAMESPACE = "argocd"

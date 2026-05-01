@@ -93,8 +93,6 @@ curl -N http://localhost:8203/generate/stream \
 
 
 
-
-rm -rf src/argocd
 rm -rf src/manifests/dense-service src/manifests/sparse-service src/manifests/retriever src/manifests/reranker-service
 make local-cluster
 python3 src/infra/rag/qdrant_service.py --rollout
@@ -109,7 +107,7 @@ python3 src/infra/rag/retriever_service.py --write
 python3 src/infra/rag/reranker_service.py --write
 python3 src/infra/rag/sparse_service.py --generate
 python3 src/infra/rag/dense_service.py --dry-run
-git add . && git commit -m "argocd sync" && git push origin main
+git add . && git commit -m "argocd full sync" && git push origin main
 bash src/infra/core/argo_setup.sh --rollout
 
 # kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d

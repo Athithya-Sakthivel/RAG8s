@@ -1,0 +1,42 @@
+replicaCount: 1
+image:
+  repository: docker.io/qdrant/qdrant
+  tag: v1.17.1
+  pullPolicy: IfNotPresent
+service:
+  type: ClusterIP
+persistence:
+  enabled: true
+  size: 20Gi
+  accessModes:
+  - ReadWriteOnce
+resources:
+  requests:
+    cpu: '1'
+    memory: 2Gi
+  limits:
+    cpu: '1'
+    memory: 2Gi
+config:
+  cluster:
+    enabled: true
+    p2p:
+      port: 6335
+      enable_tls: false
+    consensus:
+      tick_period_ms: 100
+  service:
+    enable_tls: false
+  log_level: INFO
+  on_disk_payload: false
+updateVolumeFsOwnership: true
+podManagementPolicy: Parallel
+lifecycle:
+  preStop:
+    exec:
+      command:
+      - sleep
+      - '3'
+podAnnotations:
+  app.kubernetes.io/managed-by: argocd
+  qdrant.argoproj.io/config-checksum: a2db7b7344a558d8db621b7eaf8bfbdf4f45fd04ae27bd7833d3729da18ead88
