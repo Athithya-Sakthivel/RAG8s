@@ -95,3 +95,4 @@ curl -N http://localhost:8203/generate/stream \
 git add . && git commit -m "nginx security fixes" && git push origin main
 
 make core
+bash src/infra/core/argo_setup.sh --rollout

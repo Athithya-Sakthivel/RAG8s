@@ -1,21 +1,19 @@
-FROM nginxinc/nginx-unprivileged:1.30.0-alpine@sha256:35a4455cd4153d7cd0ae1fcfa42451884ef19848202606f144d9a089376c7e6c
+# src/frontend/Dockerfile
+FROM nginxinc/nginx-unprivileged:1.30.0-alpine
 
 # remove default config + create required writable dirs (do not chown /tmp itself)
 RUN rm -f /etc/nginx/conf.d/default.conf \
- && mkdir -p /tmp/nginx /tmp/client_body /tmp/proxy /tmp/fastcgi /tmp/uwsgi /tmp/scgi \
- && chown -R nginx:nginx /tmp/nginx /tmp/client_body /tmp/proxy /tmp/fastcgi /tmp/uwsgi /tmp/scgi
+ && mkdir -p /tmp/nginx /tmp/client_body /tmp/proxy /tmp/fastcgi /tmp/uwsgi /tmp/scgi
 
-# static files
-COPY nginx.conf /etc/nginx/nginx.conf
-COPY index.html /usr/share/nginx/html/index.html
-COPY assets /usr/share/nginx/html/assets
+# copy nginx.conf and static files, set ownership at copy time to avoid chown errors
+COPY --chown=nginx:nginx nginx.conf /etc/nginx/nginx.conf
+COPY --chown=nginx:nginx index.html /usr/share/nginx/html/index.html
+COPY --chown=nginx:nginx assets /usr/share/nginx/html/assets
 
-# ensure runtime files are owned by the non-root nginx user
-RUN chown -R nginx:nginx /usr/share/nginx/html /etc/nginx
-
+# expose the unprivileged port used by the image
 EXPOSE 8080
 
-# required to avoid false positive security scans
+# run as the non-root nginx user provided by the base image
 USER nginx
 
 CMD ["nginx", "-g", "daemon off;"]
