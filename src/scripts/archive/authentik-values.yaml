@@ -1,0 +1,53 @@
+global:
+  envFrom:
+  - secretRef:
+      name: authentik-env
+  env:
+  - name: AUTHENTIK_HOST
+    value: https://auth.athithya.site
+  - name: AUTHENTIK_HOST_BROWSER
+    value: https://auth.athithya.site
+  - name: AUTHENTIK_COOKIE_DOMAIN
+    value: .athithya.site
+  - name: AUTHENTIK_POSTGRESQL__HOST
+    value: authentik-postgresql
+  - name: AUTHENTIK_POSTGRESQL__PORT
+    value: '5432'
+  - name: AUTHENTIK_POSTGRESQL__USER
+    value: authentik
+  - name: AUTHENTIK_POSTGRESQL__NAME
+    value: authentik
+  podAnnotations:
+    authentik.argoproj.io/config-checksum: 6e7302a8a7b39dff7b8e39b32d8eca3822db700a8631c9226fc3abbabedad547
+authentik:
+  enabled: true
+  secret_key: env://AUTHENTIK_SECRET_KEY
+  error_reporting:
+    enabled: false
+  log_level: info
+  postgresql:
+    host: authentik-postgresql
+    user: authentik
+    name: authentik
+    port: 5432
+    password: env://AUTHENTIK_POSTGRESQL__PASSWORD
+  web:
+    path: /
+server:
+  enabled: true
+  ingress:
+    enabled: false
+worker:
+  enabled: true
+blueprints:
+  secrets:
+  - name: authentik-blueprints
+postgresql:
+  enabled: true
+  auth:
+    username: authentik
+    database: authentik
+    existingSecret: authentik-postgresql-auth
+    secretKeys:
+      adminPasswordKey: postgres-password
+      userPasswordKey: password

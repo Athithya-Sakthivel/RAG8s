@@ -13,7 +13,7 @@ COPY --chown=nginx:nginx assets /usr/share/nginx/html/assets
 
 EXPOSE 8080
 
-# run as the non-root nginx user provided by the base image
+# Explicitly set nginx user to avoid false positives in security scans
 USER nginx
 
 CMD ["nginx", "-g", "daemon off;"]

@@ -107,6 +107,7 @@ python3 src/infra/rag/retriever_service.py --write
 python3 src/infra/rag/reranker_service.py --write
 python3 src/infra/rag/sparse_service.py --generate
 python3 src/infra/rag/dense_service.py --dry-run
+find src/manifests -name "00-namespace.yaml" -delete
 git add . && git commit -m "argocd full sync" && git push origin main
 bash src/infra/core/argo_setup.sh --rollout
 
