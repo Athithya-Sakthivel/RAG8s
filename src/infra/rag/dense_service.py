@@ -312,7 +312,6 @@ def render_rolebinding(cfg: dict[str, Any]) -> str:
     }
     return yaml.safe_dump(rb, sort_keys=False)
 
-
 def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> str:
     labels = cfg["LABELS"].copy()
     container: dict[str, Any] = {
@@ -383,7 +382,7 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
                 "rollingUpdate": {"maxUnavailable": cfg["MAX_UNAVAILABLE"], "maxSurge": cfg["MAX_SURGE"]},
             },
             "template": {
-                "metadata": {"labels": labels, "annotations": {}},
+                "metadata": {"labels": labels},
                 "spec": {
                     "serviceAccountName": cfg["SA_NAME"],
                     "containers": [container],
@@ -403,8 +402,7 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
     if pod_sec:
         deployment["spec"]["template"]["spec"]["securityContext"] = pod_sec
 
-    if inputs_hash:
-        deployment["spec"]["template"]["metadata"]["annotations"]["gen-dense/inputs-hash"] = inputs_hash
+    # NOTE: annotations removed intentionally (no gen-dense/inputs-hash, no prometheus.*)
 
     if cfg["ENABLE_GPU"] and cfg["GPU_NODE_SELECTOR"]:
         if "=" in cfg["GPU_NODE_SELECTOR"]:
@@ -413,15 +411,7 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
         else:
             deployment["spec"]["template"]["spec"]["nodeSelector"] = {cfg["GPU_NODE_SELECTOR"]: "true"}
 
-    deployment["spec"]["template"]["metadata"].setdefault("annotations", {})
-    deployment["spec"]["template"]["metadata"]["annotations"].update(
-        {
-            "prometheus.io/scrape": "true",
-            "prometheus.io/port": str(cfg["CONTAINER_PORT"]),
-            "prometheus.io/path": "/metrics",
-        }
-    )
-
+    # Ensure volume mounts and volumes remain intact when READONLY_ROOTFS is enabled
     if cfg.get("READONLY_ROOTFS", True):
         tmp_mounts = [
             {"name": "tmp-writable", "mountPath": "/tmp"},

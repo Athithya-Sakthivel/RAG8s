@@ -1,25 +1,24 @@
+#!/usr/bin/env python3
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
+import logging
 import os
 import subprocess
 import sys
-import tempfile
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import yaml
 
+logging.basicConfig(level=os.getenv("RETRIEVER_LOGLEVEL", "INFO"), format="%(asctime)s %(levelname)s %(message)s")
+log = logging.getLogger("retriever-gen")
+
 MANIFEST_DIR = Path("src/manifests/retriever")
 STATE_DIR = MANIFEST_DIR / ".state"
-RENDERED_PATH = STATE_DIR / "rendered.yaml"
-HASH_PATH = STATE_DIR / "rendered.sha256"
-
-SUPPORTED_CLUSTERS = {"kind", "eks"}
 
 DEPLOYMENT_DEFAULTS: dict[str, str] = {
     "NAMESPACE": "inference",
@@ -96,7 +95,6 @@ APP_ENV_DEFAULTS: dict[str, str] = {
     "RETRY_MAX_DELAY": "0.8",
     "BREAKER_FAILURE_THRESHOLD": "3",
     "BREAKER_RESET_TIMEOUT": "20.0",
-#   "OTEL_EXPORTER_OTLP_ENDPOINT": "http://signoz-otel-collector.signoz.svc.cluster.local:4317",
     "OTEL_TIMEOUT_SECONDS": "5.0",
     "OTEL_METRIC_EXPORT_INTERVAL_MS": "15000",
     "OTEL_METRIC_EXPORT_TIMEOUT_MS": "10000",
@@ -120,75 +118,7 @@ APP_ENV_DEFAULTS: dict[str, str] = {
 
 APP_ENV_ORDER = list(APP_ENV_DEFAULTS.keys())
 
-
-def log(level: str, event: str, message: str, **fields: Any) -> None:
-    ts = datetime.now(UTC).isoformat(timespec="seconds")
-    payload = [f"ts={ts}", f"level={level.upper()}", f"event={event}", f"message={message}"]
-    for key, value in fields.items():
-        payload.append(f"{key}={value}")
-    print(" ".join(payload), file=sys.stderr)
-
-
-@dataclass(frozen=True, slots=True)
-class DeploymentSettings:
-    cluster: str
-    namespace: str
-    deployment_name: str
-    service_name: str
-    service_account_name: str
-    secret_name: str
-    image: str
-    image_pull_policy: str
-    replicas: int
-    container_port: int
-    cpu_request: str
-    cpu_limit: str
-    memory_request: str
-    memory_limit: str
-    run_as_user: int
-    run_as_group: int
-    fs_group: int
-    service_type: str
-    use_iam: bool
-    irsa_role_arn: str | None
-
-    def __post_init__(self) -> None:
-        if self.cluster not in SUPPORTED_CLUSTERS:
-            raise RuntimeError(f"K8S_CLUSTER must be one of {sorted(SUPPORTED_CLUSTERS)}, got {self.cluster!r}")
-        if not self.namespace.strip():
-            raise RuntimeError("NAMESPACE must not be empty")
-        if not self.deployment_name.strip():
-            raise RuntimeError("DEPLOYMENT_NAME must not be empty")
-        if not self.service_name.strip():
-            raise RuntimeError("SERVICE_NAME must not be empty")
-        if not self.service_account_name.strip():
-            raise RuntimeError("SERVICE_ACCOUNT_NAME must not be empty")
-        if not self.secret_name.strip():
-            raise RuntimeError("SECRET_NAME must not be empty")
-        if not self.image.strip():
-            raise RuntimeError("IMAGE must not be empty")
-        if self.replicas < 1:
-            raise RuntimeError("REPLICAS must be >= 1")
-        if self.container_port < 1:
-            raise RuntimeError("CONTAINER_PORT must be >= 1")
-        if not self.cpu_request.strip():
-            raise RuntimeError("CPU_REQUEST must not be empty")
-        if not self.cpu_limit.strip():
-            raise RuntimeError("CPU_LIMIT must not be empty")
-        if not self.memory_request.strip():
-            raise RuntimeError("MEMORY_REQUEST must not be empty")
-        if not self.memory_limit.strip():
-            raise RuntimeError("MEMORY_LIMIT must not be empty")
-        if self.run_as_user < 1:
-            raise RuntimeError("RUN_AS_USER must be >= 1")
-        if self.run_as_group < 1:
-            raise RuntimeError("RUN_AS_GROUP must be >= 1")
-        if self.fs_group < 1:
-            raise RuntimeError("FS_GROUP must be >= 1")
-        if self.cluster == "kind" and self.use_iam:
-            raise RuntimeError("USE_IAM=true is not supported for K8S_CLUSTER=kind")
-        if self.cluster == "eks" and self.use_iam and not self.irsa_role_arn:
-            raise RuntimeError("IRSA_ROLE_ARN is required when K8S_CLUSTER=eks and USE_IAM=true")
+SUPPORTED_CLUSTERS = {"kind", "eks"}
 
 
 def _env_str(name: str, default: str) -> str:
@@ -222,20 +152,73 @@ def _require_nonempty(value: str | None, message: str) -> str:
     return value.strip()
 
 
-def _cluster() -> str:
-    raw = os.getenv("K8S_CLUSTER", "kind").strip().lower()
-    if raw not in SUPPORTED_CLUSTERS:
-        raise RuntimeError(f"K8S_CLUSTER must be one of {sorted(SUPPORTED_CLUSTERS)}, got {raw!r}")
-    return raw
+@dataclass(frozen=True, slots=True)
+class DeploymentSettings:
+    cluster: str
+    namespace: str
+    deployment_name: str
+    service_name: str
+    service_account_name: str
+    secret_name: str
+    image: str
+    image_pull_policy: str
+    replicas: int
+    container_port: int
+    cpu_request: str
+    cpu_limit: str
+    memory_request: str
+    memory_limit: str
+    run_as_user: int
+    run_as_group: int
+    fs_group: int
+    service_type: str
+    use_iam: bool
+    irsa_role_arn: str | None
 
-
-def _default_use_iam(cluster: str) -> bool:
-    return cluster == "eks"
+    def __post_init__(self) -> None:
+        if self.cluster not in SUPPORTED_CLUSTERS:
+            raise RuntimeError(f"K8S_CLUSTER must be one of {sorted(SUPPORTED_CLUSTERS)}, got {self.cluster!r}")
+        if not self.namespace.strip():
+            raise RuntimeError("NAMESPACE must not be empty")
+        if not self.deployment_name.strip():
+            raise RuntimeError("RETRIEVER deployment name must not be empty")
+        if not self.service_name.strip():
+            raise RuntimeError("SERVICE_NAME must not be empty")
+        if not self.service_account_name.strip():
+            raise RuntimeError("SERVICE_ACCOUNT_NAME must not be empty")
+        if not self.secret_name.strip():
+            raise RuntimeError("SECRET_NAME must not be empty")
+        if not self.image.strip():
+            raise RuntimeError("IMAGE must not be empty")
+        if self.replicas < 1:
+            raise RuntimeError("REPLICAS must be >= 1")
+        if self.container_port < 1:
+            raise RuntimeError("CONTAINER_PORT must be >= 1")
+        if not self.cpu_request.strip():
+            raise RuntimeError("CPU_REQUEST must not be empty")
+        if not self.cpu_limit.strip():
+            raise RuntimeError("CPU_LIMIT must not be empty")
+        if not self.memory_request.strip():
+            raise RuntimeError("MEMORY_REQUEST must not be empty")
+        if not self.memory_limit.strip():
+            raise RuntimeError("MEMORY_LIMIT must not be empty")
+        if self.run_as_user < 1:
+            raise RuntimeError("RUN_AS_USER must be >= 1")
+        if self.run_as_group < 1:
+            raise RuntimeError("RUN_AS_GROUP must be >= 1")
+        if self.fs_group < 1:
+            raise RuntimeError("FS_GROUP must be >= 1")
+        if self.cluster == "kind" and self.use_iam:
+            raise RuntimeError("USE_IAM=true is not supported for K8S_CLUSTER=kind")
+        if self.cluster == "eks" and self.use_iam and not self.irsa_role_arn:
+            raise RuntimeError("IRSA_ROLE_ARN is required when K8S_CLUSTER=eks and USE_IAM=true")
 
 
 def load_settings() -> tuple[DeploymentSettings, dict[str, str], dict[str, str]]:
-    cluster = _cluster()
-    use_iam = _env_bool("USE_IAM", _default_use_iam(cluster))
+    cluster = os.getenv("K8S_CLUSTER", "kind").strip().lower()
+    if cluster not in SUPPORTED_CLUSTERS:
+        raise RuntimeError(f"K8S_CLUSTER must be one of {sorted(SUPPORTED_CLUSTERS)}, got {cluster!r}")
+    use_iam = _env_bool("USE_IAM", cluster == "eks")
 
     app_env: dict[str, str] = {}
     for name in APP_ENV_ORDER:
@@ -258,14 +241,8 @@ def load_settings() -> tuple[DeploymentSettings, dict[str, str], dict[str, str]]
         secret_env["QDRANT_API_KEY"] = qdrant_key
 
     if not use_iam:
-        secret_env["AWS_ACCESS_KEY_ID"] = _require_nonempty(
-            os.getenv("AWS_ACCESS_KEY_ID"),
-            "AWS_ACCESS_KEY_ID is required when USE_IAM=false",
-        )
-        secret_env["AWS_SECRET_ACCESS_KEY"] = _require_nonempty(
-            os.getenv("AWS_SECRET_ACCESS_KEY"),
-            "AWS_SECRET_ACCESS_KEY is required when USE_IAM=false",
-        )
+        secret_env["AWS_ACCESS_KEY_ID"] = _require_nonempty(os.getenv("AWS_ACCESS_KEY_ID"), "AWS_ACCESS_KEY_ID is required when USE_IAM=false")
+        secret_env["AWS_SECRET_ACCESS_KEY"] = _require_nonempty(os.getenv("AWS_SECRET_ACCESS_KEY"), "AWS_SECRET_ACCESS_KEY is required when USE_IAM=false")
 
     settings = DeploymentSettings(
         cluster=cluster,
@@ -317,7 +294,6 @@ def _configmap_data(app_env: dict[str, str]) -> dict[str, str]:
         if value == "":
             continue
         data[key] = value
-
     data["SERVICE_NAME"] = app_env["SERVICE_NAME"]
     data["OTEL_SERVICE_NAME"] = app_env["OTEL_SERVICE_NAME"]
     data["SERVICE_VERSION"] = app_env["SERVICE_VERSION"]
@@ -338,54 +314,18 @@ def build_service_account_doc(settings: DeploymentSettings) -> dict[str, Any]:
         "namespace": settings.namespace,
         "labels": _base_labels(settings),
     }
-    if settings.use_iam:
-        metadata["annotations"] = {
-            "eks.amazonaws.com/role-arn": _require_nonempty(
-                settings.irsa_role_arn,
-                "IRSA_ROLE_ARN is required when USE_IAM=true on EKS",
-            )
-        }
-    return {
-        "apiVersion": "v1",
-        "kind": "ServiceAccount",
-        "metadata": metadata,
-    }
+    if settings.use_iam and settings.irsa_role_arn:
+        metadata["annotations"] = {"eks.amazonaws.com/role-arn": settings.irsa_role_arn}
+    return {"apiVersion": "v1", "kind": "ServiceAccount", "metadata": metadata}
 
 
 def build_configmap_doc(settings: DeploymentSettings, app_env: dict[str, str]) -> dict[str, Any]:
     return {
         "apiVersion": "v1",
         "kind": "ConfigMap",
-        "metadata": {
-            "name": settings.deployment_name,
-            "namespace": settings.namespace,
-            "labels": _base_labels(settings),
-        },
+        "metadata": {"name": settings.deployment_name, "namespace": settings.namespace, "labels": _base_labels(settings)},
         "data": _configmap_data(app_env),
     }
-
-
-def build_secret_doc(settings: DeploymentSettings, secret_env: dict[str, str]) -> None:
-    if not secret_env:
-        log("info", "secret.skip", "no secret data to apply", secret_name=settings.secret_name)
-        return
-
-    log("info", "secret.apply.start", "applying secret", secret_name=settings.secret_name, secret_keys=sorted(secret_env.keys()))
-    cmd = ["kubectl", "create", "secret", "generic", settings.secret_name, "-n", settings.namespace]
-    for key, value in sorted(secret_env.items()):
-        cmd.extend(["--from-literal", f"{key}={value}"])
-    cmd.extend(["--dry-run=client", "-o", "yaml"])
-    rendered = subprocess.run(cmd, check=True, capture_output=True, text=True).stdout
-    subprocess.run(["kubectl", "apply", "-f", "-"], input=rendered, text=True, check=True)
-    log("info", "secret.apply.done", "secret applied", secret_name=settings.secret_name)
-
-
-def _shared_mounts() -> list[dict[str, Any]]:
-    return [{"name": "tmp", "mountPath": "/tmp"}]
-
-
-def _shared_volumes() -> list[dict[str, Any]]:
-    return [{"name": "tmp", "emptyDir": {}}]
 
 
 def _probe_http(path: str, port: int) -> dict[str, Any]:
@@ -400,15 +340,7 @@ def _probe_http(path: str, port: int) -> dict[str, Any]:
 
 
 def _secret_key_ref(name: str, secret_name: str, key: str | None = None) -> dict[str, Any]:
-    return {
-        "name": name,
-        "valueFrom": {
-            "secretKeyRef": {
-                "name": secret_name,
-                "key": key or name,
-            }
-        },
-    }
+    return {"name": name, "valueFrom": {"secretKeyRef": {"name": secret_name, "key": key or name}}}
 
 
 def _container_env(settings: DeploymentSettings, app_env: dict[str, str], secret_env: dict[str, str]) -> list[dict[str, Any]]:
@@ -416,34 +348,37 @@ def _container_env(settings: DeploymentSettings, app_env: dict[str, str], secret
         {"name": "INSTANCE_ID", "valueFrom": {"fieldRef": {"fieldPath": "metadata.name"}}},
         {"name": "USE_IAM", "value": app_env["USE_IAM"]},
     ]
-
-    for name in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "QDRANT_API_KEY"):
-        if name in secret_env:
-            env.append(_secret_key_ref(name, settings.secret_name))
-
+    if not settings.use_iam:
+        for name in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "QDRANT_API_KEY"):
+            if name in secret_env:
+                env.append(_secret_key_ref(name, settings.secret_name))
     for name in APP_ENV_ORDER:
         if name in {"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "QDRANT_API_KEY", "USE_IAM", "INSTANCE_ID"}:
             continue
         env.append({"name": name, "value": app_env[name]})
-
     return env
 
 
-def build_deployment_doc(
-    settings: DeploymentSettings,
-    app_env: dict[str, str],
-    secret_env: dict[str, str],
-    config_hash: str,
-) -> dict[str, Any]:
-    return {
+def build_deployment_doc(settings: DeploymentSettings, app_env: dict[str, str], secret_env: dict[str, str]) -> dict[str, Any]:
+    pod_labels = _pod_labels(settings)
+    base_labels = _base_labels(settings)
+    container = {
+        "name": settings.deployment_name,
+        "image": settings.image,
+        "imagePullPolicy": settings.image_pull_policy,
+        "ports": [{"name": "http", "containerPort": settings.container_port, "protocol": "TCP"}],
+        "env": _container_env(settings, app_env, secret_env),
+        "volumeMounts": [{"name": "tmp", "mountPath": "/tmp"}],
+        "securityContext": {"allowPrivilegeEscalation": False, "capabilities": {"drop": ["ALL"]}, "readOnlyRootFilesystem": True},
+        "resources": {"requests": {"cpu": settings.cpu_request, "memory": settings.memory_request}, "limits": {"cpu": settings.cpu_limit, "memory": settings.memory_limit}},
+        "readinessProbe": _probe_http("/readyz", settings.container_port),
+        "livenessProbe": _probe_http("/healthz", settings.container_port),
+        "startupProbe": _probe_http("/healthz", settings.container_port),
+    }
+    deployment = {
         "apiVersion": "apps/v1",
         "kind": "Deployment",
-        "metadata": {
-            "name": settings.deployment_name,
-            "namespace": settings.namespace,
-            "labels": _base_labels(settings),
-            "annotations": {"retriever.io/config-sha256": config_hash},
-        },
+        "metadata": {"name": settings.deployment_name, "namespace": settings.namespace, "labels": base_labels},
         "spec": {
             "replicas": settings.replicas,
             "revisionHistoryLimit": 3,
@@ -455,57 +390,25 @@ def build_deployment_doc(
                 }
             },
             "template": {
-                "metadata": {
-                    "labels": _pod_labels(settings),
-                    "annotations": {"retriever.io/config-sha256": config_hash},
-                },
+                "metadata": {"labels": pod_labels},
                 "spec": {
                     "serviceAccountName": settings.service_account_name,
                     "automountServiceAccountToken": True,
-                    "securityContext": {
-                        "runAsNonRoot": True,
-                        "runAsUser": settings.run_as_user,
-                        "runAsGroup": settings.run_as_group,
-                        "fsGroup": settings.fs_group,
-                    },
-                    "volumes": _shared_volumes(),
-                    "containers": [
-                        {
-                            "name": "retriever",
-                            "image": settings.image,
-                            "imagePullPolicy": settings.image_pull_policy,
-                            "ports": [{"name": "http", "containerPort": settings.container_port, "protocol": "TCP"}],
-                            "env": _container_env(settings, app_env, secret_env),
-                            "volumeMounts": _shared_mounts(),
-                            "securityContext": {
-                                "allowPrivilegeEscalation": False,
-                                "capabilities": {"drop": ["ALL"]},
-                                "readOnlyRootFilesystem": True,
-                            },
-                            "resources": {
-                                "requests": {"cpu": settings.cpu_request, "memory": settings.memory_request},
-                                "limits": {"cpu": settings.cpu_limit, "memory": settings.memory_limit},
-                            },
-                            "readinessProbe": _probe_http("/readyz", settings.container_port),
-                            "livenessProbe": _probe_http("/healthz", settings.container_port),
-                            "startupProbe": _probe_http("/healthz", settings.container_port),
-                        }
-                    ],
+                    "securityContext": {"runAsNonRoot": True, "runAsUser": settings.run_as_user, "runAsGroup": settings.run_as_group, "fsGroup": settings.fs_group},
+                    "volumes": [{"name": "tmp", "emptyDir": {}}],
+                    "containers": [container],
                 },
             },
         },
     }
+    return deployment
 
 
 def build_service_doc(settings: DeploymentSettings) -> dict[str, Any]:
     return {
         "apiVersion": "v1",
         "kind": "Service",
-        "metadata": {
-            "name": settings.service_name,
-            "namespace": settings.namespace,
-            "labels": _base_labels(settings),
-        },
+        "metadata": {"name": settings.service_name, "namespace": settings.namespace, "labels": _base_labels(settings)},
         "spec": {
             "type": settings.service_type,
             "selector": {
@@ -524,48 +427,24 @@ def build_pdb_doc(settings: DeploymentSettings) -> dict[str, Any] | None:
     return {
         "apiVersion": "policy/v1",
         "kind": "PodDisruptionBudget",
-        "metadata": {
-            "name": f"{settings.deployment_name}-pdb",
-            "namespace": settings.namespace,
-            "labels": _base_labels(settings),
-        },
-        "spec": {
-            "minAvailable": 1,
-            "selector": {
-                "matchLabels": {
-                    "app.kubernetes.io/name": settings.service_name,
-                    "app.kubernetes.io/instance": settings.deployment_name,
-                    "app.kubernetes.io/component": "retriever",
-                }
-            },
-        },
+        "metadata": {"name": f"{settings.deployment_name}-pdb", "namespace": settings.namespace, "labels": _base_labels(settings)},
+        "spec": {"minAvailable": 1, "selector": {"matchLabels": {"app.kubernetes.io/name": settings.service_name, "app.kubernetes.io/instance": settings.deployment_name, "app.kubernetes.io/component": "retriever"}}},
     }
 
 
-def build_documents(
-    settings: DeploymentSettings,
-    app_env: dict[str, str],
-    secret_env: dict[str, str],
-    config_hash: str,
-) -> list[dict[str, Any]]:
-    docs: list[dict[str, Any]] = [
-        build_service_account_doc(settings),
-        build_configmap_doc(settings, app_env),
-        build_deployment_doc(settings, app_env, secret_env, config_hash),
-        build_service_doc(settings),
-    ]
-    pdb_doc = build_pdb_doc(settings)
-    if pdb_doc is not None:
-        docs.append(pdb_doc)
-    return docs
+def ensure_manifest_dir() -> None:
+    MANIFEST_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def render_documents(docs: list[dict[str, Any]]) -> str:
-    return yaml.safe_dump_all(docs, sort_keys=False, default_flow_style=False, explicit_start=True)
+def ensure_state_dir() -> None:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def sha256_text(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+def write_single_yaml(path: Path, doc: dict[str, Any]) -> None:
+    ensure_manifest_dir()
+    content = yaml.safe_dump(doc, sort_keys=False)
+    path.write_text(content, encoding="utf-8")
+    log.debug("Wrote manifest %s", str(path))
 
 
 def sha256_secret(secret_env: dict[str, str]) -> str:
@@ -573,182 +452,151 @@ def sha256_secret(secret_env: dict[str, str]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def ensure_state_dir() -> None:
-    STATE_DIR.mkdir(parents=True, exist_ok=True)
-    MANIFEST_DIR.mkdir(parents=True, exist_ok=True)
+def compute_config_hash(docs: list[dict[str, Any]], secret_hash: str) -> str:
+    payload = {"docs": docs, "secret_hash": secret_hash}
+    text = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def write_rendered_files(docs: list[dict[str, Any]], rendered_yaml: str, digest: str) -> None:
-    ensure_state_dir()
-    for child in MANIFEST_DIR.glob("*.yaml"):
-        try:
-            child.unlink()
-        except Exception:
-            pass
-
-    for idx, doc in enumerate(docs, start=1):
-        kind = str(doc.get("kind", "doc")).lower()
-        name = str(doc.get("metadata", {}).get("name", f"{idx:02d}")).lower().replace("/", "-")
-        path = MANIFEST_DIR / f"{idx:02d}-{kind}-{name}.yaml"
-        path.write_text(render_documents([doc]), encoding="utf-8")
-
-    RENDERED_PATH.write_text(rendered_yaml, encoding="utf-8")
-    HASH_PATH.write_text(digest + "\n", encoding="utf-8")
+def apply_manifest(path: Path) -> None:
+    log.info("Applying %s", str(path))
+    subprocess.run(["kubectl", "apply", "-f", str(path)], check=True, capture_output=True)
 
 
-def write_temp_yaml(text: str) -> Path:
-    tmp = tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False)
-    try:
-        tmp.write(text)
-        tmp.flush()
-        return Path(tmp.name)
-    finally:
-        tmp.close()
+def delete_manifest(path: Path) -> None:
+    log.info("Deleting %s", str(path))
+    subprocess.run(["kubectl", "delete", "-f", str(path), "--ignore-not-found"], check=True, capture_output=True)
 
 
-def kubectl_apply(path: Path) -> None:
-    subprocess.run(["kubectl", "apply", "-f", str(path)], check=True)
+def create_namespace_if_missing(namespace: str) -> None:
+    rc = subprocess.run(["kubectl", "get", "ns", namespace], capture_output=True)
+    if rc.returncode != 0:
+        log.info("Namespace %s not found; creating", namespace)
+        subprocess.run(["kubectl", "create", "ns", namespace], check=True, capture_output=True)
+    else:
+        log.debug("Namespace %s already exists", namespace)
 
 
-def kubectl_delete(path: Path) -> None:
-    subprocess.run(["kubectl", "delete", "-f", str(path), "--ignore-not-found"], check=True)
-
-
-def namespace_phase(namespace: str) -> str | None:
-    try:
-        out = subprocess.check_output(["kubectl", "get", "ns", namespace, "-o", "json"], text=True)
-    except subprocess.CalledProcessError:
-        return None
-    try:
-        data = json.loads(out)
-    except Exception:
-        return None
-    return str(data.get("status", {}).get("phase") or "").strip() or None
-
-
-def ensure_namespace_ready(settings: DeploymentSettings) -> None:
-    phase = namespace_phase(settings.namespace)
-    if phase is None:
-        raise RuntimeError(
-            f"namespace {settings.namespace!r} does not exist; create it outside this subsystem before rollout"
-        )
-    if phase == "Terminating":
-        raise RuntimeError(
-            f"namespace {settings.namespace!r} is terminating; this subsystem will not touch namespaces"
-        )
-
-
-def apply_secret(settings: DeploymentSettings, secret_env: dict[str, str]) -> None:
+def apply_secret_direct(settings: DeploymentSettings, secret_env: dict[str, str]) -> None:
     if not secret_env:
-        log("info", "secret.skip", "no secret data to apply", secret_name=settings.secret_name)
         return
-
-    log("info", "secret.apply.start", "applying secret", secret_name=settings.secret_name, secret_keys=sorted(secret_env.keys()))
     cmd = ["kubectl", "create", "secret", "generic", settings.secret_name, "-n", settings.namespace]
     for key, value in sorted(secret_env.items()):
         cmd.extend(["--from-literal", f"{key}={value}"])
     cmd.extend(["--dry-run=client", "-o", "yaml"])
-    rendered = subprocess.run(cmd, check=True, capture_output=True, text=True).stdout
-    subprocess.run(["kubectl", "apply", "-f", "-"], input=rendered, text=True, check=True)
-    log("info", "secret.apply.done", "secret applied", secret_name=settings.secret_name)
-
-
-def delete_secret(settings: DeploymentSettings) -> None:
-    log("info", "secret.delete.start", "deleting secret", secret_name=settings.secret_name)
-    subprocess.run(
-        ["kubectl", "delete", "secret", settings.secret_name, "-n", settings.namespace, "--ignore-not-found"],
-        check=True,
-    )
-    log("info", "secret.delete.done", "secret deleted", secret_name=settings.secret_name)
+    proc = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    subprocess.run(["kubectl", "apply", "-f", "-"], input=proc.stdout, text=True, check=True, capture_output=True)
+    log.info("Applied secret %s in namespace %s", settings.secret_name, settings.namespace)
 
 
 def rollout() -> int:
     settings, app_env, secret_env = load_settings()
-
-    ensure_namespace_ready(settings)
-
-    config_material = {
-        "app_env": app_env,
-        "secret_hash": sha256_secret(secret_env),
-        "image": settings.image,
-        "replicas": settings.replicas,
-        "service_account_name": settings.service_account_name,
-        "namespace": settings.namespace,
-        "use_iam": settings.use_iam,
-        "irsa_role_arn": settings.irsa_role_arn,
-    }
-    config_hash = sha256_text(json.dumps(config_material, sort_keys=True, separators=(",", ":"), ensure_ascii=False))
-
-    previous_hash = HASH_PATH.read_text(encoding="utf-8").strip() if HASH_PATH.exists() else ""
-    if previous_hash == config_hash:
-        log("info", "rollout.noop", "configuration unchanged; skipping apply", config_hash=config_hash)
-        return 0
-
-    docs = build_documents(settings, app_env, secret_env, config_hash)
-    rendered = render_documents(docs)
-    write_rendered_files(docs, rendered, config_hash)
-
-    log("info", "rollout.start", "applying retriever manifests", namespace=settings.namespace, deployment=settings.deployment_name, service=settings.service_name)
-    kubectl_apply(write_temp_yaml(render_documents([build_service_account_doc(settings)])))
-    apply_secret(settings, secret_env)
-    kubectl_apply(write_temp_yaml(render_documents([build_configmap_doc(settings, app_env)])))
-    kubectl_apply(write_temp_yaml(render_documents([build_deployment_doc(settings, app_env, secret_env, config_hash)])))
-    kubectl_apply(write_temp_yaml(render_documents([build_service_doc(settings)])))
-
+    log.info("Starting rollout for %s in namespace %s", settings.deployment_name, settings.namespace)
+    try:
+        create_namespace_if_missing(settings.namespace)
+    except subprocess.CalledProcessError as exc:
+        log.error("Failed to ensure namespace %s: %s", settings.namespace, exc)
+        return exc.returncode or 1
+    sa_doc = build_service_account_doc(settings)
+    cm_doc = build_configmap_doc(settings, app_env)
+    deployment_doc = build_deployment_doc(settings, app_env, secret_env)
+    service_doc = build_service_doc(settings)
     pdb_doc = build_pdb_doc(settings)
-    if pdb_doc is not None:
-        kubectl_apply(write_temp_yaml(render_documents([pdb_doc])))
-
-    log("info", "rollout.done", "rollout complete", config_hash=config_hash, rendered=str(MANIFEST_DIR))
+    docs_for_hash = [sa_doc, cm_doc, deployment_doc, service_doc]
+    if pdb_doc:
+        docs_for_hash.append(pdb_doc)
+    secret_hash = sha256_secret(secret_env)
+    config_hash = compute_config_hash(docs_for_hash, secret_hash)
+    ensure_state_dir()
+    existing_hash_files = [p.name for p in STATE_DIR.iterdir() if p.is_file()] if STATE_DIR.exists() else []
+    if config_hash in existing_hash_files:
+        log.info("Configuration unchanged (hash=%s); skipping apply", config_hash)
+        return 0
+    ensure_manifest_dir()
+    write_single_yaml(MANIFEST_DIR / "01-serviceaccount.yaml", sa_doc)
+    write_single_yaml(MANIFEST_DIR / "02-configmap.yaml", cm_doc)
+    write_single_yaml(MANIFEST_DIR / "04-deployment.yaml", deployment_doc)
+    write_single_yaml(MANIFEST_DIR / "05-service.yaml", service_doc)
+    if pdb_doc:
+        write_single_yaml(MANIFEST_DIR / "06-pdb.yaml", pdb_doc)
+    try:
+        apply_manifest(MANIFEST_DIR / "01-serviceaccount.yaml")
+        if secret_env and not settings.use_iam:
+            apply_secret_direct(settings, secret_env)
+        apply_manifest(MANIFEST_DIR / "02-configmap.yaml")
+        apply_manifest(MANIFEST_DIR / "04-deployment.yaml")
+        apply_manifest(MANIFEST_DIR / "05-service.yaml")
+        if pdb_doc:
+            apply_manifest(MANIFEST_DIR / "06-pdb.yaml")
+    except subprocess.CalledProcessError as exc:
+        log.error("kubectl apply failed: %s", exc)
+        return exc.returncode or 1
+    try:
+        ensure_state_dir()
+        marker = STATE_DIR / config_hash
+        marker.write_text("", encoding="utf-8")
+        log.info("Wrote state marker %s", str(marker))
+    except Exception:
+        log.warning("Failed to write state marker for hash %s", config_hash)
+    log.info("Rollout finished for %s", settings.deployment_name)
     return 0
 
 
 def delete() -> int:
-    settings, app_env, _ = load_settings()
-
-    log("info", "delete.start", "deleting retriever resources", namespace=settings.namespace, deployment=settings.deployment_name)
-
-    docs = [
-        build_service_doc(settings),
-        build_configmap_doc(settings, app_env),
-        build_deployment_doc(settings, app_env, {}, "delete"),
-        build_service_account_doc(settings),
-    ]
-    pdb_doc = build_pdb_doc(settings)
-    if pdb_doc is not None:
-        docs.append(pdb_doc)
-
-    kubectl_delete(write_temp_yaml(render_documents(docs)))
-    delete_secret(settings)
-
-    for path in (RENDERED_PATH, HASH_PATH):
-        try:
-            path.unlink(missing_ok=True)
-        except Exception:
-            pass
-    for child in MANIFEST_DIR.glob("*.yaml"):
-        try:
-            child.unlink()
-        except Exception:
-            pass
-
-    log("info", "delete.done", "delete complete", namespace=settings.namespace)
+    settings, _app_env, _secret_env = load_settings()
+    log.info("Starting delete for %s in namespace %s", settings.deployment_name, settings.namespace)
+    try:
+        pdb_path = MANIFEST_DIR / "06-pdb.yaml"
+        if pdb_path.exists():
+            delete_manifest(pdb_path)
+        svc_path = MANIFEST_DIR / "05-service.yaml"
+        if svc_path.exists():
+            delete_manifest(svc_path)
+        dep_path = MANIFEST_DIR / "04-deployment.yaml"
+        if dep_path.exists():
+            delete_manifest(dep_path)
+        cm_path = MANIFEST_DIR / "02-configmap.yaml"
+        if cm_path.exists():
+            delete_manifest(cm_path)
+        subprocess.run(["kubectl", "delete", "secret", _env_str("SECRET_NAME", DEPLOYMENT_DEFAULTS["SECRET_NAME"]), "-n", _env_str("NAMESPACE", DEPLOYMENT_DEFAULTS["NAMESPACE"]), "--ignore-not-found"], check=True, capture_output=True)
+        sa_path = MANIFEST_DIR / "01-serviceaccount.yaml"
+        if sa_path.exists():
+            delete_manifest(sa_path)
+    except subprocess.CalledProcessError as exc:
+        log.error("kubectl delete failed: %s", exc)
+        return exc.returncode or 1
+    try:
+        for child in MANIFEST_DIR.glob("*.yaml"):
+            try:
+                child.unlink()
+            except Exception:
+                pass
+        if STATE_DIR.exists():
+            for child in STATE_DIR.iterdir():
+                try:
+                    child.unlink()
+                except Exception:
+                    pass
+            try:
+                STATE_DIR.rmdir()
+            except Exception:
+                pass
+    except Exception:
+        log.warning("Failed to clean up manifest or state files")
+    log.info("Delete finished for %s", settings.deployment_name)
     return 0
 
 
-def parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        prog="retriever_manifests.py",
-        description="Render and apply Kubernetes manifests for the retriever service.",
-    )
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--rollout", action="store_true", help="Render and apply manifests idempotently")
-    group.add_argument("--delete", action="store_true", help="Delete retriever resources only")
-    return parser.parse_args(argv)
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Render and apply Kubernetes manifests for the retriever service.")
+    group = p.add_mutually_exclusive_group(required=True)
+    group.add_argument("--rollout", action="store_true", help="Render and apply manifests idempotently.")
+    group.add_argument("--delete", action="store_true", help="Delete retriever resources and manifests.")
+    return p.parse_args(argv or sys.argv[1:])
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv or sys.argv[1:])
+    args = parse_args(argv)
     try:
         if args.rollout:
             return rollout()
@@ -756,10 +604,10 @@ def main(argv: list[str] | None = None) -> int:
             return delete()
         return 1
     except subprocess.CalledProcessError as exc:
-        log("error", "kubectl.failed", "kubectl command failed", returncode=exc.returncode)
+        log.error("kubectl command failed: %s", exc)
         return exc.returncode or 1
     except Exception as exc:
-        log("error", "fatal", str(exc))
+        log.exception("fatal error: %s", exc)
         return 1
 
 

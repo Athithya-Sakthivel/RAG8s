@@ -260,7 +260,6 @@ def render_rolebinding(cfg: dict[str, Any]) -> str:
     }
     return yaml.safe_dump(rb, sort_keys=False)
 
-
 def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> str:
     labels = cfg["LABELS"].copy()
     container: dict[str, Any] = {
@@ -297,7 +296,10 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
             "timeoutSeconds": cfg["PROBE_TIMEOUT_SECONDS"],
             "failureThreshold": cfg["STARTUP_FAILURE_THRESHOLD"],
         },
-        "resources": {"requests": {"cpu": cfg["CPU_REQUEST"], "memory": cfg["MEMORY_REQUEST"]}, "limits": {"cpu": cfg["CPU_LIMIT"], "memory": cfg["MEMORY_LIMIT"]}},
+        "resources": {
+            "requests": {"cpu": cfg["CPU_REQUEST"], "memory": cfg["MEMORY_REQUEST"]},
+            "limits": {"cpu": cfg["CPU_LIMIT"], "memory": cfg["MEMORY_LIMIT"]},
+        },
     }
 
     if cfg["ENABLE_GPU"]:
@@ -321,8 +323,15 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
         "spec": {
             "replicas": cfg["REPLICAS"],
             "selector": {"matchLabels": {"app.kubernetes.io/name": cfg["SERVICE_NAME"]}},
-            "strategy": {"type": "RollingUpdate", "rollingUpdate": {"maxUnavailable": cfg["MAX_UNAVAILABLE"], "maxSurge": cfg["MAX_SURGE"]}},
-            "template": {"metadata": {"labels": labels, "annotations": {}}, "spec": {"serviceAccountName": cfg["SA_NAME"], "containers": [container]}},
+            "strategy": {
+                "type": "RollingUpdate",
+                "rollingUpdate": {"maxUnavailable": cfg["MAX_UNAVAILABLE"], "maxSurge": cfg["MAX_SURGE"]},
+            },
+            "template": {
+                # annotations intentionally omitted
+                "metadata": {"labels": labels},
+                "spec": {"serviceAccountName": cfg["SA_NAME"], "containers": [container]},
+            },
         },
     }
 
@@ -337,8 +346,7 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
     if pod_sec:
         deployment["spec"]["template"]["spec"]["securityContext"] = pod_sec
 
-    if inputs_hash:
-        deployment["spec"]["template"]["metadata"]["annotations"]["gen-sparse/inputs-hash"] = inputs_hash
+    # NOTE: do not add gen-sparse/inputs-hash annotation or prometheus.* annotations
 
     if cfg["ENABLE_GPU"] and cfg["GPU_NODE_SELECTOR"]:
         if "=" in cfg["GPU_NODE_SELECTOR"]:
@@ -347,11 +355,13 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
         else:
             deployment["spec"]["template"]["spec"]["nodeSelector"] = {cfg["GPU_NODE_SELECTOR"]: "true"}
 
-    deployment["spec"]["template"]["metadata"].setdefault("annotations", {})
-    deployment["spec"]["template"]["metadata"]["annotations"].update({"prometheus.io/scrape": "true", "prometheus.io/port": str(cfg["CONTAINER_PORT"]), "prometheus.io/path": "/metrics"})
-
+    # Ensure volume mounts and volumes remain intact when READONLY_ROOTFS is enabled
     if cfg.get("READONLY_ROOTFS", True):
-        tmp_mounts = [{"name": "tmp-writable", "mountPath": "/tmp"}, {"name": "tmp-writable", "mountPath": "/var/tmp"}, {"name": "tmp-writable", "mountPath": "/usr/tmp"}]
+        tmp_mounts = [
+            {"name": "tmp-writable", "mountPath": "/tmp"},
+            {"name": "tmp-writable", "mountPath": "/var/tmp"},
+            {"name": "tmp-writable", "mountPath": "/usr/tmp"},
+        ]
         existing_mounts = container.get("volumeMounts", [])
         for m in tmp_mounts:
             if not any(vm.get("mountPath") == m["mountPath"] for vm in existing_mounts):
@@ -376,7 +386,6 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
         deployment["spec"]["template"]["spec"]["securityContext"] = pod_sc
 
     return yaml.safe_dump(deployment, sort_keys=False)
-
 
 def render_service(cfg: dict[str, Any]) -> str:
     svc = {"apiVersion": "v1", "kind": "Service", "metadata": {"name": f"{cfg['SERVICE_NAME']}-svc", "namespace": cfg["NAMESPACE"], "labels": cfg["LABELS"]}, "spec": {"type": "ClusterIP", "ports": [{"port": cfg["CONTAINER_PORT"], "targetPort": cfg["CONTAINER_PORT"], "protocol": "TCP", "name": "http"}], "selector": {"app.kubernetes.io/name": cfg["SERVICE_NAME"]}}}

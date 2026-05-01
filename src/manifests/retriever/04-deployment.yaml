@@ -1,92 +1,3 @@
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: retriever-sa
-  namespace: inference
-  labels:
-    app.kubernetes.io/name: retriever
-    app.kubernetes.io/instance: retriever
-    app.kubernetes.io/managed-by: retriever-manifest-generator
-    app.kubernetes.io/component: retriever
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: retriever
-  namespace: inference
-  labels:
-    app.kubernetes.io/name: retriever
-    app.kubernetes.io/instance: retriever
-    app.kubernetes.io/managed-by: retriever-manifest-generator
-    app.kubernetes.io/component: retriever
-data:
-  SERVICE_NAME: retrieval
-  OTEL_SERVICE_NAME: retrieval
-  SERVICE_VERSION: v1
-  OTEL_SERVICE_VERSION: v1
-  ENV: prod
-  DEPLOYMENT_ENVIRONMENT: prod
-  CLUSTER_NAME: production-cluster
-  K8S_CLUSTER_NAME: production-cluster
-  AWS_REGION: ap-south-1
-  AWS_DEFAULT_REGION: ap-south-1
-  QDRANT_URL: http://qdrant.qdrant.svc.cluster.local:6333
-  COLLECTION_NAME: default_rag_collection1
-  CACHE_COLLECTION_NAME: default_rag_collection1__semantic_cache
-  DENSE_URL: http://dense-svc.models.svc.cluster.local:8200
-  SPARSE_URL: http://sparse-svc.models.svc.cluster.local:8201
-  RERANKER_URL: http://reranker-svc.models.svc.cluster.local:8202
-  AWS_BEDROCK_MODEL_ID: meta.llama3-8b-instruct-v1:0
-  LLM_MAX_TOKENS: '400'
-  LLM_TEMPERATURE: '0.0'
-  CORPUS_VERSION: v1
-  PROMPT_VERSION: v1
-  RETRIEVAL_VERSION: retrieval-v1
-  DENSE_DIM: '384'
-  MAX_CHUNKS_TO_LLM: '5'
-  QUERY_TOPK_DENSE: '50'
-  QUERY_TOPK_SPARSE: '50'
-  FETCH_K: '20'
-  RERANKER_TOP_K: '10'
-  RERANKER_MODE: AUTO
-  RERANK_AUTO_THRESHOLD: '0.75'
-  RERANK_MARGIN: '0.08'
-  RERANK_ALPHA: '0.6'
-  RRF_K: '60'
-  CACHE_SCORE_THRESHOLD: '0.72'
-  CACHE_TTL_SECONDS: '86400'
-  CACHE_CLEANUP_INTERVAL_SECONDS: '900'
-  PROMPT_MAX_CONTENT_CHARS: '2500'
-  CHUNK_OUTPUT_MAX_CHARS: '1600'
-  MAX_PROMPT_CHARS: '40000'
-  MAX_CONCURRENT_REQUESTS: '64'
-  HTTP_TIMEOUT: '10.0'
-  HTTP_MAX_CONNECTIONS: '100'
-  HTTP_MAX_KEEPALIVE: '20'
-  RETRY_MAX_ATTEMPTS: '3'
-  RETRY_BASE_DELAY: '0.08'
-  RETRY_MAX_DELAY: '0.8'
-  BREAKER_FAILURE_THRESHOLD: '3'
-  BREAKER_RESET_TIMEOUT: '20.0'
-  OTEL_TIMEOUT_SECONDS: '5.0'
-  OTEL_METRIC_EXPORT_INTERVAL_MS: '15000'
-  OTEL_METRIC_EXPORT_TIMEOUT_MS: '10000'
-  OTEL_TRACES_SAMPLER: parentbased_traceidratio
-  OTEL_TRACES_SAMPLER_ARG: '0.10'
-  LOG_LEVEL: WARNING
-  ENABLE_OTEL_TRACES: 'true'
-  ENABLE_OTEL_METRICS: 'true'
-  ENABLE_OTEL_LOGS: 'true'
-  AUTH_VALIDATE_URL: http://auth-svc.inference.svc.cluster.local:8000/me
-  AUTH_TIMEOUT_SECONDS: '2.0'
-  PORT: '8001'
-  UVICORN_LOOP: uvloop
-  UVICORN_HTTP: httptools
-  FORWARDED_ALLOW_IPS: '*'
-  USE_IAM: 'false'
-  RERANKER_MODEL: cross-encoder
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -97,8 +8,6 @@ metadata:
     app.kubernetes.io/instance: retriever
     app.kubernetes.io/managed-by: retriever-manifest-generator
     app.kubernetes.io/component: retriever
-  annotations:
-    retriever.io/config-sha256: b881a38e56eac61b5fda6d4c36f540115765e6d751cb6ca919dff55042a35470
 spec:
   replicas: 1
   revisionHistoryLimit: 3
@@ -115,8 +24,6 @@ spec:
         app.kubernetes.io/managed-by: retriever-manifest-generator
         app.kubernetes.io/component: retriever
         app.kubernetes.io/part-of: retriever
-      annotations:
-        retriever.io/config-sha256: b881a38e56eac61b5fda6d4c36f540115765e6d751cb6ca919dff55042a35470
     spec:
       serviceAccountName: retriever-sa
       automountServiceAccountToken: true
@@ -337,25 +244,3 @@ spec:
           periodSeconds: 5
           failureThreshold: 12
           successThreshold: 1
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: retriever
-  namespace: inference
-  labels:
-    app.kubernetes.io/name: retriever
-    app.kubernetes.io/instance: retriever
-    app.kubernetes.io/managed-by: retriever-manifest-generator
-    app.kubernetes.io/component: retriever
-spec:
-  type: ClusterIP
-  selector:
-    app.kubernetes.io/name: retriever
-    app.kubernetes.io/instance: retriever
-    app.kubernetes.io/component: retriever
-  ports:
-  - name: http
-    port: 8001
-    targetPort: 8001
-    protocol: TCP

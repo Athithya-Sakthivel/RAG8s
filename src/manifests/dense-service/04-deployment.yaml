@@ -22,11 +22,6 @@ spec:
   template:
     metadata:
       labels: *id001
-      annotations:
-        gen-dense/inputs-hash: 4d7d993b98460281ba9b9977b128893b96e0fd037378d43d061b8a055ea0a2f0
-        prometheus.io/scrape: 'true'
-        prometheus.io/port: '8200'
-        prometheus.io/path: /metrics
     spec:
       serviceAccountName: dense-sa
       containers:

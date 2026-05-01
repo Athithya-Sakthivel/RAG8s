@@ -8,28 +8,26 @@ metadata:
     app.kubernetes.io/managed-by: argocd
   annotations:
     description: SigNoz Helm deployment (chart repo + external ClickHouse preserved)
+    signoz.argoproj.io/environment: prod
 spec:
   project: e2e-rag-system
   source:
     repoURL: https://charts.signoz.io
     chart: signoz
-    targetRevision: "0.120.0"
+    targetRevision: 0.120.0
     helm:
       values: |
         global:
           clusterName: production-cluster
           clusterDomain: cluster.local
-
-        # external ClickHouse preserved (ensure secret exists if using)
+          configChecksum: 3ad138de68aaa18941254c6d42dd49cebbbe50da951fc5b4bb8a5574146fb518
         clickhouse:
           enabled: false
-
         externalClickhouse:
           host: my-clickhouse.default.svc.cluster.local
           user: admin
           existingSecret: signoz-clickhouse-auth
           existingSecretPasswordKey: password
-
         signoz:
           name: signoz
           replicaCount: 1
@@ -67,6 +65,6 @@ spec:
       prune: true
       selfHeal: true
     syncOptions:
-      - CreateNamespace=true
-      - PrunePropagationPolicy=foreground
-      - PruneLast=true
+    - CreateNamespace=true
+    - PrunePropagationPolicy=foreground
+    - PruneLast=true

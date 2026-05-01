@@ -22,11 +22,6 @@ spec:
   template:
     metadata:
       labels: *id001
-      annotations:
-        gen-sparse/inputs-hash: f0f785a309b190948d4980492b155a585716db96ebf9529450e8afdd49e3542f
-        prometheus.io/scrape: 'true'
-        prometheus.io/port: '8201'
-        prometheus.io/path: /metrics
     spec:
       serviceAccountName: sparse-sa
       containers:

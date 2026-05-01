@@ -1,9 +1,4 @@
-#!/usr/bin/env python3
-# This script initializes ClickHouse username/password from environment
-# (with sensible defaults), creates/updates a Kubernetes Secret in-cluster
-# (so credentials are not embedded in the rendered Argo CD Application YAML),
-# and then renders the Application YAML referencing that secret via existingSecret.
-
+# python3 src/infra/core/signoz_setup.py --apply-secret
 from __future__ import annotations
 
 import argparse
@@ -25,17 +20,20 @@ except Exception as exc:  # pragma: no cover
     raise SystemExit(2) from exc
 
 
+# Output path for the rendered Argo CD Application manifest
 DEFAULT_OUTPUT = Path("src/argocd/signoz-application.yaml")
 
+# Application defaults
 DEFAULT_APP_NAME = "signoz"
 DEFAULT_APP_NAMESPACE = "argocd"
 DEFAULT_PROJECT = "e2e-rag-system"
 DEFAULT_DEST_NAMESPACE = "signoz"
 DEFAULT_DEST_SERVER = "https://kubernetes.default.svc"
 
+# Chart defaults (updated to latest requested)
 DEFAULT_REPO_URL = "https://charts.signoz.io"
-DEFAULT_CHART_NAME = "signoz/signoz"
-DEFAULT_CHART_VERSION = "0.118.0"
+DEFAULT_CHART_NAME = "signoz"
+DEFAULT_CHART_VERSION = "0.120.0"
 
 DEFAULT_STORAGE_CLASS = "default-storage-class"
 DEFAULT_CLUSTER_DOMAIN = "cluster.local"
@@ -272,25 +270,27 @@ def preset_for(env_name: str) -> Preset:
 
 
 def load_existing_password(output: Path) -> str:
+    """
+    If an existing rendered Application YAML contains an internal clickhouse.password,
+    reuse it to avoid rotating the secret unnecessarily.
+    """
     if not output.exists():
         return ""
 
     try:
         outer = yaml.safe_load(output.read_text(encoding="utf-8")) or {}
-        values_text = outer["spec"]["source"]["helm"]["values"]
+        values_text = outer.get("spec", {}).get("source", {}).get("helm", {}).get("values")
         if not isinstance(values_text, str) or not values_text.strip():
             return ""
         inner = yaml.safe_load(values_text) or {}
     except Exception:
         return ""
 
-    # If the previous rendered values used internal clickhouse.password, reuse it.
     clickhouse = inner.get("clickhouse")
     if isinstance(clickhouse, dict):
         pwd = clickhouse.get("password")
         if isinstance(pwd, str) and pwd.strip():
             return pwd.strip()
-    # Also check externalClickhouse existingSecret usage (not reading secret)
     return ""
 
 
@@ -367,16 +367,18 @@ def load_config() -> Config:
 
 
 def build_values(cfg: Config) -> dict[str, Any]:
-    # Build values but use externalClickhouse with existingSecret so no password appears in the rendered YAML.
+    """
+    Build Helm values that match the requested, fixed YAML:
+    - minimal global block with clusterName and clusterDomain
+    - clickhouse.enabled: false
+    - externalClickhouse with existingSecret reference
+    - signoz block with persistence using storageClass
+    """
     values: dict[str, Any] = {
         "global": {
-            "storageClass": cfg.storage_class,
-            "clusterDomain": cfg.cluster_domain,
             "clusterName": cfg.cluster_name,
-            "cloud": cfg.cloud,
+            "clusterDomain": cfg.cluster_domain,
         },
-        "clusterName": cfg.cluster_name,
-        # Use external ClickHouse path to avoid embedding password in values YAML.
         "clickhouse": {
             "enabled": False,
         },
@@ -417,7 +419,6 @@ def build_values(cfg: Config) -> dict[str, Any]:
             },
             "persistence": {
                 "enabled": True,
-                "existingClaim": "",
                 "storageClass": cfg.storage_class,
                 "accessModes": ["ReadWriteOnce"],
                 "size": cfg.signoz_persistence_size,
@@ -425,8 +426,9 @@ def build_values(cfg: Config) -> dict[str, Any]:
         },
     }
 
+    # Keep a checksum so the chart can detect config changes if needed
     checksum = hashlib.sha256(yaml_dump(values).encode("utf-8")).hexdigest()
-    values["global"]["configChecksum"] = checksum
+    values.setdefault("global", {})["configChecksum"] = checksum
     return values
 
 
@@ -444,7 +446,7 @@ def build_application(cfg: Config) -> dict[str, Any]:
                 "app.kubernetes.io/managed-by": "argocd",
             },
             "annotations": {
-                "description": "SigNoz Helm deployment",
+                "description": "SigNoz Helm deployment (chart repo + external ClickHouse preserved)",
                 "signoz.argoproj.io/environment": cfg.env_name,
             },
         },
@@ -453,7 +455,7 @@ def build_application(cfg: Config) -> dict[str, Any]:
             "source": {
                 "repoURL": cfg.repo_url,
                 "chart": cfg.chart_name,
-                "targetRevision": cfg.chart_version,
+                "targetRevision": str(cfg.chart_version),
                 "helm": {
                     "values": values_yaml,
                 },
@@ -468,14 +470,6 @@ def build_application(cfg: Config) -> dict[str, Any]:
                     "selfHeal": cfg.automated_self_heal,
                 },
                 "syncOptions": cfg.sync_options,
-                "retry": {
-                    "limit": cfg.retry_limit,
-                    "backoff": {
-                        "duration": cfg.retry_backoff_duration,
-                        "factor": cfg.retry_backoff_factor,
-                        "maxDuration": cfg.retry_backoff_max_duration,
-                    },
-                },
             },
         },
     }
@@ -536,7 +530,7 @@ def create_or_update_secret(cfg: Config) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Render the SigNoz Argo CD Application manifest and create ClickHouse secret.")
+    parser = argparse.ArgumentParser(description="Render the SigNoz Argo CD Application manifest (chart 0.120.0) and optionally create ClickHouse secret.")
     parser.add_argument("--stdout", action="store_true", help="Print the rendered YAML to stdout.")
     parser.add_argument("--write", action="store_true", help="Write the rendered YAML to disk.")
     parser.add_argument("--check", action="store_true", help="Fail if the on-disk file differs from the rendered output.")
