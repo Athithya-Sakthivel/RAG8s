@@ -2,5 +2,6 @@
 CVE-2023-45853 # Ignore zlib false positive (Debian marks CVE-2023-45853 as `will_not_fix`)
 CVE-2025-7458 # does not process untrusted SQL. CronJob is internal, the attack surface is limited.
 
-# False positive: `LLM_MAX_TOKENS` is a non-sensitive numeric config, not a secret
-KSV-0109
+
+KSV-0109 # False positive: `LLM_MAX_TOKENS` is a non-sensitive numeric config, not a secret
+AWS-0132 # Ignores“bucket does not encrypt data with a customer managed key” rule.

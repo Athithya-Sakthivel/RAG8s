@@ -1,27 +1,5 @@
-#!/usr/bin/env python3
-# src/infra/rag/dense_service.py
-# Deterministic generator for Dense embedder Kubernetes manifests.
-# Writes manifests to src/manifests/dense_service/
-#
-# Key changes in this rewrite:
-# - Use explicit DEPLOY_ENV (preferred) with safe fallbacks for backward compatibility.
-# - Clear, unambiguous mapping: PROD -> production defaults; anything else -> nonprod defaults.
-# - Ensure DENSE_MODEL_NAME, DENSE_DIM, DENSE_BATCH_SIZE, DENSE_NORMALIZE, DENSE_CUDA, PRELOAD_MODEL
-#   are injected into the container env with strong defaults.
-# - Remove deprecated --apply CLI flag (use --rollout).
-# - Replace deprecated datetime.utcnow() with timezone-aware UTC timestamp.
-#
-# Features:
-# - Strong, sensible defaults for prod vs non-prod
-# - Idempotent generation: stores inputs hash and skips writes when nothing changed
-# - Atomic file writes
-# - Safe kubectl apply wrapper and rollout wait
-# - Clear validation and early failures
-# - Type hints and robust subprocess handling
-
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 import logging
@@ -164,9 +142,14 @@ def kubectl_apply_yaml(yaml_str: str, dry_run: bool = False, timeout: int = 120)
         return {"applied": False, "stderr": f"timeout: {e}"}
 
 
+def _env_bool(name: str, default: str = "0") -> bool:
+    return os.environ.get(name, default).strip().lower() in ("1", "true", "yes", "on")
+
+
 def load_config() -> dict[str, Any]:
     cfg: dict[str, Any] = {}
 
+    # DEPLOY_ENV precedence: DEPLOY_ENV -> DENSE_ENV -> ENV -> default
     deploy_env = os.environ.get("DEPLOY_ENV") or os.environ.get("DENSE_ENV") or os.environ.get("ENV") or DEFAULTS["DEPLOY_ENV"]
     env = str(deploy_env).upper()
     cfg["DEPLOY_ENV"] = env
@@ -208,12 +191,13 @@ def load_config() -> dict[str, Any]:
     cfg["LIVENESS_INITIAL_DELAY"] = int(os.environ.get("DENSE_LIVENESS_INITIAL_DELAY", str(DEFAULTS["LIVENESS_INITIAL_DELAY"])))
     cfg["PROBE_TIMEOUT_SECONDS"] = int(os.environ.get("DENSE_PROBE_TIMEOUT_SECONDS", str(DEFAULTS["PROBE_TIMEOUT_SECONDS"])))
 
-    cfg["ENABLE_GPU"] = os.environ.get("DENSE_ENABLE_GPU", str(DEFAULTS["ENABLE_GPU"])).lower() in ("1", "true", "yes")
+    # GPU enablement: respect explicit ENABLE flag OR DENSE_CUDA for backward compatibility
+    cfg["ENABLE_GPU"] = _env_bool("DENSE_ENABLE_GPU", str(DEFAULTS["ENABLE_GPU"]).lower()) or _env_bool("DENSE_CUDA", str(DEFAULTS["DENSE_CUDA"]).lower())
     cfg["GPU_RESOURCE_NAME"] = os.environ.get("DENSE_GPU_RESOURCE", DEFAULTS["GPU_RESOURCE_NAME"])
     cfg["GPU_COUNT"] = int(os.environ.get("DENSE_GPU_COUNT", str(DEFAULTS["GPU_COUNT"])))
     cfg["GPU_NODE_SELECTOR"] = os.environ.get("DENSE_GPU_NODE_SELECTOR", DEFAULTS["GPU_NODE_SELECTOR"])
 
-    cfg["HPA_ENABLED"] = os.environ.get("DENSE_HPA_ENABLED", str(DEFAULTS["HPA_ENABLED"])).lower() in ("1", "true", "yes")
+    cfg["HPA_ENABLED"] = _env_bool("DENSE_HPA_ENABLED", str(DEFAULTS["HPA_ENABLED"]).lower())
     cfg["HPA_MIN"] = int(os.environ.get("DENSE_HPA_MIN_REPLICAS", str(DEFAULTS["HPA_MIN"])))
     cfg["HPA_MAX"] = int(os.environ.get("DENSE_HPA_MAX_REPLICAS", str(DEFAULTS["HPA_MAX"])))
     cfg["HPA_TARGET_CPU"] = int(os.environ.get("DENSE_HPA_TARGET_CPU", str(DEFAULTS["HPA_TARGET_CPU"])))
@@ -227,17 +211,17 @@ def load_config() -> dict[str, Any]:
         cfg["DENSE_BATCH_SIZE"] = int(os.environ.get("DENSE_BATCH_SIZE", str(DEFAULTS["DENSE_BATCH_SIZE"])))
     except Exception:
         cfg["DENSE_BATCH_SIZE"] = DEFAULTS["DENSE_BATCH_SIZE"]
-    cfg["DENSE_NORMALIZE"] = os.environ.get("DENSE_NORMALIZE", str(DEFAULTS["DENSE_NORMALIZE"])).lower() in ("1", "true", "yes")
-    cfg["DENSE_CUDA"] = os.environ.get("DENSE_CUDA", str(DEFAULTS["DENSE_CUDA"])).lower() in ("1", "true", "yes")
-    cfg["PRELOAD_MODEL"] = os.environ.get("DENSE_PRELOAD_MODEL", "0").lower() in ("1", "true", "yes")
+    cfg["DENSE_NORMALIZE"] = _env_bool("DENSE_NORMALIZE", str(DEFAULTS["DENSE_NORMALIZE"]).lower())
+    cfg["DENSE_CUDA"] = _env_bool("DENSE_CUDA", str(DEFAULTS["DENSE_CUDA"]).lower())
+    cfg["PRELOAD_MODEL"] = _env_bool("DENSE_PRELOAD_MODEL", "0")
 
-    cfg["RUN_AS_NONROOT"] = os.environ.get("DENSE_RUN_AS_NONROOT", str(DEFAULTS["RUN_AS_NONROOT"])).lower() in ("1", "true", "yes")
+    cfg["RUN_AS_NONROOT"] = _env_bool("DENSE_RUN_AS_NONROOT", str(DEFAULTS["RUN_AS_NONROOT"]).lower())
     try:
         cfg["RUN_AS_USER"] = int(os.environ.get("DENSE_RUN_AS_USER", str(DEFAULTS["RUN_AS_USER"])))
     except Exception:
         cfg["RUN_AS_USER"] = DEFAULTS["RUN_AS_USER"]
-    cfg["ALLOW_PRIV_ESC"] = os.environ.get("DENSE_ALLOW_PRIV_ESC", str(DEFAULTS["ALLOW_PRIV_ESC"])).lower() in ("1", "true", "yes")
-    cfg["READONLY_ROOTFS"] = os.environ.get("DENSE_READONLY_ROOTFS", str(DEFAULTS["READONLY_ROOTFS"])).lower() in ("1", "true", "yes")
+    cfg["ALLOW_PRIV_ESC"] = _env_bool("DENSE_ALLOW_PRIV_ESC", str(DEFAULTS["ALLOW_PRIV_ESC"]).lower())
+    cfg["READONLY_ROOTFS"] = _env_bool("DENSE_READONLY_ROOTFS", str(DEFAULTS["READONLY_ROOTFS"]).lower())
     try:
         fs_group_env = os.environ.get("DENSE_FS_GROUP", "")
         cfg["FS_GROUP"] = int(fs_group_env) if fs_group_env != "" else DEFAULTS["FS_GROUP"]
@@ -312,6 +296,7 @@ def render_rolebinding(cfg: dict[str, Any]) -> str:
     }
     return yaml.safe_dump(rb, sort_keys=False)
 
+
 def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> str:
     labels = cfg["LABELS"].copy()
     container: dict[str, Any] = {
@@ -319,10 +304,12 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
         "image": cfg["IMAGE"],
         "ports": [{"containerPort": cfg["CONTAINER_PORT"]}],
         "env": [
+            # Provide both ENV (sparse-compatible) and DEPLOY_ENV (backwards-compatible)
+            {"name": "ENV", "value": cfg["DEPLOY_ENV"]},
+            {"name": "DEPLOY_ENV", "value": cfg["DEPLOY_ENV"]},
             {"name": "DENSE_HOST", "value": str(cfg["HOST"])},
             {"name": "DENSE_PORT", "value": str(cfg["CONTAINER_PORT"])},
-            {"name": "DEPLOY_ENV", "value": cfg["DEPLOY_ENV"]},
-            {"name": "DENSE_LOGLEVEL", "value": "WARN"},
+            {"name": "DENSE_LOGLEVEL", "value": str(cfg["LOGLEVEL"])},
             {"name": "DENSE_MODEL_NAME", "value": str(cfg["DENSE_MODEL_NAME"])},
             {"name": "DENSE_DIM", "value": str(cfg["DENSE_DIM"])},
             {"name": "DENSE_BATCH_SIZE", "value": str(cfg["DENSE_BATCH_SIZE"])},
@@ -402,8 +389,7 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
     if pod_sec:
         deployment["spec"]["template"]["spec"]["securityContext"] = pod_sec
 
-    # NOTE: annotations removed intentionally (no gen-dense/inputs-hash, no prometheus.*)
-
+    # GPU node selector handling (same behavior as sparse)
     if cfg["ENABLE_GPU"] and cfg["GPU_NODE_SELECTOR"]:
         if "=" in cfg["GPU_NODE_SELECTOR"]:
             k, v = cfg["GPU_NODE_SELECTOR"].split("=", 1)
@@ -418,21 +404,24 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
             {"name": "tmp-writable", "mountPath": "/var/tmp"},
             {"name": "tmp-writable", "mountPath": "/usr/tmp"},
         ]
-        existing_mounts = container.get("volumeMounts", [])
+        existing_mounts = container.get("volumeMounts", []) or []
+        # Add tmp mounts if missing
         for m in tmp_mounts:
             if not any(vm.get("mountPath") == m["mountPath"] for vm in existing_mounts):
                 existing_mounts.append(m)
-        existing_mounts.append({"name": "models-cache", "mountPath": "/models_cache"})
+        # Add models-cache only if not present
+        if not any(vm.get("mountPath") == "/models_cache" for vm in existing_mounts):
+            existing_mounts.append({"name": "models-cache", "mountPath": "/models_cache"})
         container["volumeMounts"] = existing_mounts
 
-        vols = deployment["spec"]["template"]["spec"].get("volumes", [])
+        vols = deployment["spec"]["template"]["spec"].get("volumes", []) or []
         if not any(v.get("name") == "tmp-writable" for v in vols):
             vols.append({"name": "tmp-writable", "emptyDir": {}})
         if not any(v.get("name") == "models-cache" for v in vols):
             vols.append({"name": "models-cache", "emptyDir": {}})
         deployment["spec"]["template"]["spec"]["volumes"] = vols
 
-        pod_sc = deployment["spec"]["template"]["spec"].get("securityContext", {})
+        pod_sc = deployment["spec"]["template"]["spec"].get("securityContext", {}) or {}
         if "fsGroup" not in pod_sc and cfg.get("FS_GROUP") is not None:
             try:
                 pod_sc["fsGroup"] = int(cfg.get("FS_GROUP", 1000))
@@ -577,67 +566,64 @@ def apply_to_cluster(cfg: dict[str, Any], dry_run: bool = False, verbose: bool =
             rcout, out, err = run_cmd(cmd, timeout=30)
             log.error("=== %s (rc=%d) ===\n%s\n%s", tag, rcout, (out or "").strip(), (err or "").strip())
         raise SystemExit(2) from None
-
     log.info("Rollout successful for %s/%s", cfg["NAMESPACE"], deployment_name)
 
 
 def delete_manifests(cfg: dict[str, Any]) -> None:
-
-    def _rm(dir_path: Path, state_dirname: str) -> None:
+    def _delete(dir_path: Path, state_dirname: str) -> None:
         if not dir_path or str(dir_path).strip() in ("", "/", "."):
             return
         if not dir_path.exists():
             log.info("No manifests found at %s", str(dir_path))
             return
+        try:
+            subprocess.run(["kubectl", "delete", "-f", str(dir_path), "--ignore-not-found=true"], check=False, capture_output=True, text=True)
+        except Exception:
+            log.debug("kubectl delete failed for %s", dir_path, exc_info=True)
         for p in sorted(dir_path.glob("*")):
             try:
-                shutil.rmtree(p) if p.is_dir() else p.unlink()
+                if p.is_file():
+                    p.unlink()
             except Exception:
                 log.debug("Failed to remove %s", p, exc_info=True)
+        # remove state dir if present
         state_dir = dir_path / state_dirname
-        if state_dir.exists():
-            try:
-                shutil.rmtree(state_dir)
-            except Exception:
-                log.debug("Failed to remove state dir %s", state_dir, exc_info=True)
-        log.info("Deleted manifests at %s", str(dir_path))
+        try:
+            if state_dir.exists():
+                for p in sorted(state_dir.glob("*")):
+                    try:
+                        if p.is_file():
+                            p.unlink()
+                    except Exception:
+                        log.debug("Failed to remove %s", p, exc_info=True)
+                state_dir.rmdir()
+        except Exception:
+            log.debug("Failed to cleanup state dir %s", state_dir, exc_info=True)
 
-    state_dirname = cfg.get("STATE_DIRNAME", DEFAULT_STATE_DIRNAME)
-    primary = Path(cfg["MANIFESTS_DIR"])
-    secondary = Path(DEFAULT_MANIFESTS_DIR)
-
-    _rm(primary, state_dirname)
-    if secondary.resolve() != primary.resolve():
-        _rm(secondary, state_dirname)
-
-
-def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Generate/rollout/delete Dense embedder Kubernetes manifests.")
-    grp = p.add_mutually_exclusive_group(required=True)
-    grp.add_argument("--generate", action="store_true", help="Generate manifests to MANIFESTS_DIR.")
-    grp.add_argument("--rollout", action="store_true", help="Create or converge resources to desired state.")
-    grp.add_argument("--delete", action="store_true", help="Delete generated manifests.")
-    p.add_argument("--dry-run", action="store_true", help="Render and validate but do not write or apply.")
-    p.add_argument("--verbose", action="store_true", help="Print extra debug info.")
-    return p.parse_args()
-
-
-def main() -> None:
-    args = parse_args()
-    cfg = load_config()
-    if args.delete:
-        log.info("Delete requested.")
-        delete_manifests(cfg)
-        return
-    if args.generate:
-        log.info("Generate requested.")
-        generate_manifests(cfg, dry_run=args.dry_run, verbose=args.verbose)
-        return
-    if args.rollout:
-        log.info("Rollout requested.")
-        apply_to_cluster(cfg, dry_run=args.dry_run, verbose=args.verbose, mode_label="rollout")
-        return
+    manifests_dir = Path(os.environ.get("MANIFESTS_DIR", str(DEFAULTS["MANIFESTS_DIR"])))
+    _delete(manifests_dir, os.environ.get("STATE_DIRNAME", DEFAULT_STATE_DIRNAME))
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Generate and optionally apply Dense service Kubernetes manifests.")
+    parser.add_argument("--apply", action="store_true", help="DEPRECATED: use --rollout instead (kept for compatibility).")
+    parser.add_argument("--rollout", action="store_true", help="Apply manifests to cluster and wait for rollout.")
+    parser.add_argument("--dry-run", action="store_true", help="Generate manifests but do not apply.")
+    parser.add_argument("--verbose", action="store_true", help="Enable verbose debug output.")
+    parser.add_argument("--delete", action="store_true", help="Delete generated manifests from cluster and disk.")
+    args = parser.parse_args()
+
+    cfg = load_config()
+    if args.verbose:
+        log.setLevel(logging.DEBUG)
+
+    if args.delete:
+        delete_manifests(cfg)
+        raise SystemExit(0)
+
+    if args.rollout or args.apply:
+        apply_to_cluster(cfg, dry_run=args.dry_run, verbose=args.verbose, mode_label="rollout")
+    else:
+        generate_manifests(cfg, dry_run=args.dry_run, verbose=args.verbose)

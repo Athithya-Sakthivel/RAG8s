@@ -92,13 +92,18 @@ curl -N http://localhost:8203/generate/stream \
 
 
 
-git add . && git commit -m "nginx security fixes" && git push origin main
+git add . && git commit -m "argocd sync" && git push origin main
 
 make core
+kubectl create ns signoz && python3 src/infra/core/signoz_setup.py --apply-secret
+kubectl create ns inference && python3 src/infra/rag/retriever_service.py --apply-secrets
+
 bash src/infra/core/argo_setup.sh --rollout
+python3 src/infra/rag/retriever_service.py --rollout
 
 export PER_POD=true
 export QDRANT_BACKUP_S3_PREFIX=qdrant/backups/
 export BACKUP_S3_BUCKET=$DATA_S3_BUCKET
 bash src/scripts/backups_and_restore.sh restore
+
 

@@ -30,12 +30,14 @@ spec:
         ports:
         - containerPort: 8200
         env:
+        - name: ENV
+          value: NONPROD
+        - name: DEPLOY_ENV
+          value: NONPROD
         - name: DENSE_HOST
           value: 0.0.0.0
         - name: DENSE_PORT
           value: '8200'
-        - name: DEPLOY_ENV
-          value: NONPROD
         - name: DENSE_LOGLEVEL
           value: WARN
         - name: DENSE_MODEL_NAME
@@ -43,7 +45,7 @@ spec:
         - name: DENSE_DIM
           value: '384'
         - name: DENSE_BATCH_SIZE
-          value: '64'
+          value: '16'
         - name: DENSE_NORMALIZE
           value: '1'
         - name: DENSE_CUDA
