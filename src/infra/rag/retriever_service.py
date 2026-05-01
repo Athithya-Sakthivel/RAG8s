@@ -420,15 +420,15 @@ def apply_secret_direct(cfg: dict[str, Any], secret_env: dict[str, str]) -> None
     cmd.extend(["--dry-run=client", "-o", "yaml"])
     proc = subprocess.run(cmd, check=True, capture_output=True, text=True)
     subprocess.run(["kubectl", "apply", "-f", "-"], input=proc.stdout, text=True, check=True, capture_output=True)
-    log.info("Applied secrets to namespace %s (secret=%s)", cfg["NAMESPACE"], cfg["SECRET_NAME"])
+    log.info("Applied secrets")
 
 
 def delete_secret_direct(cfg: dict[str, Any]) -> None:
     try:
         subprocess.run(["kubectl", "delete", "secret", cfg["SECRET_NAME"], "-n", cfg["NAMESPACE"], "--ignore-not-found"], check=True, capture_output=True)
-        log.info("Deleted secret %s in namespace %s (if it existed)", cfg["SECRET_NAME"], cfg["NAMESPACE"])
-    except subprocess.CalledProcessError as exc:
-        log.warning("Failed to delete secret %s: %s", cfg["SECRET_NAME"], exc)
+        log.info("Deleted secret")
+    except subprocess.CalledProcessError:
+        log.warning("Failed to delete secret")
 
 
 def generate_manifests(cfg: dict[str, Any], secret_env: dict[str, str], dry_run: bool = False, verbose: bool = False) -> str | None:

@@ -14,7 +14,7 @@ spec:
   source:
     repoURL: https://charts.signoz.io
     chart: signoz
-    targetRevision: 0.120.0
+    targetRevision: "0.120.0"
     helm:
       values: |
         global:
@@ -34,6 +34,12 @@ spec:
           env:
             signoz_telemetrystore_provider: clickhouse
             signoz_include_only_log_namespaces: inference
+            # JWT secret is read from a Kubernetes Secret (not stored in Git)
+            SIGNOZ_TOKENIZER_JWT_SECRET:
+              valueFrom:
+                secretKeyRef:
+                  name: signoz-jwt-secret
+                  key: SIGNOZ_TOKENIZER_JWT_SECRET
           podSecurityContext:
             fsGroup: 1000
           securityContext:
@@ -65,6 +71,24 @@ spec:
       prune: true
       selfHeal: true
     syncOptions:
-    - CreateNamespace=true
-    - PrunePropagationPolicy=foreground
-    - PruneLast=true
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  # Prevent ArgoCD from treating externally-managed Secret data as a diff that must be reconciled
+  ignoreDifferences:
+    - group: ""
+      kind: Secret
+      name: signoz-clickhouse-auth
+      jsonPointers:
+        - /data
+    - group: ""
+      kind: Secret
+      name: signoz-jwt-secret
+      jsonPointers:
+        - /data
