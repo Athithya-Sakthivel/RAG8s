@@ -486,7 +486,7 @@ def apply_secret_direct(settings: DeploymentSettings, secret_env: dict[str, str]
     cmd.extend(["--dry-run=client", "-o", "yaml"])
     proc = subprocess.run(cmd, check=True, capture_output=True, text=True)
     subprocess.run(["kubectl", "apply", "-f", "-"], input=proc.stdout, text=True, check=True, capture_output=True)
-    log.info("Applied secret %s in namespace %s", settings.secret_name, settings.namespace)
+    log.info("Applied secret as USE_IAM=false")
 
 
 def rollout() -> int:
