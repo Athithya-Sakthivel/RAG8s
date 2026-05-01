@@ -1,90 +1,58 @@
 #!/usr/bin/env bash
-# signoz_bootstrap.sh
 #
-# Fully automated bootstrap for a fresh Kubernetes cluster (no manual steps).
-# - Creates namespaces (signoz, clickhouse)
-# - Generates strong secrets and applies them to the cluster (kubectl)
-# - Attempts to install a ClickHouse Helm release (best-effort)
-# - Renders an ArgoCD Application YAML that references the pre-created Secrets
-#   (no plaintext secrets in the Application YAML or committed files)
+# signoz_install_internal_final.sh
+#
+# Fully automated SigNoz install using the chart's internal ClickHouse.
+# - Requires: kubectl, helm, openssl, git (if GIT_PUSH=true)
+# - Secrets are created in-cluster only (no plaintext secrets committed)
+# - Detects and fixes Helm ownership conflicts for pre-existing ClusterRole/ClusterRoleBinding
+# - Validates helm template for known DSN substitution bug before install
+# - Renders and optionally commits ArgoCD Application YAML (no secrets in YAML)
 #
 # Usage:
-#   chmod +x signoz_bootstrap.sh
-#   ./signoz_bootstrap.sh
-#
-# Optional environment variables (examples):
-#   SIGNOZ_APPLICATION_OUTPUT (default: src/argocd/signoz-application.yaml)
-#   SIGNOZ_APP_NAME (default: signoz)
-#   SIGNOZ_APP_NAMESPACE (default: argocd)
-#   SIGNOZ_PROJECT (default: e2e-rag-system)
-#   SIGNOZ_DEST_NAMESPACE (default: signoz)
-#   SIGNOZ_CLICKHOUSE_NS (default: clickhouse)
-#   SIGNOZ_CLICKHOUSE_RELEASE (default: clickhouse)
-#   SIGNOZ_CLICKHOUSE_CHART (default: clickhouse/clickhouse)
-#   SIGNOZ_CHART_REPO_URL (default: https://charts.signoz.io)
-#   SIGNOZ_CHART_NAME (default: signoz)
-#   SIGNOZ_CHART_VERSION (default: 0.120.0)
-#   SIGNOZ_CLICKHOUSE_USER (default: admin)
-#   SIGNOZ_CLICKHOUSE_PASSWORD (auto-generated if empty)
-#   SIGNOZ_CLICKHOUSE_SECRET (default: signoz-clickhouse-auth)
-#   SIGNOZ_JWT_SECRET (auto-generated if empty)
-#   SIGNOZ_JWT_SECRET_NAME (default: signoz-jwt-secret)
-#   SIGNOZ_STORAGE_CLASS (default: default-storage-class)
-#   GIT_PUSH (if "true", attempt to git add/commit/push the rendered Application YAML)
-#   GIT_COMMIT_MESSAGE (commit message when GIT_PUSH=true)
+#   export SIGNOZ_CLICKHOUSE_PASSWORD="..."   # optional, auto-generated if empty
+#   export SIGNOZ_JWT_SECRET="..."            # optional, auto-generated if empty
+#   export GIT_PUSH=true                      # optional: commit & push Application YAML
+#   chmod +x signoz_install_internal_final.sh
+#   ./signoz_install_internal_final.sh
 #
 set -euo pipefail
 IFS=$'\n\t'
 umask 077
 
-# --- Defaults and env ---
-REPO_ROOT="$(pwd)"
-OUTPUT="${SIGNOZ_APPLICATION_OUTPUT:-${REPO_ROOT}/src/argocd/signoz-application.yaml}"
-APP_NAME="${SIGNOZ_APP_NAME:-signoz}"
-APP_NAMESPACE="${SIGNOZ_APP_NAMESPACE:-argocd}"
-PROJECT="${SIGNOZ_PROJECT:-e2e-rag-system}"
-DEST_NAMESPACE="${SIGNOZ_DEST_NAMESPACE:-signoz}"
-CLICKHOUSE_NS="${SIGNOZ_CLICKHOUSE_NS:-clickhouse}"
-CLICKHOUSE_RELEASE="${SIGNOZ_CLICKHOUSE_RELEASE:-clickhouse}"
-CLICKHOUSE_CHART="${SIGNOZ_CLICKHOUSE_CHART:-clickhouse/clickhouse}"
-CLICKHOUSE_CHART_VERSION="${SIGNOZ_CLICKHOUSE_CHART_VERSION:-}"
+# --- Configurable defaults (override via env) ---
+OUTPUT="${SIGNOZ_APPLICATION_OUTPUT:-src/argocd/signoz-application.yaml}"
+NAMESPACE="${SIGNOZ_DEST_NAMESPACE:-signoz}"
 SIGNOZ_HELM_REPO="${SIGNOZ_CHART_REPO_URL:-https://charts.signoz.io}"
 SIGNOZ_CHART="${SIGNOZ_CHART_NAME:-signoz}"
 SIGNOZ_CHART_VERSION="${SIGNOZ_CHART_VERSION:-0.120.0}"
-CLUSTER_NAME="${SIGNOZ_CLUSTER_NAME:-production-cluster}"
-CLUSTER_DOMAIN="${SIGNOZ_CLUSTER_DOMAIN:-cluster.local}"
-STORAGE_CLASS="${SIGNOZ_STORAGE_CLASS:-default-storage-class}"
 CLICKHOUSE_USER="${SIGNOZ_CLICKHOUSE_USER:-admin}"
 CLICKHOUSE_PASSWORD="${SIGNOZ_CLICKHOUSE_PASSWORD:-}"
-CLICKHOUSE_SECRET="${SIGNOZ_CLICKHOUSE_SECRET:-signoz-clickhouse-auth}"
 JWT_SECRET="${SIGNOZ_JWT_SECRET:-}"
 JWT_SECRET_NAME="${SIGNOZ_JWT_SECRET_NAME:-signoz-jwt-secret}"
+CLICKHOUSE_PERSISTENCE_SIZE="${SIGNOZ_CLICKHOUSE_PERSISTENCE_SIZE:-10Gi}"
+GIT_PUSH="${GIT_PUSH:-false}"
+GIT_COMMIT_MESSAGE="${GIT_COMMIT_MESSAGE:-Add signoz ArgoCD Application (internal ClickHouse)}"
+
 KUBECTL="${KUBECTL:-kubectl}"
 HELM="${HELM:-helm}"
 OPENSSL="${OPENSSL:-openssl}"
-GIT_PUSH="${GIT_PUSH:-false}"
-GIT_COMMIT_MESSAGE="${GIT_COMMIT_MESSAGE:-Add signoz ArgoCD Application}"
+GIT_BIN="${GIT_BIN:-git}"
 
-# --- Helpers ---
-log() { printf '[%s] %s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$*" >&2; }
-fatal() { log "FATAL: $*"; exit 1; }
-require_bin() { command -v "$1" >/dev/null 2>&1 || fatal "$1 not found in PATH"; }
-atomic_write() {
-  local dest="$1"
-  local tmp
-  tmp="$(mktemp "$(dirname "$dest")/.tmp.XXXXXX")"
-  cat > "$tmp"
-  chmod 600 "$tmp"
-  mv -f "$tmp" "$dest"
-}
+# Helm release and resource names used by the chart
+HELM_RELEASE_NAME="signoz"
+OTEL_CLUSTERROLE_NAME="signoz-otel-collector-signoz"
 
-# --- Validate tools ---
-require_bin "$KUBECTL"
-require_bin "$HELM"
-require_bin "$OPENSSL"
-if [[ "$GIT_PUSH" == "true" ]]; then require_bin git; fi
+log(){ printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >&2; }
+fatal(){ log "FATAL: $*"; exit 1; }
+require(){ command -v "$1" >/dev/null 2>&1 || fatal "$1 not found in PATH"; }
 
-# --- Generate secrets if missing (kept only in-cluster) ---
+require "$KUBECTL"
+require "$HELM"
+require "$OPENSSL"
+if [[ "$GIT_PUSH" == "true" ]]; then require "$GIT_BIN"; fi
+
+# --- Generate secrets if missing ---
 if [[ -z "$CLICKHOUSE_PASSWORD" ]]; then
   CLICKHOUSE_PASSWORD="$($OPENSSL rand -base64 32)"
   log "Generated ClickHouse password"
@@ -94,57 +62,33 @@ if [[ -z "$JWT_SECRET" ]]; then
   log "Generated JWT secret"
 fi
 
-# --- Ensure namespaces exist ---
-if ! $KUBECTL get ns "$DEST_NAMESPACE" >/dev/null 2>&1; then
-  log "Creating namespace: $DEST_NAMESPACE"
-  $KUBECTL create namespace "$DEST_NAMESPACE" >/dev/null
+# --- Ensure namespace exists ---
+if ! $KUBECTL get ns "$NAMESPACE" >/dev/null 2>&1; then
+  log "Creating namespace: $NAMESPACE"
+  $KUBECTL create namespace "$NAMESPACE"
 else
-  log "Namespace $DEST_NAMESPACE already exists"
+  log "Namespace $NAMESPACE already present"
 fi
 
-if ! $KUBECTL get ns "$CLICKHOUSE_NS" >/dev/null 2>&1; then
-  log "Creating ClickHouse namespace: $CLICKHOUSE_NS"
-  $KUBECTL create namespace "$CLICKHOUSE_NS" >/dev/null
-else
-  log "Namespace $CLICKHOUSE_NS already exists"
-fi
-
-# --- Apply Kubernetes Secrets (stringData) into the cluster only ---
-apply_secret() {
-  local name="$1"; local ns="$2"; declare -n kv="$3"
-  # Build manifest on stdout and apply via kubectl
-  $KUBECTL apply -f - <<EOF >/dev/null
+# --- Create JWT secret in-cluster (stringData) ---
+log "Creating JWT secret ${JWT_SECRET_NAME} in ${NAMESPACE}"
+$KUBECTL apply -f - <<EOF
 apiVersion: v1
 kind: Secret
 metadata:
-  name: ${name}
-  namespace: ${ns}
-  labels:
-    app.kubernetes.io/managed-by: signoz-bootstrap
+  name: ${JWT_SECRET_NAME}
+  namespace: ${NAMESPACE}
 stringData:
-$(for k in "${!kv[@]}"; do v="${kv[$k]//\"/\\\"}"; printf '  %s: "%s"\n' "$k" "$v"; done)
+  SIGNOZ_TOKENIZER_JWT_SECRET: "${JWT_SECRET}"
 type: Opaque
 EOF
-  log "Applied secret ${name} in namespace ${ns}"
-}
 
-declare -A clickhouse_kv=( [user]="$CLICKHOUSE_USER" [password]="$CLICKHOUSE_PASSWORD" )
-declare -A jwt_kv=( [SIGNOZ_TOKENIZER_JWT_SECRET]="$JWT_SECRET" )
+# --- Add helm repo and update ---
+log "Adding/updating SigNoz helm repo"
+$HELM repo add signoz "${SIGNOZ_HELM_REPO}" >/dev/null 2>&1 || true
+$HELM repo update >/dev/null 2>&1 || true
 
-apply_secret "$CLICKHOUSE_SECRET" "$DEST_NAMESPACE" clickhouse_kv
-apply_secret "$JWT_SECRET_NAME" "$DEST_NAMESPACE" jwt_kv
-
-# --- Add Helm repos and update ---
-log "Adding/updating Helm repos"
-$HELM repo add clickhouse https://clickhouse.github.io/helm-charts >/dev/null 2>&1 || true
-$HELM repo add signoz "$SIGNOZ_HELM_REPO" >/dev/null 2>&1 || true
-$HELM repo update >/dev/null
-
-# --- Detect kind/local cluster and StorageClass presence to choose persistence ---
-is_kind=false
-if $KUBECTL get nodes -o name 2>/dev/null | grep -qi kind; then is_kind=true; fi
-if $KUBECTL get nodes -o wide 2>/dev/null | grep -qi kind; then is_kind=true; fi
-
+# --- Detect storageclass presence to decide persistence ---
 has_sc=false
 if $KUBECTL get storageclass >/dev/null 2>&1; then
   if $KUBECTL get storageclass -o jsonpath='{.items[0].metadata.name}' 2>/dev/null | grep -q '.'; then
@@ -152,216 +96,143 @@ if $KUBECTL get storageclass >/dev/null 2>&1; then
   fi
 fi
 
-if [[ "$is_kind" == "true" ]] || [[ "$has_sc" == "false" ]]; then
-  CH_PERSISTENCE=false
-  log "Detected kind/local cluster or no StorageClass; ClickHouse persistence will be disabled for install"
-else
+if [[ "$has_sc" == "true" ]]; then
   CH_PERSISTENCE=true
-  log "StorageClass present; ClickHouse persistence will be enabled for install"
+  log "StorageClass detected: enabling ClickHouse persistence (${CLICKHOUSE_PERSISTENCE_SIZE})"
+else
+  CH_PERSISTENCE=false
+  log "No StorageClass detected: ClickHouse persistence will be disabled (suitable for local/kind)"
 fi
 
-# --- Attempt ClickHouse install (best-effort). secrets are passed to helm via --set-string only ---
-install_clickhouse() {
-  local persistence="$1"
-  local args=(upgrade --install "$CLICKHOUSE_RELEASE" "$CLICKHOUSE_CHART" --namespace "$CLICKHOUSE_NS" --create-namespace)
-  if [[ -n "$CLICKHOUSE_CHART_VERSION" ]]; then args+=(--version "$CLICKHOUSE_CHART_VERSION"); fi
-  args+=(--set-string clickhouse.user="$CLICKHOUSE_USER" --set-string clickhouse.password="$CLICKHOUSE_PASSWORD")
-  if [[ "$persistence" == "true" ]]; then
-    args+=(--set clickhouse.persistentVolume.enabled=true --set clickhouse.persistentVolume.size=10Gi)
-  else
-    args+=(--set clickhouse.persistentVolume.enabled=false)
-  fi
-  args+=(--wait --timeout 10m)
-  log "Running helm: ${HELM} ${args[*]}"
-  if $HELM "${args[@]}" >/dev/null 2>&1; then
-    log "ClickHouse helm install succeeded (persistence=${persistence})"
-    return 0
-  else
-    log "ClickHouse helm install failed (persistence=${persistence})"
-    return 1
+# --- Validate helm template for DSN substitution bug ---
+log "Rendering helm template to validate no literal \$(CLICKHOUSE_PASSWORD) appears"
+TMP_TEMPLATE="/tmp/signoz_helm_template.yaml"
+$HELM template "${HELM_RELEASE_NAME}" signoz/signoz --version "${SIGNOZ_CHART_VERSION}" \
+  --set clickhouse.enabled=true \
+  --set-string clickhouse.user="${CLICKHOUSE_USER}" \
+  --set-string clickhouse.password="${CLICKHOUSE_PASSWORD}" \
+  --set signoz.env.SIGNOZ_TOKENIZER_JWT_SECRET.valueFrom.secretKeyRef.name="${JWT_SECRET_NAME}" \
+  --set signoz.env.SIGNOZ_TOKENIZER_JWT_SECRET.valueFrom.secretKeyRef.key=SIGNOZ_TOKENIZER_JWT_SECRET \
+  > "${TMP_TEMPLATE}"
+
+if grep -q '\$\(CLICKHOUSE_PASSWORD\)' "${TMP_TEMPLATE}"; then
+  fatal "Chart template contains literal \$(CLICKHOUSE_PASSWORD). Upgrade chart or use a chart version without this bug."
+fi
+log "Template validation passed (no literal \$(CLICKHOUSE_PASSWORD) found)."
+
+# --- Fix pre-existing ClusterRole/ClusterRoleBinding ownership conflicts (automated) ---
+# Helm fails if a resource exists without Helm ownership metadata. We attempt to patch such resources
+# to add the required labels/annotations so Helm can adopt them. If patching fails, we delete them as last resort.
+patch_or_delete_resource() {
+  local kind="$1" name="$2" ns="$3"
+  # Only ClusterRole/ClusterRoleBinding are cluster-scoped (ns empty)
+  if [[ "$kind" == "ClusterRole" || "$kind" == "ClusterRoleBinding" ]]; then
+    if $KUBECTL get "$kind" "$name" >/dev/null 2>&1; then
+      log "Found existing $kind/$name. Ensuring Helm ownership metadata is present."
+      # Add label app.kubernetes.io/managed-by=Helm and helm annotations
+      # meta.helm.sh/release-name and meta.helm.sh/release-namespace are required
+      # Use kubectl patch to add labels/annotations if missing
+      set +e
+      $KUBECTL patch "$kind" "$name" --type='merge' -p "{\"metadata\":{\"labels\":{\"app.kubernetes.io/managed-by\":\"Helm\"},\"annotations\":{\"meta.helm.sh/release-name\":\"${HELM_RELEASE_NAME}\",\"meta.helm.sh/release-namespace\":\"${NAMESPACE}\"}}}" >/dev/null 2>&1
+      rc=$?
+      set -e
+      if [[ $rc -eq 0 ]]; then
+        log "Patched $kind/$name with Helm ownership metadata."
+      else
+        log "Failed to patch $kind/$name. Attempting to delete it to allow Helm install (automated)."
+        $KUBECTL delete "$kind" "$name" --ignore-not-found || fatal "Failed to delete $kind/$name; manual intervention required."
+        log "Deleted $kind/$name."
+      fi
+    fi
   fi
 }
 
-CH_INSTALL_OK=false
-if install_clickhouse "$CH_PERSISTENCE"; then
-  CH_INSTALL_OK=true
+# Try to patch or delete the known conflicting ClusterRole used by the chart
+patch_or_delete_resource "ClusterRole" "${OTEL_CLUSTERROLE_NAME}" ""
+
+# Also check for ClusterRoleBinding with same base name (common)
+patch_or_delete_resource "ClusterRoleBinding" "${OTEL_CLUSTERROLE_NAME}" ""
+
+# --- Build helm install args and run install (internal ClickHouse) ---
+helm_args=(upgrade --install "${HELM_RELEASE_NAME}" signoz/signoz --namespace "${NAMESPACE}" --create-namespace)
+helm_args+=(--version "${SIGNOZ_CHART_VERSION}")
+helm_args+=(--set clickhouse.enabled=true --set-string clickhouse.user="${CLICKHOUSE_USER}" --set-string clickhouse.password="${CLICKHOUSE_PASSWORD}")
+if [[ "$CH_PERSISTENCE" == "true" ]]; then
+  helm_args+=(--set clickhouse.persistence.enabled=true --set clickhouse.persistence.size="${CLICKHOUSE_PERSISTENCE_SIZE}")
 else
-  log "Retrying ClickHouse install with persistence disabled"
-  if install_clickhouse "false"; then
-    CH_INSTALL_OK=true
-  else
-    CH_INSTALL_OK=false
-    log "ClickHouse install failed after retries; continuing. Secrets remain only in-cluster."
-  fi
+  helm_args+=(--set clickhouse.persistence.enabled=false)
+fi
+# Ensure JWT env is wired to secret via valueFrom
+helm_args+=(--set signoz.env.SIGNOZ_TOKENIZER_JWT_SECRET.valueFrom.secretKeyRef.name="${JWT_SECRET_NAME}" --set signoz.env.SIGNOZ_TOKENIZER_JWT_SECRET.valueFrom.secretKeyRef.key=SIGNOZ_TOKENIZER_JWT_SECRET)
+helm_args+=(--wait --timeout 20m)
+
+log "Installing SigNoz (internal ClickHouse) via Helm"
+if $HELM "${helm_args[@]}"; then
+  log "Helm install/upgrade succeeded"
+else
+  fatal "Helm install failed even after attempting to fix ownership conflicts. Inspect cluster and Helm state."
 fi
 
-# --- Resolve ClickHouse service name (best-effort) ---
-CLICKHOUSE_SVC="$($KUBECTL -n "$CLICKHOUSE_NS" get svc -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{range .spec.ports[*]}{.port}{";"}{end}{"\n"}{end}' 2>/dev/null | awk -F'|' -v port=9000 '{
-  split($2, arr, ";");
-  for (i in arr) if (arr[i]==port) { print $1; exit }
-}')"
-if [[ -z "$CLICKHOUSE_SVC" ]]; then
-  CLICKHOUSE_SVC="${CLICKHOUSE_RELEASE}-clickhouse"
-fi
-CLICKHOUSE_FQDN="${CLICKHOUSE_SVC}.${CLICKHOUSE_NS}.svc.cluster.local"
-
-# --- Build Helm values block for ArgoCD Application (externalClickhouse pattern) ---
-# IMPORTANT: This Application YAML does NOT contain any plaintext secret values.
-read -r -d '' HELM_VALUES <<'EOF' || true
-global:
-  storageClass: "__STORAGE_CLASS__"
-  clusterDomain: "__CLUSTER_DOMAIN__"
-  clusterName: "__CLUSTER_NAME__"
-
-clusterName: "__CLUSTER_NAME__"
-
-clickhouse:
-  enabled: false
-
-externalClickhouse:
-  host: "__CLICKHOUSE_FQDN__:9000"
-  user: "__CLICKHOUSE_USER__"
-  existingSecret: "__CLICKHOUSE_SECRET__"
-  existingSecretPasswordKey: password
-
-signoz:
-  name: "signoz"
-  replicaCount: 1
-  env:
-    signoz_telemetrystore_provider: "clickhouse"
-    signoz_include_only_log_namespaces: "inference"
-    SIGNOZ_TOKENIZER_JWT_SECRET:
-      valueFrom:
-        secretKeyRef:
-          name: "__JWT_SECRET_NAME__"
-          key: SIGNOZ_TOKENIZER_JWT_SECRET
-  podSecurityContext:
-    fsGroup: 1000
-  securityContext:
-    allowPrivilegeEscalation: false
-    capabilities:
-      drop:
-        - ALL
-    readOnlyRootFilesystem: true
-    runAsNonRoot: true
-    runAsUser: 1000
-  resources:
-    requests:
-      cpu: "100m"
-      memory: "256Mi"
-    limits:
-      cpu: "500m"
-      memory: "512Mi"
-  persistence:
-    enabled: true
-    existingClaim: ""
-    storageClass: "__STORAGE_CLASS__"
-    accessModes:
-      - ReadWriteOnce
-    size: "1Gi"
-EOF
-
-HELM_VALUES_RENDERED="$(printf '%s' "$HELM_VALUES" \
-  | sed -e "s|__STORAGE_CLASS__|${STORAGE_CLASS}|g" \
-        -e "s|__CLUSTER_DOMAIN__|${CLUSTER_DOMAIN}|g" \
-        -e "s|__CLUSTER_NAME__|${CLUSTER_NAME}|g" \
-        -e "s|__CLICKHOUSE_FQDN__|${CLICKHOUSE_FQDN}|g" \
-        -e "s|__CLICKHOUSE_USER__|${CLICKHOUSE_USER}|g" \
-        -e "s|__CLICKHOUSE_SECRET__|${CLICKHOUSE_SECRET}|g" \
-        -e "s|__JWT_SECRET_NAME__|${JWT_SECRET_NAME}|g" )"
-
-# Insert configChecksum under global (best-effort)
-CONFIG_CHECKSUM="$(printf '%s' "$HELM_VALUES_RENDERED" | sha256sum | awk '{print $1}')"
-HELM_VALUES_WITH_CHECKSUM="$(printf '%s\n' "$HELM_VALUES_RENDERED" | awk -v cs="$CONFIG_CHECKSUM" '
-  BEGIN { added=0 }
-  {
-    print $0
-    if ($0 ~ /^global:/ && added==0) {
-      getline; print $0; print "  configChecksum: " cs; added=1; next
-    }
-  }')"
-if [[ -z "$HELM_VALUES_WITH_CHECKSUM" ]]; then HELM_VALUES_WITH_CHECKSUM="$HELM_VALUES_RENDERED"; fi
-
-# --- Build ArgoCD Application YAML (references secrets by name; no plaintext) ---
-APPLICATION_YAML="$(cat <<-YAML
+# --- Render ArgoCD Application YAML (no plaintext secrets) ---
+log "Rendering ArgoCD Application YAML to ${OUTPUT}"
+mkdir -p "$(dirname "${OUTPUT}")"
+cat > "${OUTPUT}" <<YAML
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: ${APP_NAME}
-  namespace: ${APP_NAMESPACE}
+  name: signoz
+  namespace: argocd
   labels:
-    app.kubernetes.io/name: ${APP_NAME}
+    app.kubernetes.io/name: signoz
     app.kubernetes.io/managed-by: argocd
-  annotations:
-    description: SigNoz Helm deployment (external ClickHouse; secrets created at bootstrap)
-    signoz.argoproj.io/environment: prod
 spec:
-  project: ${PROJECT}
+  project: e2e-rag-system
   source:
     repoURL: ${SIGNOZ_HELM_REPO}
     chart: ${SIGNOZ_CHART}
     targetRevision: "${SIGNOZ_CHART_VERSION}"
     helm:
       values: |
-$(printf '%s' "$HELM_VALUES_WITH_CHECKSUM" | sed 's/^/        /')
+        clickhouse:
+          enabled: true
+        signoz:
+          env:
+            SIGNOZ_TOKENIZER_JWT_SECRET:
+              valueFrom:
+                secretKeyRef:
+                  name: "${JWT_SECRET_NAME}"
+                  key: SIGNOZ_TOKENIZER_JWT_SECRET
   destination:
     server: https://kubernetes.default.svc
-    namespace: ${DEST_NAMESPACE}
+    namespace: ${NAMESPACE}
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
-    syncOptions:
-      - CreateNamespace=true
-      - PrunePropagationPolicy=foreground
-      - PruneLast=true
-    retry:
-      limit: 5
-      backoff:
-        duration: 5s
-        factor: 2
-        maxDuration: 3m
-  ignoreDifferences:
-    - group: ""
-      kind: Secret
-      name: ${CLICKHOUSE_SECRET}
-      jsonPointers:
-        - /data
-    - group: ""
-      kind: Secret
-      name: ${JWT_SECRET_NAME}
-      jsonPointers:
-        - /data
 YAML
-)"
 
-# --- Write Application YAML atomically (no secrets inside) ---
-mkdir -p "$(dirname "$OUTPUT")"
-atomic_write "$OUTPUT" <<EOF
-$APPLICATION_YAML
-EOF
-log "Wrote ArgoCD Application YAML to: $OUTPUT"
+# Apply Application so ArgoCD sees it immediately
+log "Applying ArgoCD Application resource"
+$KUBECTL apply -f "${OUTPUT}"
 
-# --- Optionally commit & push the Application YAML to Git (if requested) ---
-if [[ "$GIT_PUSH" == "true" ]]; then
-  if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    git add "$OUTPUT"
-    git commit -m "${GIT_COMMIT_MESSAGE}" || log "No changes to commit"
-    git push || log "Git push failed; please push manually"
-    log "Committed and pushed $OUTPUT"
+# Optionally commit & push Application YAML to git
+if [[ "${GIT_PUSH}" == "true" ]]; then
+  if $GIT_BIN rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    log "Committing ${OUTPUT} to git"
+    $GIT_BIN add "${OUTPUT}"
+    $GIT_BIN commit -m "${GIT_COMMIT_MESSAGE}" || log "No changes to commit"
+    log "Pushing commit to remote"
+    $GIT_BIN push || log "git push failed; ensure remote and credentials are configured"
   else
-    log "GIT_PUSH=true but current directory is not a git repo; skipping push"
+    log "GIT_PUSH=true but current directory is not a git repo; skipping commit"
   fi
 fi
 
-# --- Final status ---
-log "Bootstrap complete."
-log "Secrets created in namespace ${DEST_NAMESPACE}: ${CLICKHOUSE_SECRET}, ${JWT_SECRET_NAME} (kept only in-cluster)"
-if [[ "$CH_INSTALL_OK" == "true" ]]; then
-  log "ClickHouse install succeeded (namespace: ${CLICKHOUSE_NS}, service: ${CLICKHOUSE_SVC}.${CLICKHOUSE_NS}.svc.cluster.local:9000)"
-else
-  log "ClickHouse install did not succeed; ArgoCD Application references the pre-created secrets and will retry when ClickHouse becomes available."
-fi
-log "ArgoCD Application rendered to: ${OUTPUT} (no plaintext secrets inside)."
+# Restart SigNoz pods to pick up env/secret (best-effort)
+log "Restarting SigNoz pods"
+$KUBECTL -n "${NAMESPACE}" rollout restart statefulset/signoz >/dev/null 2>&1 || true
+$KUBECTL -n "${NAMESPACE}" rollout restart deployment/signoz-otel-collector >/dev/null 2>&1 || true
 
+log "Done. SigNoz installed with internal ClickHouse. Secrets exist only in-cluster; Application YAML contains no plaintext secrets."
+log "If anything still fails, run: kubectl -n ${NAMESPACE} get pods; kubectl -n ${NAMESPACE} logs statefulset/signoz --tail=200"
 exit 0

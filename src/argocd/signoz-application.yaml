@@ -3,6 +3,9 @@ kind: Application
 metadata:
   name: signoz
   namespace: argocd
+  labels:
+    app.kubernetes.io/name: signoz
+    app.kubernetes.io/managed-by: argocd
 spec:
   project: e2e-rag-system
   source:
@@ -12,12 +15,7 @@ spec:
     helm:
       values: |
         clickhouse:
-          enabled: false
-        externalClickhouse:
-          host: "clickhouse-clickhouse.clickhouse.svc.cluster.local:9000"
-          user: "admin"
-          existingSecret: "signoz-clickhouse-auth"
-          existingSecretPasswordKey: password
+          enabled: true
         signoz:
           env:
             SIGNOZ_TOKENIZER_JWT_SECRET:
@@ -29,14 +27,6 @@ spec:
     server: https://kubernetes.default.svc
     namespace: signoz
   syncPolicy:
-    automated: { prune: true, selfHeal: true }
-    syncOptions: [CreateNamespace=true]
-  ignoreDifferences:
-    - group: ""
-      kind: Secret
-      name: signoz-clickhouse-auth
-      jsonPointers: ["/data"]
-    - group: ""
-      kind: Secret
-      name: signoz-jwt-secret
-      jsonPointers: ["/data"]
+    automated:
+      prune: true
+      selfHeal: true

@@ -92,10 +92,15 @@ curl -N http://localhost:8203/generate/stream \
 
 
 
+
 git add . && git commit -m "argocd sync" && git push origin main
 
+
+git add . && git commit -m "signoz connection fix" && git push origin main
+
+
 make core
-export SIGNOZ_CLICKHOUSE_PASSWORD="YourStrongPasswordHere"
+export SIGNOZ_JWT_SECRET="YourStrongJWTSecretHere"
 bash src/infra/core/signoz_setup.sh --apply-secret
 python3 src/infra/rag/retriever_service.py --apply-secrets
 

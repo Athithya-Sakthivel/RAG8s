@@ -62,6 +62,26 @@ def _env_int_any(names: tuple[str, ...], default: int) -> int:
     return default
 
 
+def _parse_duration_seconds(raw: str | None) -> float | None:
+    if raw is None:
+        return None
+    text = raw.strip().lower()
+    if not text:
+        return None
+
+    multiplier = 1.0
+    for suffix, factor in (("ms", 0.001), ("s", 1.0), ("m", 60.0)):
+        if text.endswith(suffix):
+            text = text[: -len(suffix)].strip()
+            multiplier = factor
+            break
+
+    try:
+        return float(text) * multiplier
+    except Exception:
+        return None
+
+
 def _env_otlp_timeout_seconds(default: float = 5.0) -> float:
     for name in (
         "OTEL_TIMEOUT_SECONDS",
@@ -71,13 +91,8 @@ def _env_otlp_timeout_seconds(default: float = 5.0) -> float:
         "OTEL_EXPORTER_OTLP_LOGS_TIMEOUT",
     ):
         raw = os.getenv(name)
-        if raw is None or not raw.strip():
-            continue
-        try:
-            value = float(raw)
-        except Exception:
-            continue
-        if value > 0:
+        value = _parse_duration_seconds(raw)
+        if value is not None and value > 0:
             return value
     return default
 
@@ -140,9 +155,10 @@ BEDROCK_MODEL_ID = (
 ANSWER_PROMPT_TEMPLATE = _env_str(
     "LLM_PROMPT_TEMPLATE",
     (
-        "You are a knowledge assistant who must explain explicitly to an end-user by referring ONLY to the provided passages BELOW"
-        "You MUST end every passage with a citation in the exact format [n], where n is one of the numbered passage blocks."
-        "Use ONLY the provided passage numbers. Do NOT output filenames, secrets, URLs, page numbers, or any other metadata. Do NOT invent citations."
+        "You are a knowledge assistant who must explain explicitly to an end-user by referring ONLY to the provided passages below.\n"
+        "You MUST end every passage with a citation in the exact format [n], where n is one of the numbered passage blocks.\n"
+        "Use ONLY the provided passage numbers. Do NOT output filenames, secrets, URLs, page numbers, or any other metadata.\n"
+        "Do NOT invent citations.\n"
         "PASSAGES:\n{passages}\n\n"
         "QUESTION: {question}\n\n"
         "Answer:"
@@ -189,8 +205,19 @@ BREAKER_RESET_TIMEOUT = _env_float("BREAKER_RESET_TIMEOUT", 20.0)
 
 OTEL_ENDPOINT = _env_str(
     "OTEL_EXPORTER_OTLP_ENDPOINT",
-    "http://signoz-otel-collector.signoz.svc.cluster.local:4317",
+    "http://signoz-otel-collector.signoz.svc.cluster.local:4318",
 )
+
+OTEL_PROTOCOL = (
+    _env_str("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf") or "http/protobuf"
+).strip().lower()
+if OTEL_PROTOCOL in {"http", "http/protobuf", "http-protobuf"}:
+    OTEL_PROTOCOL = "http/protobuf"
+elif OTEL_PROTOCOL in {"grpc", "gprc"}:
+    OTEL_PROTOCOL = "grpc"
+else:
+    OTEL_PROTOCOL = "http/protobuf"
+
 OTEL_TIMEOUT_SECONDS = _env_otlp_timeout_seconds(5.0)
 OTEL_METRIC_EXPORT_INTERVAL_MS = _env_int_any(
     ("OTEL_METRIC_EXPORT_INTERVAL", "OTEL_METRIC_EXPORT_INTERVAL_MS"),
@@ -320,6 +347,7 @@ __all__ = [
     "OTEL_ENDPOINT",
     "OTEL_METRIC_EXPORT_INTERVAL_MS",
     "OTEL_METRIC_EXPORT_TIMEOUT_MS",
+    "OTEL_PROTOCOL",
     "OTEL_TIMEOUT_SECONDS",
     "OTEL_TRACES_SAMPLER",
     "PROMPT_MAX_CONTENT_CHARS",
