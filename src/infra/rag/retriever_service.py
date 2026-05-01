@@ -96,7 +96,7 @@ APP_ENV_DEFAULTS: dict[str, str] = {
     "RETRY_MAX_DELAY": "0.8",
     "BREAKER_FAILURE_THRESHOLD": "3",
     "BREAKER_RESET_TIMEOUT": "20.0",
-    "OTEL_EXPORTER_OTLP_ENDPOINT": "http://signoz-otel-collector.signoz.svc.cluster.local:4317",
+#   "OTEL_EXPORTER_OTLP_ENDPOINT": "http://signoz-otel-collector.signoz.svc.cluster.local:4317",
     "OTEL_TIMEOUT_SECONDS": "5.0",
     "OTEL_METRIC_EXPORT_INTERVAL_MS": "15000",
     "OTEL_METRIC_EXPORT_TIMEOUT_MS": "10000",

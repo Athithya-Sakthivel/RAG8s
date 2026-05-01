@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/managed-by: retriever-manifest-generator
     app.kubernetes.io/component: retriever
   annotations:
-    retriever.io/config-sha256: 3d6f3f06bb3ff93ee44acff5a8137a324d655f5f506dc88a94714e75abe10fc4
+    retriever.io/config-sha256: b881a38e56eac61b5fda6d4c36f540115765e6d751cb6ca919dff55042a35470
 spec:
   replicas: 1
   revisionHistoryLimit: 3
@@ -28,7 +28,7 @@ spec:
         app.kubernetes.io/component: retriever
         app.kubernetes.io/part-of: retriever
       annotations:
-        retriever.io/config-sha256: 3d6f3f06bb3ff93ee44acff5a8137a324d655f5f506dc88a94714e75abe10fc4
+        retriever.io/config-sha256: b881a38e56eac61b5fda6d4c36f540115765e6d751cb6ca919dff55042a35470
     spec:
       serviceAccountName: retriever-sa
       automountServiceAccountToken: true
@@ -167,8 +167,6 @@ spec:
           value: '3'
         - name: BREAKER_RESET_TIMEOUT
           value: '20.0'
-        - name: OTEL_EXPORTER_OTLP_ENDPOINT
-          value: http://signoz-otel-collector.signoz.svc.cluster.local:4317
         - name: OTEL_TIMEOUT_SECONDS
           value: '5.0'
         - name: OTEL_METRIC_EXPORT_INTERVAL_MS
