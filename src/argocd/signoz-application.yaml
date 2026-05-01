@@ -7,8 +7,7 @@ metadata:
     app.kubernetes.io/name: signoz
     app.kubernetes.io/managed-by: argocd
   annotations:
-    description: SigNoz Helm deployment (external ClickHouse; secrets created at bootstrap)
-    signoz.argoproj.io/environment: prod
+    description: SigNoz Helm deployment (external ClickHouse via in-cluster secret)
 spec:
   project: e2e-rag-system
   source:
@@ -19,21 +18,16 @@ spec:
       values: |
         global:
           storageClass: "default-storage-class"
-          configChecksum: 4e9d047161b0412fb1c454b5bd36c05cb195121d1663c25e524b6b3b8132adcb
           clusterDomain: "cluster.local"
           clusterName: "production-cluster"
-        
         clusterName: "production-cluster"
-        
         clickhouse:
           enabled: false
-        
         externalClickhouse:
           host: "clickhouse-clickhouse.clickhouse.svc.cluster.local:9000"
           user: "admin"
           existingSecret: "signoz-clickhouse-auth"
           existingSecretPasswordKey: password
-        
         signoz:
           name: "signoz"
           replicaCount: 1
