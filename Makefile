@@ -1,4 +1,4 @@
-core:
+local-cluster:
 	kind delete cluster --name local-cluster || true && kind create cluster --name local-cluster && \
 	bash src/infra/core/default_storage_class.sh
 

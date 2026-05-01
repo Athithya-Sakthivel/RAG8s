@@ -4,6 +4,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -18,6 +20,7 @@ except Exception as exc:  # pragma: no cover
 
 
 DEFAULT_OUTPUT = Path("src/argocd/qdrant-application.yaml")
+DEFAULT_VALUES_OUTPUT = Path("src/argocd/qdrant-values.yaml")
 
 DEFAULT_APP_NAME = "qdrant"
 DEFAULT_APP_NAMESPACE = "argocd"
@@ -25,9 +28,12 @@ DEFAULT_PROJECT = "default"
 DEFAULT_DEST_NAMESPACE = "qdrant"
 DEFAULT_DEST_SERVER = "https://kubernetes.default.svc"
 
+DEFAULT_HELM_REPO_NAME = "qdrant"
 DEFAULT_REPO_URL = "https://qdrant.github.io/qdrant-helm"
 DEFAULT_CHART_NAME = "qdrant"
 DEFAULT_CHART_VERSION = "v1.17.1"
+DEFAULT_HELM_TIMEOUT = "15m"
+DEFAULT_HELM_RELEASE_NAME = "qdrant"
 
 DEFAULT_IMAGE_REPO = "docker.io/qdrant/qdrant"
 DEFAULT_IMAGE_TAG = "v1.17.1"
@@ -134,9 +140,22 @@ def yaml_dump(data: Any) -> str:
     )
 
 
+def run_cmd(args: list[str], *, cwd: Path | None = None) -> None:
+    dbg("RUN:", " ".join(args))
+    subprocess.run(args, cwd=str(cwd) if cwd else None, check=True)
+
+
+def require_cmd(name: str) -> str:
+    path = shutil.which(name)
+    if not path:
+        fatal(f"Required command not found: {name}")
+    return path
+
+
 @dataclass(frozen=True)
 class Config:
     output: Path
+    values_output: Path
 
     app_name: str
     app_namespace: str
@@ -144,9 +163,12 @@ class Config:
     dest_server: str
     dest_namespace: str
 
+    helm_repo_name: str
     repo_url: str
     chart_name: str
     chart_version: str
+    helm_release_name: str
+    helm_timeout: str
 
     image_repo: str
     image_tag: str
@@ -188,14 +210,18 @@ class Config:
 def load_config() -> Config:
     return Config(
         output=Path(env("QDRANT_APPLICATION_OUTPUT", str(DEFAULT_OUTPUT))),
+        values_output=Path(env("QDRANT_VALUES_OUTPUT", str(DEFAULT_VALUES_OUTPUT))),
         app_name=env("QDRANT_APP_NAME", DEFAULT_APP_NAME),
         app_namespace=env("QDRANT_APP_NAMESPACE", DEFAULT_APP_NAMESPACE),
         project=env("QDRANT_PROJECT", DEFAULT_PROJECT),
         dest_server=env("QDRANT_DEST_SERVER", DEFAULT_DEST_SERVER),
         dest_namespace=env("QDRANT_DEST_NAMESPACE", DEFAULT_DEST_NAMESPACE),
+        helm_repo_name=env("QDRANT_HELM_REPO_NAME", DEFAULT_HELM_REPO_NAME),
         repo_url=env("QDRANT_CHART_REPO_URL", DEFAULT_REPO_URL),
         chart_name=env("QDRANT_CHART_NAME", DEFAULT_CHART_NAME),
         chart_version=env("QDRANT_CHART_VERSION", DEFAULT_CHART_VERSION),
+        helm_release_name=env("QDRANT_HELM_RELEASE_NAME", DEFAULT_HELM_RELEASE_NAME),
+        helm_timeout=env("QDRANT_HELM_TIMEOUT", DEFAULT_HELM_TIMEOUT),
         image_repo=env("QDRANT_IMAGE_REPO", DEFAULT_IMAGE_REPO),
         image_tag=env("QDRANT_IMAGE_TAG", DEFAULT_IMAGE_TAG),
         image_pull_policy=env("QDRANT_IMAGE_PULL_POLICY", DEFAULT_IMAGE_PULL_POLICY),
@@ -301,8 +327,12 @@ def build_values(cfg: Config) -> dict[str, Any]:
     return values
 
 
+def render_values(cfg: Config) -> str:
+    return yaml_dump(build_values(cfg)).rstrip() + "\n"
+
+
 def build_application(cfg: Config) -> dict[str, Any]:
-    values_yaml = yaml_dump(build_values(cfg)).rstrip() + "\n"
+    values_yaml = render_values(cfg)
 
     return {
         "apiVersion": "argoproj.io/v1alpha1",
@@ -363,23 +393,72 @@ def build_application(cfg: Config) -> dict[str, Any]:
     }
 
 
-def render(cfg: Config) -> str:
+def render_application(cfg: Config) -> str:
     return yaml_dump(build_application(cfg))
 
 
-def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Render the Qdrant Argo CD Application manifest.")
-    parser.add_argument("--stdout", action="store_true", help="Print the rendered YAML to stdout.")
-    parser.add_argument("--write", action="store_true", help="Write the rendered YAML to disk.")
-    parser.add_argument("--check", action="store_true", help="Fail if the on-disk file differs from the rendered output.")
-    args = parser.parse_args(argv)
+def ensure_helm_repo(cfg: Config) -> None:
+    require_cmd("helm")
+    run_cmd(["helm", "repo", "add", cfg.helm_repo_name, cfg.repo_url])
+    run_cmd(["helm", "repo", "update"])
 
+
+def rollout_qdrant(cfg: Config) -> None:
+    require_cmd("helm")
+
+    values_yaml = render_values(cfg)
+    atomic_write_text(cfg.values_output, values_yaml)
+    atomic_write_text(cfg.output, render_application(cfg))
+
+    ensure_helm_repo(cfg)
+
+    chart_ref = f"{cfg.helm_repo_name}/{cfg.chart_name}"
+    release = cfg.helm_release_name
+
+    cmd = [
+        "helm",
+        "upgrade",
+        "--install",
+        release,
+        chart_ref,
+        "--version",
+        cfg.chart_version,
+        "-n",
+        cfg.dest_namespace,
+        "--create-namespace",
+        "-f",
+        str(cfg.values_output),
+        "--wait",
+        "--timeout",
+        cfg.helm_timeout,
+    ]
+    run_cmd(cmd)
+    log(f"Rolled out {release} into namespace {cfg.dest_namespace}")
+    log(f"Wrote {cfg.output}")
+    log(f"Wrote {cfg.values_output}")
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description="Render or roll out the Qdrant application.")
+    parser.add_argument("--stdout", action="store_true", help="Print the rendered Application YAML to stdout.")
+    parser.add_argument("--write", action="store_true", help="Write the rendered Application YAML to disk.")
+    parser.add_argument("--check", action="store_true", help="Fail if the on-disk Application YAML differs.")
+    parser.add_argument("--rollout", action="store_true", help="Write values.yaml and install/upgrade Qdrant with Helm.")
+
+    args = parser.parse_args(argv)
     cfg = load_config()
 
-    if not any([args.stdout, args.write, args.check]):
+    if not any([args.stdout, args.write, args.check, args.rollout]):
         args.write = True
 
-    rendered = render(cfg)
+    if args.rollout and (args.stdout or args.check):
+        fatal("--rollout cannot be combined with --stdout or --check")
+
+    if args.rollout:
+        rollout_qdrant(cfg)
+        return
+
+    rendered = render_application(cfg)
 
     if args.stdout:
         sys.stdout.write(rendered)
