@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: reranker-deployment
-  namespace: models
+  namespace: inference
   labels: &id001
     app.kubernetes.io/name: reranker
     app.kubernetes.io/component: reranker
@@ -23,7 +23,7 @@ spec:
     metadata:
       labels: *id001
       annotations:
-        gen-reranker/inputs-hash: cde232ee6127da02fb2bce772450f93cb357d89a481a3542cdef15c92b65a802
+        gen-reranker/inputs-hash: af63dfccc62d573bcd620b7bb3ab35824471814109fab1dd1f0ad79de176f52d
     spec:
       serviceAccountName: reranker-sa
       containers:

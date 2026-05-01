@@ -21,7 +21,7 @@ DEFAULT_STATE_DIRNAME = ".state"
 DEFAULTS: dict[str, Any] = {
     "DEPLOY_ENV": "NONPROD",
     "IMAGE": "ghcr.io/athithya-sakthivel/dense:2026-04-26-08-57--a0cce10@sha256:5b804638527906701a4065b27071a237c3783ca3c9ef4bf5e94dc233e5dc7f7f",
-    "NAMESPACE": "models",
+    "NAMESPACE": "inference",
     "SERVICE_NAME": "dense",
     "CONTAINER_PORT": 8200,
     "HOST": "0.0.0.0",

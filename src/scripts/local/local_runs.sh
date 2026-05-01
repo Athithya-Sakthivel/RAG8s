@@ -96,19 +96,28 @@ curl -N http://localhost:8203/generate/stream \
 git add . && git commit -m "argocd sync" && git push origin main
 
 
+rm -rf src/manifests/dense-service
+rm -rf src/manifests/sparse-service
+rm -rf src/manifests/retriever
+rm -rf src/manifests/reranker-service
 make core
 export SIGNOZ_JWT_SECRET="YourStrongJWTSecretHere"
-bash src/infra/core/signoz_setup.sh --apply-secret
-python3 src/infra/rag/retriever_service.py --apply-secrets
-python3 src/infra/rag/retriever_service.py --write
 
-bash src/infra/core/argo_setup.sh --rollout
-
-
+python3 src/infra/rag/qdrant_service.py --rollout
 export PER_POD=true
 export QDRANT_BACKUP_S3_PREFIX=qdrant/backups/
 export BACKUP_S3_BUCKET=$DATA_S3_BUCKET
 bash src/scripts/backups_and_restore.sh restore
+
+bash src/infra/core/signoz_setup.sh --apply-secret
+python3 src/infra/rag/retriever_service.py --apply-secrets
+python3 src/infra/rag/retriever_service.py --write
+python3 src/infra/rag/reranker_service.py --write
+python3 src/infra/rag/sparse_service.py --generate
+python3 src/infra/rag/dense_service.py --dry-run
+bash src/infra/core/argo_setup.sh --rollout
+
+
 
 
 rWwJ-ZKNKQN9SySj

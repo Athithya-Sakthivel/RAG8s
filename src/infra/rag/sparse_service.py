@@ -44,7 +44,7 @@ DEFAULT_STATE_DIRNAME = ".state"
 DEFAULTS: dict[str, Any] = {
     "DEPLOY_ENV": "NONPROD",
     "IMAGE": "ghcr.io/athithya-sakthivel/sparse:2026-04-26-08-57--a0cce10@sha256:c399305b860bb2a6c0d91f4e8d70c28cc459d909edac6988bcc4cc2ab1a8b347",
-    "NAMESPACE": "models",
+    "NAMESPACE": "inference",
     "SERVICE_NAME": "sparse",
     "CONTAINER_PORT": 8201,
     "HOST": "0.0.0.0",

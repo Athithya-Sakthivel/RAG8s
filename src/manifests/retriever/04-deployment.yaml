@@ -81,11 +81,11 @@ spec:
         - name: CACHE_COLLECTION_NAME
           value: default_cache_collection1
         - name: DENSE_URL
-          value: http://dense-svc.models.svc.cluster.local:8200
+          value: http://dense-svc.inference.svc.cluster.local:8200
         - name: SPARSE_URL
-          value: http://sparse-svc.models.svc.cluster.local:8201
+          value: http://sparse-svc.inference.svc.cluster.local:8201
         - name: RERANKER_URL
-          value: http://reranker-svc.models.svc.cluster.local:8202
+          value: http://reranker-svc.inference.svc.cluster.local:8202
         - name: PORT
           value: '8001'
         - name: LOG_LEVEL

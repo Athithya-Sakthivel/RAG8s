@@ -2,11 +2,11 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: dense-rb
-  namespace: models
+  namespace: inference
 subjects:
 - kind: ServiceAccount
   name: dense-sa
-  namespace: models
+  namespace: inference
 roleRef:
   kind: Role
   name: dense-role

@@ -1,8 +1,9 @@
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
-  name: services-applicationset
+  name: inference-applicationset
   namespace: argocd
+
 spec:
   generators:
     - git:
@@ -17,6 +18,7 @@ spec:
   template:
     metadata:
       name: '{{path.basename}}'
+
     spec:
       project: e2e-rag-system
 
@@ -27,7 +29,7 @@ spec:
 
       destination:
         server: https://kubernetes.default.svc
-        namespace: '{{path.basename}}'
+        namespace: inference   # fixed, no templating
 
       syncPolicy:
         automated:

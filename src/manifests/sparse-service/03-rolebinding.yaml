@@ -2,11 +2,11 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: sparse-rb
-  namespace: models
+  namespace: inference
 subjects:
 - kind: ServiceAccount
   name: sparse-sa
-  namespace: models
+  namespace: inference
 roleRef:
   kind: Role
   name: sparse-role

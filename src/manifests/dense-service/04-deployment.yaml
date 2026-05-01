@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: dense-deployment
-  namespace: models
+  namespace: inference
   labels: &id001
     app.kubernetes.io/name: dense
     app.kubernetes.io/component: embedder

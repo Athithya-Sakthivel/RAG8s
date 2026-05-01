@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: sparse-deployment
-  namespace: models
+  namespace: inference
   labels: &id001
     app.kubernetes.io/name: sparse
     app.kubernetes.io/component: embedder
@@ -39,7 +39,7 @@ spec:
         - name: SPARSE_MODEL_NAME
           value: Qdrant/minicoil-v1
         - name: SPARSE_BATCH_SIZE
-          value: '64'
+          value: '8'
         - name: SPARSE_CUDA
           value: '0'
         - name: PRELOAD_MODEL
