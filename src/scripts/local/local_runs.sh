@@ -100,6 +100,7 @@ make core
 export SIGNOZ_JWT_SECRET="YourStrongJWTSecretHere"
 bash src/infra/core/signoz_setup.sh --apply-secret
 python3 src/infra/rag/retriever_service.py --apply-secrets
+python3 src/infra/rag/retriever_service.py --write
 
 bash src/infra/core/argo_setup.sh --rollout
 

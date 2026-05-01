@@ -65,7 +65,7 @@ APP_ENV_DEFAULTS: dict[str, str] = {
     "QDRANT_URL": "http://qdrant.qdrant.svc.cluster.local:6333",
     "QDRANT_API_KEY": "",
     "COLLECTION_NAME": "default_rag_collection1",
-    "CACHE_COLLECTION_NAME": "",
+    "CACHE_COLLECTION_NAME": "default_cache_collection1",
     "DENSE_URL": "http://dense-svc.models.svc.cluster.local:8200",
     "SPARSE_URL": "http://sparse-svc.models.svc.cluster.local:8201",
     "RERANKER_URL": "http://reranker-svc.models.svc.cluster.local:8202",
@@ -74,6 +74,7 @@ APP_ENV_DEFAULTS: dict[str, str] = {
     "ENABLE_OTEL_TRACES": "true",
     "ENABLE_OTEL_METRICS": "true",
     "ENABLE_OTEL_LOGS": "true",
+    "OTEL_EXPORTER_OTLP_ENDPOINT": "signoz-otel-collector.signoz.svc.cluster.local:4317",
 }
 
 APP_ENV_ORDER = list(APP_ENV_DEFAULTS.keys())
