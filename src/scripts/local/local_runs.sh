@@ -99,6 +99,7 @@ rm -rf src/manifests/dense-service
 rm -rf src/manifests/sparse-service
 rm -rf src/manifests/retriever
 rm -rf src/manifests/reranker-service
+
 make core
 export SIGNOZ_JWT_SECRET="YourStrongJWTSecretHere"
 bash src/infra/core/signoz_setup.sh --apply-secrets
@@ -116,7 +117,7 @@ sleep 1200
 export PER_POD=true
 export QDRANT_BACKUP_S3_PREFIX=qdrant/backups/
 export BACKUP_S3_BUCKET=$DATA_S3_BUCKET
-bash src/scripts/backups_and_restore.sh restore
+bash src/scripts/backups_and_restore.sh restore # restores latest by default
 
 
 # kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
