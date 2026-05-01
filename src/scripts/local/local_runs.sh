@@ -95,7 +95,7 @@ curl -N http://localhost:8203/generate/stream \
 git add . && git commit -m "argocd sync" && git push origin main
 
 make core
-kubectl create ns signoz || true && python3 src/infra/core/signoz_setup.py --apply-secret
+python3 src/infra/core/signoz_setup.py --apply-secret
 kubectl create ns inference && python3 src/infra/rag/retriever_service.py --apply-secrets
 
 bash src/infra/core/argo_setup.sh --rollout
