@@ -42,7 +42,8 @@ sudo apt-get install -y -qq \
   python3-pip \
   python3-venv \
   jq \
-  wget
+  wget \
+  imagemagick
 
 log "configuring OpenTofu apt repo"
 sudo install -m 0755 -d /etc/apt/keyrings
@@ -138,6 +139,7 @@ curl -sSL -o argocd \
 chmod +x argocd
 sudo mv argocd /usr/local/bin/
 
+# convert favicon.png -define icon:auto-resize=256,128,64,48,32,16 favicon.ico
 
 curl -LsSf https://astral.sh/ruff/install.sh | sh && sudo mv "$HOME/.local/bin/ruff" /usr/local/bin/
 

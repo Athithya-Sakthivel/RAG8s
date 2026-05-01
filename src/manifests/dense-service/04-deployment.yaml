@@ -23,7 +23,7 @@ spec:
     metadata:
       labels: *id001
       annotations:
-        gen-dense/inputs-hash: a4f50c5a5984d72a6872e161734636310fb338b7c4300d5aead73360c9b10361
+        gen-dense/inputs-hash: 4d7d993b98460281ba9b9977b128893b96e0fd037378d43d061b8a055ea0a2f0
         prometheus.io/scrape: 'true'
         prometheus.io/port: '8200'
         prometheus.io/path: /metrics

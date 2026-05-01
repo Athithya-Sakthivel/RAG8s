@@ -12,6 +12,24 @@ delete-qdrant:
 	kubectl delete ns qdrant
 
 
+POSTGRES_SH := bash src/infra/core/postgres_cluster.sh
+
+.PHONY: pg-cluster pg-backup pg-restore-latest pg-restore-time
+
+pg-cluster:
+	$(POSTGRES_SH) deploy --create-initial-backup false
+
+pg-backup:
+	$(POSTGRES_SH) backup --wait
+
+pg-restore-latest:
+	$(POSTGRES_SH) deploy --restore latest --force-recreate
+
+pg-restore-time:
+	@test -n "$$TARGET_TIME" || (echo "ERROR: TARGET_TIME must be set (RFC3339)" && exit 1)
+	$(POSTGRES_SH) deploy --restore time --target-time "$$TARGET_TIME" --force-recreate
+
+
 dense-image:
 	bash apps/dense/test_and_push_dense.sh
 
@@ -60,15 +78,3 @@ reranker-image:
 
 delete-reranker:
 	python3 infra/generators/reranker.py --delete
-
-setup-flux:
-	curl -s https://fluxcd.io/install.sh | sudo FLUX_VERSION=2.7.5 bash || true
-	python3 infra/setup/setup_fluxcd.py --auto-push
-
-
-
-delete-flux:
-	kubectl delete ns flux-system --grace-period=0 --force --wait=false || true
-	kubectl get crd | grep fluxcd.io | awk '{print $$1}' | xargs -r kubectl delete crd --grace-period=0 --force || true
-	kubectl delete crd gitrepositories.source.toolkit.fluxcd.io helmrepositories.source.toolkit.fluxcd.io --grace-period=0 --force || true
-	kubectl get ns flux-system -o json 2>/dev/null | jq 'del(.spec.finalizers)' | kubectl replace --raw "/api/v1/namespaces/flux-system/finalize" -f - || true

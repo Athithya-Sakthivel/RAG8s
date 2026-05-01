@@ -168,44 +168,25 @@ EOF
 }
 
 apply_crds_server_side() {
-  local kustomize_url="https://github.com/argoproj/argo-cd/manifests/crds?ref=${ARGOCD_APP_VERSION}"
-  local raw_url="https://raw.githubusercontent.com/argoproj/argo-cd/${ARGOCD_APP_VERSION}/manifests/crds/install.yaml"
-  local rc rc2
+  local url="https://github.com/argoproj/argo-cd/manifests/crds?ref=${ARGOCD_APP_VERSION}"
+  local i
 
-  log "Applying CRDs via remote kustomize: ${kustomize_url}"
-  set +e
-  kubectl apply --server-side --force-conflicts -k "${kustomize_url}"
-  rc=$?
-  set -e
-  if [[ ${rc} -eq 0 ]]; then
-    log "CRDs applied via remote kustomize."
-    return 0
-  fi
+  log "Applying CRDs from ${url}"
 
-  warn "Remote kustomize failed (RC=${rc}). Trying raw install.yaml"
-  set +e
-  kubectl apply --server-side --force-conflicts -f "${raw_url}"
-  rc2=$?
-  set -e
-  if [[ ${rc2} -eq 0 ]]; then
-    log "CRDs applied via raw install.yaml."
-    return 0
-  fi
+  for i in {1..5}; do
+    if kubectl apply \
+      --server-side \
+      --force-conflicts \
+      -k "${url}"; then
+      log "CRDs applied successfully"
+      return 0
+    fi
 
-  warn "Raw install failed. Falling back to shallow git clone."
-  log "Cloning argoproj/argo-cd@${ARGOCD_APP_VERSION}"
-  if ! timeout "${GIT_CLONE_TIMEOUT}" git clone --depth 1 --branch "${ARGOCD_APP_VERSION}" https://github.com/argoproj/argo-cd.git "${TMPDIR}/argo-cd" >/dev/null 2>&1; then
-    err "git clone failed; aborting."
-    exit 1
-  fi
+    warn "CRD apply attempt ${i}/5 failed; retrying in 5s"
+    sleep 5
+  done
 
-  if [[ -d "${TMPDIR}/argo-cd/manifests/crds" ]]; then
-    kubectl apply --server-side --force-conflicts -k "${TMPDIR}/argo-cd/manifests/crds"
-    log "Local CRDs applied."
-    return 0
-  fi
-
-  err "Cloned repo missing manifests/crds; aborting."
+  err "Failed to apply Argo CD CRDs after retries"
   exit 1
 }
 
@@ -427,7 +408,6 @@ do_delete() {
   fi
 
   delete_namespace_safely
-  delete_crds_last
 
   log "Cleanup: remove Helm repo entry (optional)"
   helm repo remove "${CHART_REPO_NAME}" >/dev/null 2>&1 || true

@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-# From the provided script:
-# "Render the SigNoz Argo CD Application manifest."
-# "#!/usr/bin/env python3"
-#
-# This rewritten script initializes ClickHouse username/password from environment
+# This script initializes ClickHouse username/password from environment
 # (with sensible defaults), creates/updates a Kubernetes Secret in-cluster
 # (so credentials are not embedded in the rendered Argo CD Application YAML),
 # and then renders the Application YAML referencing that secret via existingSecret.

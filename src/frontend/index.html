@@ -1,0 +1,75 @@
+<!-- src/frontend/index.html -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="RAG UI">
+  <title>RAG UI</title>
+
+  <link rel="icon" href="/assets/images/favicon.ico">
+  <link rel="stylesheet" href="/assets/styles.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="/assets/images/favicon.ico" alt="Logo" class="brand-icon">
+      <div>
+        <div class="brand-title">RAG UI</div>
+        <div class="brand-subtitle">Streaming chat with citations</div>
+      </div>
+    </div>
+
+    <div class="topbar-actions" id="auth-controls">
+      <a class="link" href="/auth/login">Sign in</a>
+      <a class="link" href="/auth/logout">Logout</a>
+    </div>
+  </header>
+
+  <main class="shell">
+    <section class="card">
+      <form id="query-form" class="ask-form">
+        <label class="label" for="query">Ask a question</label>
+        <textarea
+          id="query"
+          name="query"
+          class="textarea"
+          rows="4"
+          placeholder="Ask your question..."
+          autocomplete="off"
+          required
+        ></textarea>
+
+        <div class="row">
+          <label class="check">
+            <input id="return_chunks" type="checkbox" checked>
+            <span>Show citations</span>
+          </label>
+
+          <label class="field">
+            <span>Top K</span>
+            <input id="top_k" type="number" value="5" min="1" max="50">
+          </label>
+
+          <label class="field">
+            <span>Fetch K</span>
+            <input id="fetch_k" type="number" value="20" min="1" max="200">
+          </label>
+
+          <button id="ask-btn" class="btn" type="submit">Ask</button>
+        </div>
+
+        <div id="loading" class="loading" aria-live="polite">
+          Streaming response...
+        </div>
+      </form>
+    </section>
+
+    <section id="result" class="result card">
+      <div class="empty-state">Ask a question to see a streamed answer with citations.</div>
+    </section>
+  </main>
+</body>
+</html>
