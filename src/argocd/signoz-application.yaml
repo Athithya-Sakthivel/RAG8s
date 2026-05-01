@@ -3,11 +3,6 @@ kind: Application
 metadata:
   name: signoz
   namespace: argocd
-  labels:
-    app.kubernetes.io/name: signoz
-    app.kubernetes.io/managed-by: argocd
-  annotations:
-    description: SigNoz Helm deployment (external ClickHouse via in-cluster secret)
 spec:
   project: e2e-rag-system
   source:
@@ -16,11 +11,6 @@ spec:
     targetRevision: "0.120.0"
     helm:
       values: |
-        global:
-          storageClass: "default-storage-class"
-          clusterDomain: "cluster.local"
-          clusterName: "production-cluster"
-        clusterName: "production-cluster"
         clickhouse:
           enabled: false
         externalClickhouse:
@@ -29,65 +19,24 @@ spec:
           existingSecret: "signoz-clickhouse-auth"
           existingSecretPasswordKey: password
         signoz:
-          name: "signoz"
-          replicaCount: 1
           env:
-            signoz_telemetrystore_provider: "clickhouse"
-            signoz_include_only_log_namespaces: "inference"
             SIGNOZ_TOKENIZER_JWT_SECRET:
               valueFrom:
                 secretKeyRef:
                   name: "signoz-jwt-secret"
                   key: SIGNOZ_TOKENIZER_JWT_SECRET
-          podSecurityContext:
-            fsGroup: 1000
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
-            readOnlyRootFilesystem: true
-            runAsNonRoot: true
-            runAsUser: 1000
-          resources:
-            requests:
-              cpu: "100m"
-              memory: "256Mi"
-            limits:
-              cpu: "500m"
-              memory: "512Mi"
-          persistence:
-            enabled: true
-            existingClaim: ""
-            storageClass: "default-storage-class"
-            accessModes:
-              - ReadWriteOnce
-            size: "1Gi"
   destination:
     server: https://kubernetes.default.svc
     namespace: signoz
   syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    syncOptions:
-      - CreateNamespace=true
-      - PrunePropagationPolicy=foreground
-      - PruneLast=true
-    retry:
-      limit: 5
-      backoff:
-        duration: 5s
-        factor: 2
-        maxDuration: 3m
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [CreateNamespace=true]
   ignoreDifferences:
     - group: ""
       kind: Secret
       name: signoz-clickhouse-auth
-      jsonPointers:
-        - /data
+      jsonPointers: ["/data"]
     - group: ""
       kind: Secret
       name: signoz-jwt-secret
-      jsonPointers:
-        - /data
+      jsonPointers: ["/data"]
