@@ -7,37 +7,43 @@ metadata:
     app.kubernetes.io/name: signoz
     app.kubernetes.io/managed-by: argocd
   annotations:
-    description: SigNoz Helm deployment (chart repo + external ClickHouse preserved)
+    description: SigNoz Helm deployment (external ClickHouse; secrets created at bootstrap)
     signoz.argoproj.io/environment: prod
 spec:
   project: e2e-rag-system
   source:
     repoURL: https://charts.signoz.io
     chart: signoz
-    targetRevision: 0.120.0
+    targetRevision: "0.120.0"
     helm:
       values: |
         global:
-          clusterName: production-cluster
-          clusterDomain: cluster.local
-          configChecksum: 4c305ca2d42072df5efcc1298705d1576eb5f6678d8c280503905efa7f225267
+          storageClass: "default-storage-class"
+          configChecksum: 4e9d047161b0412fb1c454b5bd36c05cb195121d1663c25e524b6b3b8132adcb
+          clusterDomain: "cluster.local"
+          clusterName: "production-cluster"
+        
+        clusterName: "production-cluster"
+        
         clickhouse:
           enabled: false
+        
         externalClickhouse:
-          host: my-clickhouse.default.svc.cluster.local
-          user: admin
-          existingSecret: signoz-clickhouse-auth
+          host: "clickhouse-clickhouse.clickhouse.svc.cluster.local:9000"
+          user: "admin"
+          existingSecret: "signoz-clickhouse-auth"
           existingSecretPasswordKey: password
+        
         signoz:
-          name: signoz
+          name: "signoz"
           replicaCount: 1
           env:
-            signoz_telemetrystore_provider: clickhouse
-            signoz_include_only_log_namespaces: inference
+            signoz_telemetrystore_provider: "clickhouse"
+            signoz_include_only_log_namespaces: "inference"
             SIGNOZ_TOKENIZER_JWT_SECRET:
               valueFrom:
                 secretKeyRef:
-                  name: signoz-jwt-secret
+                  name: "signoz-jwt-secret"
                   key: SIGNOZ_TOKENIZER_JWT_SECRET
           podSecurityContext:
             fsGroup: 1000
@@ -45,23 +51,24 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop:
-              - ALL
+                - ALL
             readOnlyRootFilesystem: true
             runAsNonRoot: true
             runAsUser: 1000
           resources:
             requests:
-              cpu: 100m
-              memory: 256Mi
+              cpu: "100m"
+              memory: "256Mi"
             limits:
-              cpu: 500m
-              memory: 512Mi
+              cpu: "500m"
+              memory: "512Mi"
           persistence:
             enabled: true
-            storageClass: default-storage-class
+            existingClaim: ""
+            storageClass: "default-storage-class"
             accessModes:
-            - ReadWriteOnce
-            size: 1Gi
+              - ReadWriteOnce
+            size: "1Gi"
   destination:
     server: https://kubernetes.default.svc
     namespace: signoz
@@ -70,9 +77,9 @@ spec:
       prune: true
       selfHeal: true
     syncOptions:
-    - CreateNamespace=true
-    - PrunePropagationPolicy=foreground
-    - PruneLast=true
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
     retry:
       limit: 5
       backoff:
@@ -80,13 +87,13 @@ spec:
         factor: 2
         maxDuration: 3m
   ignoreDifferences:
-  - group: ''
-    kind: Secret
-    name: signoz-clickhouse-auth
-    jsonPointers:
-    - /data
-  - group: ''
-    kind: Secret
-    name: signoz-jwt-secret
-    jsonPointers:
-    - /data
+    - group: ""
+      kind: Secret
+      name: signoz-clickhouse-auth
+      jsonPointers:
+        - /data
+    - group: ""
+      kind: Secret
+      name: signoz-jwt-secret
+      jsonPointers:
+        - /data

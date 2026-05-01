@@ -95,8 +95,9 @@ curl -N http://localhost:8203/generate/stream \
 git add . && git commit -m "argocd sync" && git push origin main
 
 make core
-python3 src/infra/core/signoz_setup.py --apply-secret
-kubectl create ns inference && python3 src/infra/rag/retriever_service.py --apply-secrets
+export SIGNOZ_CLICKHOUSE_PASSWORD="YourStrongPasswordHere"
+bash src/infra/core/signoz_setup.sh --apply-secret
+python3 src/infra/rag/retriever_service.py --apply-secrets
 
 bash src/infra/core/argo_setup.sh --rollout
 
@@ -107,3 +108,4 @@ export BACKUP_S3_BUCKET=$DATA_S3_BUCKET
 bash src/scripts/backups_and_restore.sh restore
 
 
+rWwJ-ZKNKQN9SySj
