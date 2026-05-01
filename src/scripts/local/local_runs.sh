@@ -40,8 +40,7 @@ kubectl port-forward -n models svc/sparse-svc 8201:8201 &
 kubectl port-forward -n models svc/reranker-svc 8202:8202 &
 kubectl port-forward -n qdrant svc/qdrant 6333:6333 &
 
-unset BEDROCK_GUARDRAIL_IDENTIFIER
-unset BEDROCK_GUARDRAIL_VERSION
+unset BEDROCK_GUARDRAIL_IDENTIFIER && unset BEDROCK_GUARDRAIL_VERSION
 curl -X DELETE http://localhost:6333/collections/default_rag_collection1__semantic_cache
 source /workspace/.venv/bin/activate && cd /workspace/src/services/retriever && export PYTHONPATH=$(pwd)
 export DENSE_URL="http://localhost:8200"
