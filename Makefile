@@ -78,3 +78,9 @@ reranker-image:
 
 delete-reranker:
 	python3 infra/generators/reranker.py --delete
+
+
+push:
+	git add .
+	git commit -m "new"
+	git push origin main

@@ -180,11 +180,11 @@ spec:
         - name: LOG_LEVEL
           value: WARNING
         - name: ENABLE_OTEL_TRACES
-          value: 'true'
+          value: 'false'
         - name: ENABLE_OTEL_METRICS
-          value: 'true'
+          value: 'false'
         - name: ENABLE_OTEL_LOGS
-          value: 'true'
+          value: 'false'
         - name: AUTH_VALIDATE_URL
           value: http://auth-svc.inference.svc.cluster.local:8000/me
         - name: AUTH_TIMEOUT_SECONDS
