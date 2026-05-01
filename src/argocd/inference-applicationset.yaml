@@ -20,7 +20,7 @@ spec:
       name: '{{path.basename}}'
 
     spec:
-      project: e2e-rag-system
+      project: default
 
       source:
         repoURL: https://github.com/Athithya-Sakthivel/E2E-RAG-System.git

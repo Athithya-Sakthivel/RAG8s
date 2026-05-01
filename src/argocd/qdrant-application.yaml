@@ -9,7 +9,7 @@ metadata:
   annotations:
     description: Qdrant Helm deployment
 spec:
-  project: e2e-rag-system
+  project: default
   source:
     repoURL: https://qdrant.github.io/qdrant-helm
     chart: qdrant

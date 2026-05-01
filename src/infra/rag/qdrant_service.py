@@ -21,7 +21,7 @@ DEFAULT_OUTPUT = Path("src/argocd/qdrant-application.yaml")
 
 DEFAULT_APP_NAME = "qdrant"
 DEFAULT_APP_NAMESPACE = "argocd"
-DEFAULT_PROJECT = "e2e-rag-system"
+DEFAULT_PROJECT = "default"
 DEFAULT_DEST_NAMESPACE = "qdrant"
 DEFAULT_DEST_SERVER = "https://kubernetes.default.svc"
 
