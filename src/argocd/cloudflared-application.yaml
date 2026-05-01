@@ -1,14 +1,17 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: dense-service
+  name: cloudflared
   namespace: argocd
+  labels:
+    app.kubernetes.io/name: cloudflared
+    app.kubernetes.io/managed-by: argocd
 spec:
   project: default
   source:
     repoURL: https://github.com/Athithya-Sakthivel/E2E-RAG-System.git
     targetRevision: main
-    path: src/manifests/dense-service
+    path: src/manifests/cloudflared
   destination:
     server: https://kubernetes.default.svc
     namespace: inference

@@ -7,7 +7,7 @@ metadata:
     app.kubernetes.io/name: cloudflared
     app.kubernetes.io/component: tunnel
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: cloudflared
@@ -18,7 +18,7 @@ spec:
         app.kubernetes.io/name: cloudflared
         app.kubernetes.io/component: tunnel
       annotations:
-        cloudflared/config-checksum: dba4a34a2a340be82b47f73898a6b6ec40a129ad29863d0b381b03bad35edf79
+        cloudflared/config-checksum: a1ee7da1d5dd06d731a8af16cbe0d2fbcd6abe07026d3253ae9b09cd364087d3
     spec:
       serviceAccountName: cloudflared-sa
       terminationGracePeriodSeconds: 60
@@ -35,7 +35,7 @@ spec:
             path: config.yaml
       containers:
       - name: cloudflared
-        image: cloudflare/cloudflared:2026.4.0
+        image: cloudflare/cloudflared:2026.3.0@sha256:6b599ca3e974349ead3286d178da61d291961182ec3fe9c505e1dd02c8ac31b0
         imagePullPolicy: IfNotPresent
         command:
         - cloudflared

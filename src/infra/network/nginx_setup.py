@@ -16,7 +16,7 @@ NGINX_CONF_PATH = Path(__file__).resolve().with_name("nginx.conf")
 OUT_DIR = ROOT / "manifests" / "nginx"
 
 NAMESPACE = os.getenv("NAMESPACE", "inference").strip() or "inference"
-FRONTEND_IMAGE = os.getenv("FRONTEND_IMAGE", "").strip()
+FRONTEND_IMAGE = os.getenv("FRONTEND_IMAGE", "ghcr.io/athithya-sakthivel/frontend:2026-05-01-19-45--178fb2a@sha256:885d4316886316d1c1fdfbeedd2dfe94efda677eab5e55d90a526861a71c4627").strip()
 SERVICE_NAME = os.getenv("SERVICE_NAME", "frontend-nginx").strip() or "frontend-nginx"
 SERVICE_ACCOUNT = os.getenv("SERVICE_ACCOUNT", "frontend-nginx").strip() or "frontend-nginx"
 CONFIGMAP_NAME = os.getenv("CONFIGMAP_NAME", "frontend-nginx-config").strip() or "frontend-nginx-config"

@@ -7,16 +7,10 @@ metadata:
     app.kubernetes.io/name: frontend-nginx
     app.kubernetes.io/component: frontend
 data:
-  routes.txt: 'frontend host: https://athithya.site
-
+  routes.txt: |
+    frontend host: https://athithya.site
     api host: https://api.athithya.site
-
     auth host: https://auth.athithya.site
-
     public: /
-
     public: /assets/*
-
     public: /healthz
-
-    '

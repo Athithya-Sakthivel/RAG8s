@@ -17,22 +17,21 @@ global:
     value: authentik
   - name: AUTHENTIK_POSTGRESQL__NAME
     value: authentik
-  podAnnotations:
-    authentik.argoproj.io/config-checksum: 6e7302a8a7b39dff7b8e39b32d8eca3822db700a8631c9226fc3abbabedad547
 authentik:
   enabled: true
-  secret_key: env://AUTHENTIK_SECRET_KEY
+  existingSecret:
+    secretName: authentik-env
+  log_level: info
   error_reporting:
     enabled: false
-  log_level: info
-  postgresql:
-    host: authentik-postgresql
-    user: authentik
-    name: authentik
-    port: 5432
-    password: env://AUTHENTIK_POSTGRESQL__PASSWORD
   web:
     path: /
+  postgresql:
+    host: authentik-postgresql
+    name: authentik
+    user: authentik
+    port: 5432
+    password: env://AUTHENTIK_POSTGRESQL__PASSWORD
 server:
   enabled: true
   ingress:
@@ -51,3 +50,5 @@ postgresql:
     secretKeys:
       adminPasswordKey: postgres-password
       userPasswordKey: password
+      replicationPasswordKey: replication-password
+      metricsPasswordKey: metrics-password

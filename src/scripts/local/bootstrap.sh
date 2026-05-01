@@ -63,6 +63,10 @@ sudo chmod a+r /etc/apt/sources.list.d/opentofu.list
 
 log "refreshing apt metadata after repo add"
 sudo apt-get update -qq
+CLOUDFLARED_VERSION=2026.3.0 && \
+curl -fL "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-amd64" \
+-o /usr/local/bin/cloudflared && \
+chmod +x /usr/local/bin/cloudflared
 
 log "resolving installable tofu version"
 CANDIDATE="$(apt-cache policy tofu 2>/dev/null | awk '/Candidate:/ {print $2; exit}')"
@@ -156,6 +160,7 @@ aws --version
 ruff version
 pre-commit --version
 kubectl version --client
+cloudflared --version
 tofu version
 
 log "done"

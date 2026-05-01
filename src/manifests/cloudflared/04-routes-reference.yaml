@@ -1,4 +1,4 @@
-tunnel: default-api-tunnel
+tunnel: default-tunnel-1
 ingress:
 - hostname: auth.athithya.site
   service: http://authentik-server.inference.svc.cluster.local:9000

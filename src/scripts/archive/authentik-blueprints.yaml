@@ -2,13 +2,13 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: authentik-blueprints
-  namespace: inference
+  namespace: authentik
   labels:
     app.kubernetes.io/name: authentik
     app.kubernetes.io/component: blueprints
 type: Opaque
 stringData:
-  google-and-forward-auth.yaml: |
+  google-oauth.yaml: |
     # yaml-language-server: $schema=https://goauthentik.io/blueprints/schema.json
     version: 1
     metadata:
@@ -26,42 +26,3 @@ stringData:
           consumer_secret: !Env GOOGLE_OAUTH_CLIENT_SECRET
           scope: openid email profile
           promoted: true
-
-      - model: authentik_flows.flow
-        state: present
-        identifiers:
-          slug: default-authentication-flow
-        attrs:
-          name: Default Authentication Flow
-          slug: default-authentication-flow
-          designation: authentication
-
-      - model: authentik_providers_proxy.proxyprovider
-        state: present
-        identifiers:
-          slug: api-forward-auth
-        attrs:
-          name: api-forward-auth
-          slug: api-forward-auth
-          mode: forward_single_application
-          authorization_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
-          external_host: https://api.athithya.site
-
-      - model: authentik_core.application
-        state: present
-        identifiers:
-          slug: api-forward-auth
-        attrs:
-          name: api-forward-auth
-          slug: api-forward-auth
-          provider: !Find [authentik_providers_proxy.proxyprovider, [slug, api-forward-auth]]
-
-      - model: authentik_outposts.outpost
-        state: present
-        identifiers:
-          name: nginx-outpost
-        attrs:
-          name: nginx-outpost
-          type: proxy
-          providers:
-            - !Find [authentik_providers_proxy.proxyprovider, [slug, api-forward-auth]]

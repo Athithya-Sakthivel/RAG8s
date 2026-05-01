@@ -18,7 +18,7 @@ spec:
         app.kubernetes.io/name: frontend-nginx
         app.kubernetes.io/component: frontend
       annotations:
-        nginx/config-checksum: 602d5a11376063105bf0478771d7621fa946898a0037ef551ad42adf5d5fc5fc
+        nginx/config-checksum: 78246c399e2404cb43f8bdf199f767ab10e246d64d65e2cbdbfd1d8eb4ae8452
     spec:
       serviceAccountName: frontend-nginx
       terminationGracePeriodSeconds: 30

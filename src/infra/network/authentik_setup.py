@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import os
 import subprocess
 import sys
@@ -18,37 +17,38 @@ except Exception as exc:  # pragma: no cover
     raise SystemExit(2) from exc
 
 
-DEFAULT_APP_OUTPUT = Path("src/argocd/authentik-application.yaml")
-DEFAULT_VALUES_OUTPUT = Path("src/scripts/archive/authentik-values.yaml")
-DEFAULT_BLUEPRINT_OUTPUT = Path("src/scripts/archive/authentik-blueprints.yaml")
+ROOT = Path(__file__).resolve().parents[3]
 
-DEFAULT_APP_NAME = "authentik"
-DEFAULT_APP_NAMESPACE = "argocd"
-DEFAULT_PROJECT = "default"
-DEFAULT_DEST_NAMESPACE = "authentik"
-DEFAULT_DEST_SERVER = "https://kubernetes.default.svc"
+APP_OUTPUT = ROOT / "src/argocd/authentik-application.yaml"
+VALUES_OUTPUT = ROOT / "src/scripts/archive/authentik-values.yaml"
+BLUEPRINT_OUTPUT = ROOT / "src/scripts/archive/authentik-blueprints.yaml"
 
-DEFAULT_HELM_REPO_NAME = "authentik"
-DEFAULT_REPO_URL = "https://charts.goauthentik.io"
-DEFAULT_CHART_NAME = "authentik"
-DEFAULT_CHART_VERSION = "2026.2.2"
-DEFAULT_HELM_RELEASE_NAME = "authentik"
-DEFAULT_HELM_TIMEOUT = "20m"
+APP_NAME = "authentik"
+APP_NAMESPACE = "argocd"
+PROJECT = "default"
+DEST_NAMESPACE = "authentik"
+DEST_SERVER = "https://kubernetes.default.svc"
 
-DEFAULT_NAMESPACE = os.environ.get("AUTHENTIK_NAMESPACE", "inference").strip() or "inference"
-DEFAULT_DOMAIN = os.environ.get("AUTHENTIK_DOMAIN", "athithya.site").strip().rstrip(".") or "athithya.site"
-DEFAULT_AUTH_HOST = os.environ.get("AUTHENTIK_HOST", f"auth.{DEFAULT_DOMAIN}").strip().rstrip(".") or f"auth.{DEFAULT_DOMAIN}"
-DEFAULT_API_HOST = os.environ.get("AUTHENTIK_API_HOST", f"api.{DEFAULT_DOMAIN}").strip().rstrip(".") or f"api.{DEFAULT_DOMAIN}"
-DEFAULT_COOKIE_DOMAIN = os.environ.get("AUTHENTIK_COOKIE_DOMAIN", f".{DEFAULT_DOMAIN}").strip().rstrip(".") or f".{DEFAULT_DOMAIN}"
+HELM_REPO_URL = "https://charts.goauthentik.io"
+HELM_CHART_NAME = "authentik"
+HELM_CHART_VERSION = "2026.2.2"
+HELM_RELEASE_NAME = "authentik"
+HELM_TIMEOUT = "20m"
 
-DEFAULT_AUTHENTIK_SECRET_NAME = os.environ.get("AUTHENTIK_SECRET_NAME", "authentik-env").strip() or "authentik-env"
-DEFAULT_POSTGRES_SECRET_NAME = os.environ.get("AUTHENTIK_POSTGRES_SECRET_NAME", "authentik-postgresql-auth").strip() or "authentik-postgresql-auth"
-DEFAULT_BLUEPRINT_SECRET_NAME = os.environ.get("AUTHENTIK_BLUEPRINT_SECRET_NAME", "authentik-blueprints").strip() or "authentik-blueprints"
+NAMESPACE = "authentik"
+DOMAIN = "athithya.site"
+AUTH_HOST = f"auth.{DOMAIN}"
+API_HOST = f"api.{DOMAIN}"
+COOKIE_DOMAIN = f".{DOMAIN}"
 
-DEFAULT_POSTGRES_USERNAME = os.environ.get("AUTHENTIK_POSTGRES_USERNAME", "authentik").strip() or "authentik"
-DEFAULT_POSTGRES_DATABASE = os.environ.get("AUTHENTIK_POSTGRES_DATABASE", "authentik").strip() or "authentik"
-DEFAULT_POSTGRES_HOST = os.environ.get("AUTHENTIK_POSTGRES_HOST", "authentik-postgresql").strip() or "authentik-postgresql"
-DEFAULT_POSTGRES_PORT = int(os.environ.get("AUTHENTIK_POSTGRES_PORT", "5432"))
+AUTHENTIK_SECRET_NAME = "authentik-env"
+POSTGRES_SECRET_NAME = "authentik-postgresql-auth"
+BLUEPRINT_SECRET_NAME = "authentik-blueprints"
+
+POSTGRES_USERNAME = "authentik"
+POSTGRES_DATABASE = "authentik"
+POSTGRES_HOST = "authentik-postgresql"
+POSTGRES_PORT = 5432
 
 DEFAULT_SYNC_OPTIONS = [
     "CreateNamespace=true",
@@ -85,29 +85,12 @@ def fatal(msg: str, code: int = 2) -> NoReturn:
     raise SystemExit(code)
 
 
-def env(name: str, default: str) -> str:
+def env(name: str, default: str = "") -> str:
     value = os.environ.get(name)
     if value is None:
         return default
     value = value.strip()
     return value if value else default
-
-
-def env_bool(name: str, default: bool) -> bool:
-    value = os.environ.get(name)
-    if value is None:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
-
-
-def env_int(name: str, default: int) -> int:
-    value = os.environ.get(name)
-    if value is None or not value.strip():
-        return default
-    try:
-        return int(value)
-    except ValueError:
-        return default
 
 
 def atomic_write_text(path: Path, content: str) -> None:
@@ -141,104 +124,66 @@ def run_cmd(args: list[str], *, cwd: Path | None = None, stdin: str | None = Non
     subprocess.run(args, cwd=str(cwd) if cwd else None, input=stdin, text=True, check=True)
 
 
-def require_cmd(name: str) -> str:
+def require_cmd(name: str) -> None:
     from shutil import which
 
-    path = which(name)
-    if not path:
+    if which(name) is None:
         fatal(f"Required command not found: {name}")
-    return path
 
 
-@dataclass(frozen=True)
+@dataclass
 class Config:
-    app_output: Path
-    values_output: Path
-    blueprint_output: Path
+    app_output: Path = APP_OUTPUT
+    values_output: Path = VALUES_OUTPUT
+    blueprint_output: Path = BLUEPRINT_OUTPUT
 
-    app_name: str
-    app_namespace: str
-    project: str
-    dest_server: str
-    dest_namespace: str
+    app_name: str = APP_NAME
+    app_namespace: str = APP_NAMESPACE
+    project: str = PROJECT
+    dest_server: str = DEST_SERVER
+    dest_namespace: str = DEST_NAMESPACE
 
-    helm_repo_name: str
-    repo_url: str
-    chart_name: str
-    chart_version: str
-    helm_release_name: str
-    helm_timeout: str
+    repo_url: str = HELM_REPO_URL
+    chart_name: str = HELM_CHART_NAME
+    chart_version: str = HELM_CHART_VERSION
+    helm_release_name: str = HELM_RELEASE_NAME
+    helm_timeout: str = HELM_TIMEOUT
 
-    namespace: str
-    domain: str
-    auth_host: str
-    api_host: str
-    cookie_domain: str
+    namespace: str = NAMESPACE
+    domain: str = DOMAIN
+    auth_host: str = AUTH_HOST
+    api_host: str = API_HOST
+    cookie_domain: str = COOKIE_DOMAIN
 
-    sync_options: list[str]
-    retry_limit: int
-    retry_backoff_duration: str
-    retry_backoff_factor: int
-    retry_backoff_max_duration: str
+    sync_options: list[str] = None  # type: ignore[assignment]
+    retry_limit: int = 3
+    retry_backoff_duration: str = "10s"
+    retry_backoff_factor: int = 2
+    retry_backoff_max_duration: str = "3m"
 
-    secret_name: str
-    postgres_secret_name: str
-    blueprint_secret_name: str
+    authentik_secret_key: str = ""
+    postgres_password: str = ""
+    google_client_id: str = ""
+    google_client_secret: str = ""
 
-    authentik_secret_key: str
-    postgres_password: str
-    google_client_id: str
-    google_client_secret: str
-
-    postgres_username: str
-    postgres_database: str
-    postgres_host: str
-    postgres_port: int
-
-    create_namespace: bool
-    rollout_application: bool
+    create_namespace: bool = True
+    rollout_application: bool = False
 
 
 def load_config() -> Config:
-    return Config(
-        app_output=Path(env("AUTHENTIK_APP_OUTPUT", str(DEFAULT_APP_OUTPUT))),
-        values_output=Path(env("AUTHENTIK_VALUES_OUTPUT", str(DEFAULT_VALUES_OUTPUT))),
-        blueprint_output=Path(env("AUTHENTIK_BLUEPRINT_OUTPUT", str(DEFAULT_BLUEPRINT_OUTPUT))),
-        app_name=env("AUTHENTIK_APP_NAME", DEFAULT_APP_NAME),
-        app_namespace=env("AUTHENTIK_APP_NAMESPACE", DEFAULT_APP_NAMESPACE),
-        project=env("AUTHENTIK_PROJECT", DEFAULT_PROJECT),
-        dest_server=env("AUTHENTIK_DEST_SERVER", DEFAULT_DEST_SERVER),
-        dest_namespace=env("AUTHENTIK_DEST_NAMESPACE", DEFAULT_DEST_NAMESPACE),
-        helm_repo_name=env("AUTHENTIK_HELM_REPO_NAME", DEFAULT_HELM_REPO_NAME),
-        repo_url=env("AUTHENTIK_CHART_REPO_URL", DEFAULT_REPO_URL),
-        chart_name=env("AUTHENTIK_CHART_NAME", DEFAULT_CHART_NAME),
-        chart_version=env("AUTHENTIK_CHART_VERSION", DEFAULT_CHART_VERSION),
-        helm_release_name=env("AUTHENTIK_HELM_RELEASE_NAME", DEFAULT_HELM_RELEASE_NAME),
-        helm_timeout=env("AUTHENTIK_HELM_TIMEOUT", DEFAULT_HELM_TIMEOUT),
-        namespace=env("AUTHENTIK_NAMESPACE", DEFAULT_NAMESPACE),
-        domain=env("AUTHENTIK_DOMAIN", DEFAULT_DOMAIN),
-        auth_host=env("AUTHENTIK_HOST", DEFAULT_AUTH_HOST),
-        api_host=env("AUTHENTIK_API_HOST", DEFAULT_API_HOST),
-        cookie_domain=env("AUTHENTIK_COOKIE_DOMAIN", DEFAULT_COOKIE_DOMAIN),
-        sync_options=[item.strip() for item in env("AUTHENTIK_SYNC_OPTIONS", ",".join(DEFAULT_SYNC_OPTIONS)).split(",") if item.strip()],
-        retry_limit=env_int("AUTHENTIK_RETRY_LIMIT", 3),
-        retry_backoff_duration=env("AUTHENTIK_RETRY_BACKOFF_DURATION", "10s"),
-        retry_backoff_factor=env_int("AUTHENTIK_RETRY_BACKOFF_FACTOR", 2),
-        retry_backoff_max_duration=env("AUTHENTIK_RETRY_BACKOFF_MAX_DURATION", "3m"),
-        secret_name=env("AUTHENTIK_SECRET_NAME", DEFAULT_AUTHENTIK_SECRET_NAME),
-        postgres_secret_name=env("AUTHENTIK_POSTGRES_SECRET_NAME", DEFAULT_POSTGRES_SECRET_NAME),
-        blueprint_secret_name=env("AUTHENTIK_BLUEPRINT_SECRET_NAME", DEFAULT_BLUEPRINT_SECRET_NAME),
-        authentik_secret_key=env("AUTHENTIK_SECRET_KEY", ""),
-        postgres_password=env("AUTHENTIK_POSTGRESQL_PASSWORD", ""),
-        google_client_id=env("GOOGLE_OAUTH_CLIENT_ID", env("GOOGLE_CLIENT_ID", "")),
-        google_client_secret=env("GOOGLE_OAUTH_CLIENT_SECRET", env("GOOGLE_CLIENT_SECRET", "")),
-        postgres_username=env("AUTHENTIK_POSTGRES_USERNAME", DEFAULT_POSTGRES_USERNAME),
-        postgres_database=env("AUTHENTIK_POSTGRES_DATABASE", DEFAULT_POSTGRES_DATABASE),
-        postgres_host=env("AUTHENTIK_POSTGRES_HOST", DEFAULT_POSTGRES_HOST),
-        postgres_port=env_int("AUTHENTIK_POSTGRES_PORT", DEFAULT_POSTGRES_PORT),
-        create_namespace=env_bool("AUTHENTIK_CREATE_NAMESPACE", True),
-        rollout_application=env_bool("AUTHENTIK_ROLLOUT_APPLICATION", False),
+    cfg = Config(
+        authentik_secret_key=env("AUTHENTIK_SECRET_KEY"),
+        postgres_password=env("AUTHENTIK_POSTGRESQL_PASSWORD"),
+        google_client_id=env("GOOGLE_OAUTH_CLIENT_ID"),
+        google_client_secret=env("GOOGLE_OAUTH_CLIENT_SECRET"),
     )
+    cfg.sync_options = [item.strip() for item in env("AUTHENTIK_SYNC_OPTIONS", ",".join(DEFAULT_SYNC_OPTIONS)).split(",") if item.strip()]
+    cfg.retry_limit = int(env("AUTHENTIK_RETRY_LIMIT", "3"))
+    cfg.retry_backoff_duration = env("AUTHENTIK_RETRY_BACKOFF_DURATION", "10s")
+    cfg.retry_backoff_factor = int(env("AUTHENTIK_RETRY_BACKOFF_FACTOR", "2"))
+    cfg.retry_backoff_max_duration = env("AUTHENTIK_RETRY_BACKOFF_MAX_DURATION", "3m")
+    cfg.create_namespace = env("AUTHENTIK_CREATE_NAMESPACE", "true").lower() in {"1", "true", "yes", "y", "on"}
+    return cfg
 
 
 def require_secrets(cfg: Config) -> None:
@@ -255,18 +200,20 @@ def require_secrets(cfg: Config) -> None:
         fatal(f"Missing required environment variable(s): {', '.join(missing)}")
 
 
-def namespace_manifest(cfg: Config) -> dict[str, Any]:
-    return {
-        "apiVersion": "v1",
-        "kind": "Namespace",
-        "metadata": {
-            "name": cfg.namespace,
-            "labels": {
-                "app.kubernetes.io/name": cfg.app_name,
-                "app.kubernetes.io/managed-by": "generator",
-            },
-        },
-    }
+def namespace_exists(namespace: str) -> bool:
+    result = subprocess.run(
+        ["kubectl", "get", "namespace", namespace],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+    return result.returncode == 0
+
+
+def ensure_namespace(namespace: str) -> None:
+    if namespace_exists(namespace):
+        return
+    run_cmd(["kubectl", "create", "namespace", namespace])
 
 
 def render_authentik_env_secret(cfg: Config) -> dict[str, Any]:
@@ -275,7 +222,7 @@ def render_authentik_env_secret(cfg: Config) -> dict[str, Any]:
         "apiVersion": "v1",
         "kind": "Secret",
         "metadata": {
-            "name": cfg.secret_name,
+            "name": AUTHENTIK_SECRET_NAME,
             "namespace": cfg.namespace,
             "labels": {
                 "app.kubernetes.io/name": cfg.app_name,
@@ -286,8 +233,6 @@ def render_authentik_env_secret(cfg: Config) -> dict[str, Any]:
         "stringData": {
             "AUTHENTIK_SECRET_KEY": cfg.authentik_secret_key,
             "AUTHENTIK_POSTGRESQL__PASSWORD": cfg.postgres_password,
-            "GOOGLE_OAUTH_CLIENT_ID": cfg.google_client_id,
-            "GOOGLE_OAUTH_CLIENT_SECRET": cfg.google_client_secret,
         },
     }
 
@@ -298,7 +243,7 @@ def render_postgres_secret(cfg: Config) -> dict[str, Any]:
         "apiVersion": "v1",
         "kind": "Secret",
         "metadata": {
-            "name": cfg.postgres_secret_name,
+            "name": POSTGRES_SECRET_NAME,
             "namespace": cfg.namespace,
             "labels": {
                 "app.kubernetes.io/name": cfg.app_name,
@@ -307,14 +252,16 @@ def render_postgres_secret(cfg: Config) -> dict[str, Any]:
         },
         "type": "Opaque",
         "stringData": {
-            "username": cfg.postgres_username,
-            "password": cfg.postgres_password,
             "postgres-password": cfg.postgres_password,
+            "password": cfg.postgres_password,
+            "replication-password": cfg.postgres_password,
+            "metrics-password": cfg.postgres_password,
         },
     }
 
 
 def render_blueprints_yaml(cfg: Config) -> str:
+    require_secrets(cfg)
     return (
         "# yaml-language-server: $schema=https://goauthentik.io/blueprints/schema.json\n"
         "version: 1\n"
@@ -333,45 +280,6 @@ def render_blueprints_yaml(cfg: Config) -> str:
         "      consumer_secret: !Env GOOGLE_OAUTH_CLIENT_SECRET\n"
         "      scope: openid email profile\n"
         "      promoted: true\n"
-        "\n"
-        "  - model: authentik_flows.flow\n"
-        "    state: present\n"
-        "    identifiers:\n"
-        "      slug: default-authentication-flow\n"
-        "    attrs:\n"
-        "      name: Default Authentication Flow\n"
-        "      slug: default-authentication-flow\n"
-        "      designation: authentication\n"
-        "\n"
-        "  - model: authentik_providers_proxy.proxyprovider\n"
-        "    state: present\n"
-        "    identifiers:\n"
-        "      slug: api-forward-auth\n"
-        "    attrs:\n"
-        "      name: api-forward-auth\n"
-        "      slug: api-forward-auth\n"
-        "      mode: forward_single_application\n"
-        "      authorization_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]\n"
-        f"      external_host: https://{cfg.api_host}\n"
-        "\n"
-        "  - model: authentik_core.application\n"
-        "    state: present\n"
-        "    identifiers:\n"
-        "      slug: api-forward-auth\n"
-        "    attrs:\n"
-        "      name: api-forward-auth\n"
-        "      slug: api-forward-auth\n"
-        "      provider: !Find [authentik_providers_proxy.proxyprovider, [slug, api-forward-auth]]\n"
-        "\n"
-        "  - model: authentik_outposts.outpost\n"
-        "    state: present\n"
-        "    identifiers:\n"
-        "      name: nginx-outpost\n"
-        "    attrs:\n"
-        "      name: nginx-outpost\n"
-        "      type: proxy\n"
-        "      providers:\n"
-        "        - !Find [authentik_providers_proxy.proxyprovider, [slug, api-forward-auth]]\n"
     )
 
 
@@ -380,7 +288,7 @@ def render_blueprints_secret(cfg: Config) -> dict[str, Any]:
         "apiVersion": "v1",
         "kind": "Secret",
         "metadata": {
-            "name": cfg.blueprint_secret_name,
+            "name": BLUEPRINT_SECRET_NAME,
             "namespace": cfg.namespace,
             "labels": {
                 "app.kubernetes.io/name": cfg.app_name,
@@ -389,7 +297,7 @@ def render_blueprints_secret(cfg: Config) -> dict[str, Any]:
         },
         "type": "Opaque",
         "stringData": {
-            "google-and-forward-auth.yaml": render_blueprints_yaml(cfg),
+            "google-oauth.yaml": render_blueprints_yaml(cfg),
         },
     }
 
@@ -398,34 +306,36 @@ def build_values(cfg: Config) -> dict[str, Any]:
     values: dict[str, Any] = {
         "global": {
             "envFrom": [
-                {"secretRef": {"name": cfg.secret_name}},
+                {"secretRef": {"name": AUTHENTIK_SECRET_NAME}},
             ],
             "env": [
                 {"name": "AUTHENTIK_HOST", "value": f"https://{cfg.auth_host}"},
                 {"name": "AUTHENTIK_HOST_BROWSER", "value": f"https://{cfg.auth_host}"},
                 {"name": "AUTHENTIK_COOKIE_DOMAIN", "value": cfg.cookie_domain},
-                {"name": "AUTHENTIK_POSTGRESQL__HOST", "value": cfg.postgres_host},
-                {"name": "AUTHENTIK_POSTGRESQL__PORT", "value": str(cfg.postgres_port)},
-                {"name": "AUTHENTIK_POSTGRESQL__USER", "value": cfg.postgres_username},
-                {"name": "AUTHENTIK_POSTGRESQL__NAME", "value": cfg.postgres_database},
+                {"name": "AUTHENTIK_POSTGRESQL__HOST", "value": POSTGRES_HOST},
+                {"name": "AUTHENTIK_POSTGRESQL__PORT", "value": str(POSTGRES_PORT)},
+                {"name": "AUTHENTIK_POSTGRESQL__USER", "value": POSTGRES_USERNAME},
+                {"name": "AUTHENTIK_POSTGRESQL__NAME", "value": POSTGRES_DATABASE},
             ],
         },
         "authentik": {
             "enabled": True,
-            "secret_key": "env://AUTHENTIK_SECRET_KEY",
+            "existingSecret": {
+                "secretName": AUTHENTIK_SECRET_NAME,
+            },
+            "log_level": "info",
             "error_reporting": {
                 "enabled": False,
             },
-            "log_level": "info",
-            "postgresql": {
-                "host": cfg.postgres_host,
-                "user": cfg.postgres_username,
-                "name": cfg.postgres_database,
-                "port": cfg.postgres_port,
-                "password": "env://AUTHENTIK_POSTGRESQL__PASSWORD",
-            },
             "web": {
                 "path": "/",
+            },
+            "postgresql": {
+                "host": POSTGRES_HOST,
+                "name": POSTGRES_DATABASE,
+                "user": POSTGRES_USERNAME,
+                "port": POSTGRES_PORT,
+                "password": "env://AUTHENTIK_POSTGRESQL__PASSWORD",
             },
         },
         "server": {
@@ -439,27 +349,25 @@ def build_values(cfg: Config) -> dict[str, Any]:
         },
         "blueprints": {
             "secrets": [
-                {"name": cfg.blueprint_secret_name},
+                {"name": BLUEPRINT_SECRET_NAME},
             ]
         },
         "postgresql": {
             "enabled": True,
             "auth": {
-                "username": cfg.postgres_username,
-                "database": cfg.postgres_database,
-                "existingSecret": cfg.postgres_secret_name,
+                "username": POSTGRES_USERNAME,
+                "database": POSTGRES_DATABASE,
+                "existingSecret": POSTGRES_SECRET_NAME,
                 "secretKeys": {
                     "adminPasswordKey": "postgres-password",
                     "userPasswordKey": "password",
+                    "replicationPasswordKey": "replication-password",
+                    "metricsPasswordKey": "metrics-password",
                 },
             },
         },
     }
 
-    checksum = hashlib.sha256(yaml_dump(values).encode("utf-8")).hexdigest()
-    values["global"]["podAnnotations"] = {
-        "authentik.argoproj.io/config-checksum": checksum,
-    }
     return values
 
 
@@ -520,28 +428,13 @@ def render_application(cfg: Config) -> str:
     return yaml_dump(build_application(cfg))
 
 
-def render_namespace_yaml(cfg: Config) -> str:
-    return yaml_dump(namespace_manifest(cfg)).rstrip() + "\n"
-
-
-def ensure_cluster_namespace(cfg: Config) -> None:
-    require_cmd("kubectl")
-    run_cmd(["kubectl", "apply", "-f", "-"], stdin=render_namespace_yaml(cfg))
-
-
-def rollout_secrets(cfg: Config) -> None:
-    require_cmd("kubectl")
-    payload = "\n---\n".join(
-        yaml_dump(doc).rstrip()
-        for doc in [
-            namespace_manifest(cfg),
-            render_authentik_env_secret(cfg),
-            render_postgres_secret(cfg),
-            render_blueprints_secret(cfg),
-        ]
-    ) + "\n"
-    run_cmd(["kubectl", "apply", "-f", "-"], stdin=payload)
-    log(f"Applied secrets into namespace {cfg.namespace}")
+def render_secrets_payload(cfg: Config) -> str:
+    docs = [
+        render_authentik_env_secret(cfg),
+        render_postgres_secret(cfg),
+        render_blueprints_secret(cfg),
+    ]
+    return "\n---\n".join(yaml_dump(doc).rstrip() for doc in docs) + "\n"
 
 
 def write_outputs(cfg: Config) -> None:
@@ -554,12 +447,12 @@ def write_outputs(cfg: Config) -> None:
 
 
 def rollout(cfg: Config) -> None:
+    require_cmd("kubectl")
     if cfg.create_namespace:
-        ensure_cluster_namespace(cfg)
-    rollout_secrets(cfg)
+        ensure_namespace(cfg.namespace)
+    run_cmd(["kubectl", "apply", "-f", "-"], stdin=render_secrets_payload(cfg))
     write_outputs(cfg)
     if cfg.rollout_application:
-        require_cmd("kubectl")
         run_cmd(["kubectl", "apply", "-f", str(cfg.app_output)])
 
 
@@ -570,9 +463,9 @@ def delete_cluster_secrets(cfg: Config) -> None:
             "kubectl",
             "delete",
             "secret",
-            cfg.secret_name,
-            cfg.postgres_secret_name,
-            cfg.blueprint_secret_name,
+            AUTHENTIK_SECRET_NAME,
+            POSTGRES_SECRET_NAME,
+            BLUEPRINT_SECRET_NAME,
             "-n",
             cfg.namespace,
             "--ignore-not-found=true",
@@ -591,19 +484,14 @@ def main(argv: list[str] | None = None) -> None:
 
     args = parser.parse_args(argv)
     cfg = load_config()
-
     if args.apply_app:
-        object.__setattr__(cfg, "rollout_application", True)
+        cfg.rollout_application = True
 
     if not any([args.stdout, args.write, args.check, args.rollout, args.delete]):
         args.write = True
 
     if args.rollout and (args.stdout or args.check or args.delete):
         fatal("--rollout cannot be combined with --stdout, --check, or --delete")
-
-    if args.delete:
-        delete_cluster_secrets(cfg)
-        return
 
     rendered = render_application(cfg)
 
@@ -621,6 +509,9 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.rollout:
         rollout(cfg)
+
+    if args.delete:
+        delete_cluster_secrets(cfg)
 
 
 if __name__ == "__main__":

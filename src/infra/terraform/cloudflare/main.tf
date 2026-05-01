@@ -4,7 +4,7 @@ terraform {
   required_providers {
     cloudflare = {
       source  = "cloudflare/cloudflare"
-      version = ">= 5.18.0, < 6.0.0"
+      version = ">= 5.19.0, < 6.0.0"
     }
   }
 }
@@ -25,146 +25,55 @@ variable "domain" {
 }
 
 variable "tunnel_name" {
-  description = "Cloudflare Tunnel name used by the downstream tunneling agent"
+  description = "Cloudflare Tunnel name used by cloudflared"
   type        = string
-  default     = "tabular-api-tunnel"
+  default     = "default-tunnel-1"
 }
 
-variable "pages_project_name" {
-  type    = string
-  default = "tabular-ui"
-}
-
-variable "pages_branch" {
-  type    = string
-  default = "main"
-}
-
-variable "pages_repo_owner" {
-  type = string
-}
-
-variable "pages_repo_name" {
-  type = string
-}
-
-variable "pages_repo_id" {
+variable "root_host" {
   type    = string
   default = null
 }
 
-variable "pages_root_dir" {
+variable "api_host" {
   type    = string
-  default = "src/frontend"
+  default = null
 }
 
-variable "pages_destination_dir" {
+variable "auth_host" {
   type    = string
-  default = "dist"
+  default = null
 }
 
-variable "rate_limit_enabled" {
+variable "enable_always_use_https" {
   type    = bool
   default = true
 }
 
-variable "rate_limit_action" {
-  type    = string
-  default = "block"
-
-  validation {
-    condition     = contains(["block", "js_challenge", "managed_challenge", "challenge", "log"], var.rate_limit_action)
-    error_message = "rate_limit_action must be one of: block, js_challenge, managed_challenge, challenge, log."
-  }
+variable "enable_tls_1_3" {
+  type    = bool
+  default = true
 }
 
-variable "rate_limit_requests" {
-  type    = number
-  default = 60
-
-  validation {
-    condition     = var.rate_limit_requests > 0
-    error_message = "rate_limit_requests must be greater than 0."
-  }
+variable "enable_bot_fight_mode" {
+  type    = bool
+  default = true
 }
 
-variable "rate_limit_period" {
-  type    = number
-  default = 10
-
-  validation {
-    condition     = contains([10, 60, 120, 300, 600, 3600], var.rate_limit_period)
-    error_message = "rate_limit_period must be one of: 10, 60, 120, 300, 600, 3600."
-  }
-}
-
-variable "rate_limit_mitigation_timeout" {
-  type    = number
-  default = 10
-
-  validation {
-    condition     = contains([0, 10, 60, 120, 300, 600, 3600, 86400], var.rate_limit_mitigation_timeout)
-    error_message = "rate_limit_mitigation_timeout must be one of: 0, 10, 60, 120, 300, 600, 3600, 86400."
-  }
+variable "enable_js_detections" {
+  type    = bool
+  default = true
 }
 
 locals {
-  app_hostname     = "app.${var.domain}"
-  auth_hostname    = "auth.${var.domain}"
-  predict_hostname = "predict.${var.domain}"
-  tunnel_cname     = "${data.cloudflare_zero_trust_tunnel_cloudflared.api.id}.cfargotunnel.com"
+  domain       = trim(var.domain, ".")
+  root_host    = coalesce(var.root_host, local.domain)
+  api_host     = coalesce(var.api_host, "api.${local.domain}")
+  auth_host    = coalesce(var.auth_host, "auth.${local.domain}")
+  tunnel_cname = "${data.cloudflare_zero_trust_tunnel_cloudflared.default.id}.cfargotunnel.com"
 }
 
-resource "cloudflare_pages_project" "frontend" {
-  account_id        = var.account_id
-  name              = var.pages_project_name
-  production_branch = var.pages_branch
-
-  build_config = {
-    build_caching   = true
-    build_command   = "npm ci && npm run build"
-    destination_dir = "dist"
-    root_dir        = "src/frontend"
-  }
-
-  source = {
-    type = "github"
-
-    config = {
-      owner                          = var.pages_repo_owner
-      repo_id                        = var.pages_repo_id
-      repo_name                      = var.pages_repo_name
-      path_includes                  = ["src/frontend/**"]
-      preview_deployment_setting     = "all"
-      production_branch              = var.pages_branch
-      production_deployments_enabled = true
-      pr_comments_enabled            = true
-    }
-  }
-}
-
-
-resource "cloudflare_dns_record" "frontend_cname" {
-  zone_id = var.zone_id
-  name    = local.app_hostname
-  type    = "CNAME"
-  content = cloudflare_pages_project.frontend.subdomain
-  proxied = true
-  ttl     = 1
-}
-
-resource "cloudflare_pages_domain" "frontend_domain" {
-  account_id   = var.account_id
-  project_name = cloudflare_pages_project.frontend.name
-  name         = local.app_hostname
-
-  depends_on = [
-    cloudflare_pages_project.frontend,
-    cloudflare_dns_record.frontend_cname,
-  ]
-}
-
-data "cloudflare_zero_trust_tunnel_cloudflared" "api" {
+data "cloudflare_zero_trust_tunnel_cloudflared" "default" {
   account_id = var.account_id
 
   filter = {
@@ -173,97 +82,95 @@ data "cloudflare_zero_trust_tunnel_cloudflared" "api" {
   }
 }
 
-data "cloudflare_zero_trust_tunnel_cloudflared_token" "api" {
+data "cloudflare_zero_trust_tunnel_cloudflared_token" "default" {
   account_id = var.account_id
-  tunnel_id  = data.cloudflare_zero_trust_tunnel_cloudflared.api.id
+  tunnel_id   = data.cloudflare_zero_trust_tunnel_cloudflared.default.id
 }
 
-resource "cloudflare_dns_record" "auth_api_cname" {
+resource "cloudflare_dns_record" "root_cname" {
   zone_id = var.zone_id
-  name    = local.auth_hostname
+  name    = local.root_host
   type    = "CNAME"
   content = local.tunnel_cname
   proxied = true
   ttl     = 1
 }
 
-resource "cloudflare_dns_record" "predict_api_cname" {
+resource "cloudflare_dns_record" "api_cname" {
   zone_id = var.zone_id
-  name    = local.predict_hostname
+  name    = local.api_host
   type    = "CNAME"
   content = local.tunnel_cname
   proxied = true
   ttl     = 1
 }
 
-resource "cloudflare_ruleset" "zone_custom_firewall" {
-  zone_id     = var.zone_id
-  name        = "zone-custom-firewall"
-  description = "Block non-standard HTTP(S) ports"
-  kind        = "zone"
-  phase       = "http_request_firewall_custom"
-
-  rules = [
-    {
-      ref         = "block_non_default_ports"
-      description = "Block ports other than 80 and 443"
-      enabled     = true
-      expression  = "not (cf.edge.server_port in {80 443})"
-      action      = "block"
-    }
-  ]
+resource "cloudflare_dns_record" "auth_cname" {
+  zone_id = var.zone_id
+  name    = local.auth_host
+  type    = "CNAME"
+  content = local.tunnel_cname
+  proxied = true
+  ttl     = 1
 }
 
-resource "cloudflare_ruleset" "zone_rate_limit" {
-  count       = var.rate_limit_enabled ? 1 : 0
-  zone_id     = var.zone_id
-  name        = "zone-rate-limit"
-  description = "Rate limiting for API hosts"
-  kind        = "zone"
-  phase       = "http_ratelimit"
-
-  rules = [
-    {
-      ref         = "rate_limit_api_hosts"
-      description = "Rate limit auth and predict API hosts by IP"
-      enabled     = true
-      expression  = "(http.host in {\"${local.auth_hostname}\" \"${local.predict_hostname}\"})"
-      action      = var.rate_limit_action
-      ratelimit = {
-        characteristics     = ["cf.colo.id", "ip.src"]
-        period              = var.rate_limit_period
-        requests_per_period = var.rate_limit_requests
-        mitigation_timeout   = var.rate_limit_mitigation_timeout
-      }
-    }
-  ]
+resource "cloudflare_zone_setting" "ssl" {
+  zone_id    = var.zone_id
+  setting_id = "ssl"
+  value      = "strict"
 }
 
-output "frontend_url" {
-  value = "https://${local.app_hostname}"
+resource "cloudflare_zone_setting" "always_use_https" {
+  count      = var.enable_always_use_https ? 1 : 0
+  zone_id    = var.zone_id
+  setting_id = "always_use_https"
+  value      = "on"
 }
 
-output "auth_url" {
-  value = "https://${local.auth_hostname}"
+resource "cloudflare_zone_setting" "tls_1_3" {
+  count      = var.enable_tls_1_3 ? 1 : 0
+  zone_id    = var.zone_id
+  setting_id = "tls_1_3"
+  value      = "on"
 }
 
-output "predict_url" {
-  value = "https://${local.predict_hostname}"
-}
+resource "cloudflare_bot_management" "zone" {
+  zone_id = var.zone_id
 
-output "pages_project_name" {
-  value = cloudflare_pages_project.frontend.name
+  fight_mode = var.enable_bot_fight_mode
+  enable_js  = var.enable_js_detections
+
+  ai_bots_protection = "block"
+  crawler_protection = "enabled"
+
+  lifecycle {
+    ignore_changes = [
+      auto_update_model
+    ]
+  }
 }
 
 output "cloudflare_tunnel_id" {
-  value = data.cloudflare_zero_trust_tunnel_cloudflared.api.id
+  value = data.cloudflare_zero_trust_tunnel_cloudflared.default.id
 }
 
 output "cloudflare_tunnel_name" {
-  value = data.cloudflare_zero_trust_tunnel_cloudflared.api.name
+  value = data.cloudflare_zero_trust_tunnel_cloudflared.default.name
 }
 
 output "cloudflare_tunnel_token" {
-  value     = data.cloudflare_zero_trust_tunnel_cloudflared_token.api.token
+  value     = data.cloudflare_zero_trust_tunnel_cloudflared_token.default.token
   sensitive = true
+}
+
+output "root_url" {
+  value = "https://${local.root_host}"
+}
+
+output "api_url" {
+  value = "https://${local.api_host}"
+}
+
+output "auth_url" {
+  value = "https://${local.auth_host}"
 }

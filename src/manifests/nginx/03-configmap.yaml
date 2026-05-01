@@ -7,19 +7,68 @@ metadata:
     app.kubernetes.io/name: frontend-nginx
     app.kubernetes.io/component: frontend
 data:
-  nginx.conf: "worker_processes auto;\npid /tmp/nginx.pid;\n\nevents {\n    worker_connections 1024;\n}\n\nhttp {\n    include\
-    \       /etc/nginx/mime.types;\n    default_type  application/octet-stream;\n\n    sendfile        on;\n    tcp_nopush\
-    \      on;\n    tcp_nodelay     on;\n    keepalive_timeout 65;\n    server_tokens   off;\n\n    client_body_temp_path\
-    \ /tmp/client_body;\n    proxy_temp_path       /tmp/proxy;\n    fastcgi_temp_path     /tmp/fastcgi;\n    uwsgi_temp_path\
-    \       /tmp/uwsgi;\n    scgi_temp_path        /tmp/scgi;\n\n    gzip on;\n    gzip_types text/plain text/css application/javascript\
-    \ application/json application/xml image/svg+xml;\n    gzip_min_length 1024;\n\n    server {\n        listen 8080;\n \
-    \       server_name athithya.site;\n\n        root /usr/share/nginx/html;\n        index index.html;\n\n        add_header\
-    \ X-Content-Type-Options \"nosniff\" always;\n        add_header X-Frame-Options \"DENY\" always;\n        add_header\
-    \ Referrer-Policy \"no-referrer-when-downgrade\" always;\n        add_header Cache-Control \"no-store\" always;\n\n  \
-    \      location = /healthz {\n            access_log off;\n            add_header Cache-Control \"no-store\" always;\n\
-    \            return 200 'ok';\n        }\n\n        location = /favicon.ico {\n            try_files /assets/images/favicon.ico\
-    \ =404;\n            add_header Cache-Control \"public, max-age=31536000, immutable\" always;\n            access_log\
-    \ off;\n            log_not_found off;\n        }\n\n        location /assets/ {\n            try_files $uri =404;\n \
-    \           add_header Cache-Control \"public, max-age=31536000, immutable\" always;\n            access_log off;\n  \
-    \          expires 1y;\n        }\n\n        location / {\n            try_files $uri /index.html;\n            add_header\
-    \ Cache-Control \"no-cache\" always;\n        }\n    }\n}\n"
+  nginx.conf: |-
+    worker_processes auto;
+    pid /tmp/nginx.pid;
+
+    events {
+        worker_connections 1024;
+    }
+
+    http {
+        include       /etc/nginx/mime.types;
+        default_type  application/octet-stream;
+
+        sendfile        on;
+        tcp_nopush      on;
+        tcp_nodelay     on;
+        keepalive_timeout 65;
+        server_tokens   off;
+
+        client_body_temp_path /tmp/client_body;
+        proxy_temp_path       /tmp/proxy;
+        fastcgi_temp_path     /tmp/fastcgi;
+        uwsgi_temp_path       /tmp/uwsgi;
+        scgi_temp_path        /tmp/scgi;
+
+        gzip on;
+        gzip_types text/plain text/css application/javascript application/json application/xml image/svg+xml;
+        gzip_min_length 1024;
+
+        server {
+            listen 8080;
+            server_name athithya.site;
+
+            root /usr/share/nginx/html;
+            index index.html;
+
+            add_header X-Content-Type-Options "nosniff" always;
+            add_header X-Frame-Options "DENY" always;
+            add_header Referrer-Policy "no-referrer-when-downgrade" always;
+
+            location = /healthz {
+                access_log off;
+                add_header Cache-Control "no-store" always;
+                return 200 'ok';
+            }
+
+            location = /favicon.ico {
+                try_files /assets/images/favicon.ico =404;
+                add_header Cache-Control "public, max-age=31536000, immutable" always;
+                access_log off;
+                log_not_found off;
+            }
+
+            location /assets/ {
+                try_files $uri =404;
+                add_header Cache-Control "public, max-age=31536000, immutable" always;
+                access_log off;
+                expires 1y;
+            }
+
+            location / {
+                try_files $uri /index.html;
+                add_header Cache-Control "no-cache" always;
+            }
+        }
+    }
