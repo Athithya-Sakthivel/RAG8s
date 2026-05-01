@@ -27,7 +27,7 @@ DEPLOYMENT_DEFAULTS: dict[str, str] = {
     "SERVICE_NAME": "retriever",
     "SERVICE_ACCOUNT_NAME": "retriever-sa",
     "SECRET_NAME": "retriever-secrets",
-    "IMAGE": "ghcr.io/athithya-sakthivel/retriever:2026-04-28-19-39--fed2269@sha256:896c6bad7dbba0eaa07a1e317900e98773c2da6439769c3c6ba48e45548f9800",
+    "IMAGE": "ghcr.io/athithya-sakthivel/retriever:2026-05-01-07-15--813f3ab@sha256:2fff10a209f9f622c66d549b4c7e496444935299f170a896ce15980f8f4019cf",
     "IMAGE_PULL_POLICY": "IfNotPresent",
     "REPLICAS": "1",
     "CONTAINER_PORT": "8001",
@@ -62,14 +62,6 @@ APP_ENV_DEFAULTS: dict[str, str] = {
     "SPARSE_URL": "http://sparse-svc.models.svc.cluster.local:8201",
     "RERANKER_URL": "http://reranker-svc.models.svc.cluster.local:8202",
     "AWS_BEDROCK_MODEL_ID": "meta.llama3-8b-instruct-v1:0",
-    "LLM_PROMPT_TEMPLATE": (
-        "You are a knowledge assistant who must explain explicitly to an end-user by referring ONLY to the provided passages BELOW"
-        "You MUST end every passage with a citation in the exact format [n], where n is one of the numbered passage blocks."
-        "Use ONLY the provided passage numbers. Do NOT output filenames, secrets, URLs, page numbers, or any other metadata. Do NOT invent citations."
-        "PASSAGES:\n{passages}\n\n"
-        "QUESTION: {question}\n\n"
-        "Answer:"
-    ),
     "LLM_MAX_TOKENS": "400",
     "LLM_TEMPERATURE": "0.0",
     "BEDROCK_GUARDRAIL_IDENTIFIER": "",

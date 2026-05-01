@@ -64,9 +64,9 @@ DEFAULTS: dict[str, Any] = {
     "NONPROD": {
         "REPLICAS": 1,
         "CPU_REQUEST": "250m",
-        "CPU_LIMIT": "1000m",
+        "CPU_LIMIT": "4000m",
         "MEMORY_REQUEST": "512Mi",
-        "MEMORY_LIMIT": "2Gi",
+        "MEMORY_LIMIT": "4Gi",
         "STARTUP_FAILURE_THRESHOLD": 60,
     },
     "PROBE_PERIOD_SECONDS": 5,

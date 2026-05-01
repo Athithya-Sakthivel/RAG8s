@@ -38,19 +38,6 @@ data:
   SPARSE_URL: http://sparse-svc.models.svc.cluster.local:8201
   RERANKER_URL: http://reranker-svc.models.svc.cluster.local:8202
   AWS_BEDROCK_MODEL_ID: meta.llama3-8b-instruct-v1:0
-  LLM_PROMPT_TEMPLATE: 'You are a knowledge assistant who must explain explicitly
-    to an end-user by referring ONLY to the provided passages BELOWYou MUST end every
-    passage with a citation in the exact format [n], where n is one of the numbered
-    passage blocks.Use ONLY the provided passage numbers. Do NOT output filenames,
-    secrets, URLs, page numbers, or any other metadata. Do NOT invent citations.PASSAGES:
-
-    {passages}
-
-
-    QUESTION: {question}
-
-
-    Answer:'
   LLM_MAX_TOKENS: '400'
   LLM_TEMPERATURE: '0.0'
   CORPUS_VERSION: v1
@@ -112,7 +99,7 @@ metadata:
     app.kubernetes.io/managed-by: retriever-manifest-generator
     app.kubernetes.io/component: retriever
   annotations:
-    retriever.io/config-sha256: 826a76e435ec948b083a9868408d4e7b77cde9779d7b934bbfb078530e036898
+    retriever.io/config-sha256: 3d6f3f06bb3ff93ee44acff5a8137a324d655f5f506dc88a94714e75abe10fc4
 spec:
   replicas: 1
   revisionHistoryLimit: 3
@@ -130,7 +117,7 @@ spec:
         app.kubernetes.io/component: retriever
         app.kubernetes.io/part-of: retriever
       annotations:
-        retriever.io/config-sha256: 826a76e435ec948b083a9868408d4e7b77cde9779d7b934bbfb078530e036898
+        retriever.io/config-sha256: 3d6f3f06bb3ff93ee44acff5a8137a324d655f5f506dc88a94714e75abe10fc4
     spec:
       serviceAccountName: retriever-sa
       automountServiceAccountToken: true
@@ -144,7 +131,7 @@ spec:
         emptyDir: {}
       containers:
       - name: retriever
-        image: ghcr.io/athithya-sakthivel/retriever:2026-04-28-19-39--fed2269@sha256:896c6bad7dbba0eaa07a1e317900e98773c2da6439769c3c6ba48e45548f9800
+        image: ghcr.io/athithya-sakthivel/retriever:2026-05-01-07-15--813f3ab@sha256:2fff10a209f9f622c66d549b4c7e496444935299f170a896ce15980f8f4019cf
         imagePullPolicy: IfNotPresent
         ports:
         - name: http
@@ -201,21 +188,6 @@ spec:
           value: http://reranker-svc.models.svc.cluster.local:8202
         - name: AWS_BEDROCK_MODEL_ID
           value: meta.llama3-8b-instruct-v1:0
-        - name: LLM_PROMPT_TEMPLATE
-          value: 'You are a knowledge assistant who must explain explicitly to an
-            end-user by referring ONLY to the provided passages BELOWYou MUST end
-            every passage with a citation in the exact format [n], where n is one
-            of the numbered passage blocks.Use ONLY the provided passage numbers.
-            Do NOT output filenames, secrets, URLs, page numbers, or any other metadata.
-            Do NOT invent citations.PASSAGES:
-
-            {passages}
-
-
-            QUESTION: {question}
-
-
-            Answer:'
         - name: LLM_MAX_TOKENS
           value: '400'
         - name: LLM_TEMPERATURE
