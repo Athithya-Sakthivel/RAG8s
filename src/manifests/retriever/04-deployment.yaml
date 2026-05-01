@@ -1,0 +1,159 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: retriever
+  namespace: inference
+  labels:
+    app.kubernetes.io/name: retriever
+    app.kubernetes.io/instance: retriever
+    app.kubernetes.io/managed-by: retriever-manifest-generator
+    app.kubernetes.io/component: retriever
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: retriever
+      app.kubernetes.io/instance: retriever
+      app.kubernetes.io/component: retriever
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: retriever
+        app.kubernetes.io/instance: retriever
+        app.kubernetes.io/managed-by: retriever-manifest-generator
+        app.kubernetes.io/component: retriever
+        app.kubernetes.io/part-of: retriever
+    spec:
+      serviceAccountName: retriever-sa
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      - name: models-cache
+        emptyDir: {}
+      containers:
+      - name: retriever
+        image: ghcr.io/athithya-sakthivel/retriever:2026-05-01-14-56--7edc587@sha256:ff60267c9e71bd00bdf2636d6c9e81f477023687bd4cf12bd825a05e19a4c49d
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8001
+          protocol: TCP
+        env:
+        - name: ENV
+          value: prod
+        - name: DEPLOYMENT_ENVIRONMENT
+          value: prod
+        - name: INSTANCE_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: SERVICE_NAME
+          value: retrieval
+        - name: OTEL_SERVICE_NAME
+          value: retrieval
+        - name: SERVICE_VERSION
+          value: v1
+        - name: OTEL_SERVICE_VERSION
+          value: v1
+        - name: ENV
+          value: prod
+        - name: DEPLOYMENT_ENVIRONMENT
+          value: prod
+        - name: CLUSTER_NAME
+          value: production-cluster
+        - name: K8S_CLUSTER_NAME
+          value: production-cluster
+        - name: AWS_REGION
+          value: ap-south-1
+        - name: AWS_DEFAULT_REGION
+          value: ap-south-1
+        - name: QDRANT_URL
+          value: http://qdrant.qdrant.svc.cluster.local:6333
+        - name: COLLECTION_NAME
+          value: default_rag_collection1
+        - name: DENSE_URL
+          value: http://dense-svc.inference.svc.cluster.local:8200
+        - name: SPARSE_URL
+          value: http://sparse-svc.inference.svc.cluster.local:8201
+        - name: RERANKER_URL
+          value: http://reranker-svc.inference.svc.cluster.local:8202
+        - name: PORT
+          value: '8001'
+        - name: LOG_LEVEL
+          value: WARNING
+        - name: ENABLE_OTEL_TRACES
+          value: 'true'
+        - name: ENABLE_OTEL_METRICS
+          value: 'true'
+        - name: ENABLE_OTEL_LOGS
+          value: 'true'
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: signoz-otel-collector.signoz.svc.cluster.local:4317
+        - name: QDRANT_ON_DISK_PAYLOAD
+          value: 'false'
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: retriever-secrets
+              key: AWS_ACCESS_KEY_ID
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: retriever-secrets
+              key: AWS_SECRET_ACCESS_KEY
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: tmp
+          mountPath: /var/tmp
+        - name: tmp
+          mountPath: /usr/tmp
+        - name: models-cache
+          mountPath: /models_cache
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: '1'
+            memory: 1Gi
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8001
+            scheme: HTTP
+          initialDelaySeconds: 10
+          timeoutSeconds: 5
+          periodSeconds: 5
+          failureThreshold: 3
+          successThreshold: 1
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8001
+            scheme: HTTP
+          initialDelaySeconds: 30
+          timeoutSeconds: 5
+          periodSeconds: 5
+          failureThreshold: 6
+          successThreshold: 1
+        startupProbe:
+          httpGet:
+            path: /healthz
+            port: 8001
+            scheme: HTTP
+          initialDelaySeconds: 30
+          timeoutSeconds: 5
+          periodSeconds: 5
+          failureThreshold: 60
+          successThreshold: 1

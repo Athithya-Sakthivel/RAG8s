@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: retriever
+  namespace: inference
+  labels:
+    app.kubernetes.io/name: retriever
+    app.kubernetes.io/instance: retriever
+    app.kubernetes.io/managed-by: retriever-manifest-generator
+    app.kubernetes.io/component: retriever
+data:
+  SERVICE_NAME: retrieval
+  OTEL_SERVICE_NAME: retrieval
+  SERVICE_VERSION: v1
+  OTEL_SERVICE_VERSION: v1
+  ENV: prod
+  DEPLOYMENT_ENVIRONMENT: prod
+  CLUSTER_NAME: production-cluster
+  K8S_CLUSTER_NAME: production-cluster
+  AWS_REGION: ap-south-1
+  AWS_DEFAULT_REGION: ap-south-1
+  QDRANT_URL: http://qdrant.qdrant.svc.cluster.local:6333
+  COLLECTION_NAME: default_rag_collection1
+  DENSE_URL: http://dense-svc.inference.svc.cluster.local:8200
+  SPARSE_URL: http://sparse-svc.inference.svc.cluster.local:8201
+  RERANKER_URL: http://reranker-svc.inference.svc.cluster.local:8202
+  PORT: '8001'
+  LOG_LEVEL: WARNING
+  ENABLE_OTEL_TRACES: 'true'
+  ENABLE_OTEL_METRICS: 'true'
+  ENABLE_OTEL_LOGS: 'true'
+  OTEL_EXPORTER_OTLP_ENDPOINT: signoz-otel-collector.signoz.svc.cluster.local:4317
+  QDRANT_ON_DISK_PAYLOAD: 'false'

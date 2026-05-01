@@ -8,6 +8,7 @@ metadata:
     app.kubernetes.io/managed-by: argocd
   annotations:
     description: Qdrant Helm deployment
+    argocd.argoproj.io/sync-wave: "0"
 spec:
   project: default
   source:
