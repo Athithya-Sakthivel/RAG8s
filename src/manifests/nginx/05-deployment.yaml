@@ -7,7 +7,7 @@ metadata:
     app.kubernetes.io/name: frontend-nginx
     app.kubernetes.io/component: frontend
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: frontend-nginx
@@ -18,7 +18,7 @@ spec:
         app.kubernetes.io/name: frontend-nginx
         app.kubernetes.io/component: frontend
       annotations:
-        nginx/config-checksum: 78246c399e2404cb43f8bdf199f767ab10e246d64d65e2cbdbfd1d8eb4ae8452
+        nginx/config-checksum: efce8a7c437935210ad07d632cf050f2f5ed7868aad2b8cf102c201fd04f17ae
     spec:
       serviceAccountName: frontend-nginx
       terminationGracePeriodSeconds: 30
@@ -33,7 +33,7 @@ spec:
         emptyDir: {}
       containers:
       - name: nginx
-        image: ghcr.io/athithya-sakthivel/frontend:2026-05-01-10-57--e3a1005@sha256:af6ed0459b212fd8011b1e1eadd79231ed8fc218af5fb8b61d6aaa42d159b272
+        image: ghcr.io/athithya-sakthivel/frontend:2026-05-01-19-45--178fb2a@sha256:885d4316886316d1c1fdfbeedd2dfe94efda677eab5e55d90a526861a71c4627
         imagePullPolicy: IfNotPresent
         ports:
         - name: http

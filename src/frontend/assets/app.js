@@ -1,10 +1,8 @@
-// src/frontend/assets/app.js
 (() => {
   const form = document.getElementById("query-form");
   const result = document.getElementById("result");
   const loading = document.getElementById("loading");
   const askBtn = document.getElementById("ask-btn");
-  const authControls = document.getElementById("auth-controls");
   const queryEl = document.getElementById("query");
   const returnChunksEl = document.getElementById("return_chunks");
   const topKEl = document.getElementById("top_k");
@@ -22,21 +20,9 @@
     }[m]));
   }
 
-  function getToken() {
-    try {
-      return localStorage.getItem("app_jwt") || "";
-    } catch {
-      return "";
-    }
-  }
-
-  function setToken(token) {
-    try {
-      if (token) localStorage.setItem("app_jwt", token);
-      else localStorage.removeItem("app_jwt");
-    } catch {
-      // ignore storage errors
-    }
+  function redirectToLogin() {
+    const rd = encodeURIComponent(window.location.href);
+    window.location.assign(`/auth/login?rd=${rd}`);
   }
 
   function setBusy(busy) {
@@ -47,50 +33,6 @@
     fetchKEl.disabled = busy;
     loading.style.display = busy ? "block" : "none";
     askBtn.textContent = busy ? "Streaming..." : "Ask";
-  }
-
-  function renderAuthSignedOut() {
-    authControls.innerHTML = `
-      <a class="link" href="/auth/login">Sign in</a>
-      <a class="link" href="/auth/logout">Logout</a>
-    `;
-  }
-
-  function renderAuthSignedIn(displayName) {
-    authControls.innerHTML = `
-      <span class="auth-pill">Signed in as ${escapeHtml(displayName || "user")}</span>
-      <a class="link" href="/auth/logout">Logout</a>
-    `;
-  }
-
-  async function refreshAuth() {
-    const token = getToken();
-    if (!token) {
-      renderAuthSignedOut();
-      return;
-    }
-
-    try {
-      const resp = await fetch("/auth/me", {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
-
-      if (!resp.ok) {
-        setToken("");
-        renderAuthSignedOut();
-        return;
-      }
-
-      const data = await resp.json();
-      const user = data && data.user ? data.user : {};
-      const displayName = user.name || user.email || user.sub || "user";
-      renderAuthSignedIn(displayName);
-    } catch {
-      setToken("");
-      renderAuthSignedOut();
-    }
   }
 
   function renderShell() {
@@ -249,16 +191,13 @@
     setBusy(true);
 
     const answerText = document.getElementById("answer-text");
-    const token = getToken();
-    const headers = {
-      "Content-Type": "application/json"
-    };
-    if (token) headers.Authorization = `Bearer ${token}`;
 
     try {
-      const response = await fetch("/api/generate/stream/", {
+      const response = await fetch("/stream", {
         method: "POST",
-        headers,
+        headers: {
+          "Content-Type": "application/json"
+        },
         signal: activeAbortController.signal,
         body: JSON.stringify({
           query,
@@ -267,19 +206,29 @@
           return_chunks,
           allow_semantic_cache: true,
           max_tokens: 400
-        })
+        }),
+        credentials: "same-origin"
       });
 
-      if (response.status === 401 || response.status === 403) {
-        setToken("");
-        renderAuthSignedOut();
-        result.innerHTML = `<div class="error-box">Authentication required. <a class="link" href="/auth/login">Sign in</a></div>`;
+      if (response.redirected || (response.url && response.url.includes("auth.athithya.site"))) {
+        redirectToLogin();
         return;
       }
 
+      if (response.status === 401 || response.status === 403) {
+        redirectToLogin();
+        return;
+      }
+
+      const contentType = response.headers.get("content-type") || "";
       if (!response.ok) {
         const text = await response.text();
         result.innerHTML = `<div class="error-box">Error ${response.status}: ${escapeHtml(text)}</div>`;
+        return;
+      }
+
+      if (contentType.includes("text/html")) {
+        redirectToLogin();
         return;
       }
 
@@ -353,7 +302,5 @@
     }
   }
 
-  window.addEventListener("pageshow", refreshAuth);
   form.addEventListener("submit", submit);
-  refreshAuth();
 })();

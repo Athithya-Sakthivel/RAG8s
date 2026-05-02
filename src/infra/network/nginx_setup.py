@@ -16,12 +16,13 @@ NGINX_CONF_PATH = Path(__file__).resolve().with_name("nginx.conf")
 OUT_DIR = ROOT / "manifests" / "nginx"
 
 NAMESPACE = os.getenv("NAMESPACE", "inference").strip() or "inference"
-FRONTEND_IMAGE = os.getenv("FRONTEND_IMAGE", "ghcr.io/athithya-sakthivel/frontend:2026-05-01-19-45--178fb2a@sha256:885d4316886316d1c1fdfbeedd2dfe94efda677eab5e55d90a526861a71c4627").strip()
+DEFAULT_FRONTEND_IMAGE = "ghcr.io/athithya-sakthivel/frontend:2026-05-01-19-45--178fb2a@sha256:885d4316886316d1c1fdfbeedd2dfe94efda677eab5e55d90a526861a71c4627"
+FRONTEND_IMAGE = os.getenv("FRONTEND_IMAGE", DEFAULT_FRONTEND_IMAGE).strip() or DEFAULT_FRONTEND_IMAGE
 SERVICE_NAME = os.getenv("SERVICE_NAME", "frontend-nginx").strip() or "frontend-nginx"
 SERVICE_ACCOUNT = os.getenv("SERVICE_ACCOUNT", "frontend-nginx").strip() or "frontend-nginx"
 CONFIGMAP_NAME = os.getenv("CONFIGMAP_NAME", "frontend-nginx-config").strip() or "frontend-nginx-config"
 
-REPLICAS = int(os.getenv("REPLICAS", "2"))
+REPLICAS = int(os.getenv("REPLICAS", "1"))
 SERVICE_PORT = int(os.getenv("SERVICE_PORT", "8080"))
 CONTAINER_PORT = int(os.getenv("CONTAINER_PORT", "8080"))
 
@@ -289,9 +290,17 @@ def render_routes_reference() -> dict[str, Any]:
                     f"frontend host: https://{APP_HOST}",
                     f"api host: https://{API_HOST}",
                     f"auth host: https://{AUTH_HOST}",
-                    "public: /",
-                    "public: /assets/*",
                     "public: /healthz",
+                    "public: /readyz",
+                    "public: /auth/login",
+                    "public: /auth/logout",
+                    "public: /outpost.goauthentik.io/*",
+                    "protected: /",
+                    "protected: /api/*",
+                    "protected: /generate",
+                    "protected: /generate/stream",
+                    "protected: /stream",
+                    "protected: /retrieve",
                 ]
             )
             + "\n",
@@ -346,7 +355,7 @@ def write_manifests(docs: list[dict[str, Any]]) -> None:
 
 
 def apply_rollout(docs: list[dict[str, Any]]) -> None:
-    payload = "\n---\n".join(to_yaml(d).rstrip() for d in docs) + "\n"
+    payload = "\n---\n".join(to_yaml(d).rstrip() for d in docs[:4]) + "\n"
     run(["kubectl", "apply", "-f", "-"], stdin=payload)
 
 

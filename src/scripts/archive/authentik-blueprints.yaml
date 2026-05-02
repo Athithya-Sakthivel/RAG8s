@@ -8,7 +8,7 @@ metadata:
     app.kubernetes.io/component: blueprints
 type: Opaque
 stringData:
-  google-oauth.yaml: |
+  google-oauth-forward-auth.yaml: |
     # yaml-language-server: $schema=https://goauthentik.io/blueprints/schema.json
     version: 1
     metadata:
@@ -25,4 +25,23 @@ stringData:
           consumer_key: !Env GOOGLE_OAUTH_CLIENT_ID
           consumer_secret: !Env GOOGLE_OAUTH_CLIENT_SECRET
           scope: openid email profile
-          promoted: true
+          enabled: true
+
+      - model: authentik_providers_proxy.proxyprovider
+        state: present
+        identifiers:
+          slug: api-forward-auth
+        attrs:
+          name: api-forward-auth
+          slug: api-forward-auth
+          mode: forward_single_application
+          external_host: https://api.athithya.site
+
+      - model: authentik_core.application
+        state: present
+        identifiers:
+          slug: api-forward-auth
+        attrs:
+          name: api-forward-auth
+          slug: api-forward-auth
+          provider: !Find [authentik_providers_proxy.proxyprovider, [slug, api-forward-auth]]

@@ -11,6 +11,14 @@ data:
     frontend host: https://athithya.site
     api host: https://api.athithya.site
     auth host: https://auth.athithya.site
-    public: /
-    public: /assets/*
     public: /healthz
+    public: /readyz
+    public: /auth/login
+    public: /auth/logout
+    public: /outpost.goauthentik.io/*
+    protected: /
+    protected: /api/*
+    protected: /generate
+    protected: /generate/stream
+    protected: /stream
+    protected: /retrieve

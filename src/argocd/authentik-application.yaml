@@ -25,6 +25,8 @@ spec:
             value: https://auth.athithya.site
           - name: AUTHENTIK_HOST_BROWSER
             value: https://auth.athithya.site
+          - name: AUTHENTIK_EXTERNAL_URL
+            value: https://auth.athithya.site
           - name: AUTHENTIK_COOKIE_DOMAIN
             value: .athithya.site
           - name: AUTHENTIK_POSTGRESQL__HOST
@@ -35,13 +37,14 @@ spec:
             value: authentik
           - name: AUTHENTIK_POSTGRESQL__NAME
             value: authentik
+          podAnnotations:
+            authentik.argoproj.io/config-checksum: 99574045eb783dc507008e0484384518982ee338d3aefdf92703fd31d442d361
         authentik:
           enabled: true
-          existingSecret:
-            secretName: authentik-env
-          log_level: info
+          secret_key: env://AUTHENTIK_SECRET_KEY
           error_reporting:
             enabled: false
+          log_level: info
           web:
             path: /
           postgresql:
@@ -68,8 +71,6 @@ spec:
             secretKeys:
               adminPasswordKey: postgres-password
               userPasswordKey: password
-              replicationPasswordKey: replication-password
-              metricsPasswordKey: metrics-password
   destination:
     server: https://kubernetes.default.svc
     namespace: authentik

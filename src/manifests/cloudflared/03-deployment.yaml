@@ -18,14 +18,10 @@ spec:
         app.kubernetes.io/name: cloudflared
         app.kubernetes.io/component: tunnel
       annotations:
-        cloudflared/config-checksum: a1ee7da1d5dd06d731a8af16cbe0d2fbcd6abe07026d3253ae9b09cd364087d3
+        cloudflared/config-checksum: 7398e836a7d0ec40130c42c804fef950cd61b4d22cdc4a52a00b5e7f1a82a948
     spec:
       serviceAccountName: cloudflared-sa
-      terminationGracePeriodSeconds: 60
-      securityContext:
-        sysctls:
-        - name: net.ipv4.ping_group_range
-          value: 65532 65532
+      terminationGracePeriodSeconds: 30
       volumes:
       - name: cloudflared-config
         configMap:
@@ -60,6 +56,7 @@ spec:
         ports:
         - name: metrics
           containerPort: 2000
+          protocol: TCP
         volumeMounts:
         - name: cloudflared-config
           mountPath: /etc/cloudflared

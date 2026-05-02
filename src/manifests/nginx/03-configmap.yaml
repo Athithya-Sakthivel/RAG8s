@@ -35,6 +35,16 @@ data:
         gzip_types text/plain text/css application/javascript application/json application/xml image/svg+xml;
         gzip_min_length 1024;
 
+        upstream authentik_upstream {
+            server authentik-server.authentik.svc.cluster.local:80;
+            keepalive 32;
+        }
+
+        upstream retriever_upstream {
+            server retriever.inference.svc.cluster.local:8001;
+            keepalive 32;
+        }
+
         server {
             listen 8080;
             server_name athithya.site;
@@ -69,6 +79,176 @@ data:
             location / {
                 try_files $uri /index.html;
                 add_header Cache-Control "no-cache" always;
+            }
+        }
+
+        server {
+            listen 8080;
+            server_name api.athithya.site;
+
+            root /usr/share/nginx/html;
+            index index.html;
+
+            add_header X-Content-Type-Options "nosniff" always;
+            add_header X-Frame-Options "DENY" always;
+            add_header Referrer-Policy "no-referrer-when-downgrade" always;
+
+            location = /healthz {
+                access_log off;
+                add_header Cache-Control "no-store" always;
+                return 200 'ok';
+            }
+
+            location = /readyz {
+                access_log off;
+                add_header Cache-Control "no-store" always;
+                return 200 'ok';
+            }
+
+            location = /auth/login {
+                return 302 /outpost.goauthentik.io/start?rd=https://$http_host/;
+            }
+
+            location = /auth/logout {
+                return 302 /outpost.goauthentik.io/sign_out;
+            }
+
+            location /outpost.goauthentik.io {
+                proxy_pass http://authentik_upstream/outpost.goauthentik.io;
+                proxy_http_version 1.1;
+
+                proxy_set_header Host auth.athithya.site;
+                proxy_set_header X-Forwarded-Host $http_host;
+                proxy_set_header X-Forwarded-Proto https;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Original-URL $scheme://$http_host$request_uri;
+
+                auth_request_set $auth_cookie $upstream_http_set_cookie;
+                add_header Set-Cookie $auth_cookie always;
+
+                proxy_pass_request_body off;
+                proxy_set_header Content-Length "";
+                proxy_buffering off;
+                proxy_request_buffering off;
+            }
+
+            location = /api {
+                return 301 /;
+            }
+
+            location ^~ /api/ {
+                auth_request /outpost.goauthentik.io/auth/nginx;
+                error_page 401 = @goauthentik_proxy_signin;
+                error_page 403 = @goauthentik_proxy_signin;
+
+                auth_request_set $auth_cookie $upstream_http_set_cookie;
+                auth_request_set $authentik_username $upstream_http_x_authentik_username;
+                auth_request_set $authentik_groups $upstream_http_x_authentik_groups;
+                auth_request_set $authentik_entitlements $upstream_http_x_authentik_entitlements;
+                auth_request_set $authentik_email $upstream_http_x_authentik_email;
+                auth_request_set $authentik_name $upstream_http_x_authentik_name;
+                auth_request_set $authentik_uid $upstream_http_x_authentik_uid;
+
+                add_header Set-Cookie $auth_cookie always;
+
+                proxy_set_header X-authentik-username $authentik_username;
+                proxy_set_header X-authentik-groups $authentik_groups;
+                proxy_set_header X-authentik-entitlements $authentik_entitlements;
+                proxy_set_header X-authentik-email $authentik_email;
+                proxy_set_header X-authentik-name $authentik_name;
+                proxy_set_header X-authentik-uid $authentik_uid;
+
+                rewrite ^/api/(.+?)/?$ /$1 break;
+
+                proxy_pass http://retriever_upstream;
+                proxy_http_version 1.1;
+                proxy_set_header Host $host;
+                proxy_set_header X-Request-Id $request_id;
+                proxy_set_header X-Forwarded-Proto https;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Host $http_host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header Connection "";
+                proxy_buffering off;
+                proxy_request_buffering off;
+                proxy_read_timeout 3600s;
+                proxy_send_timeout 3600s;
+                gzip off;
+                add_header Cache-Control "no-store" always;
+            }
+
+            location ~ ^/(generate/stream|generate|retrieve|stream)/?$ {
+                auth_request /outpost.goauthentik.io/auth/nginx;
+                error_page 401 = @goauthentik_proxy_signin;
+                error_page 403 = @goauthentik_proxy_signin;
+
+                auth_request_set $auth_cookie $upstream_http_set_cookie;
+                auth_request_set $authentik_username $upstream_http_x_authentik_username;
+                auth_request_set $authentik_groups $upstream_http_x_authentik_groups;
+                auth_request_set $authentik_entitlements $upstream_http_x_authentik_entitlements;
+                auth_request_set $authentik_email $upstream_http_x_authentik_email;
+                auth_request_set $authentik_name $upstream_http_x_authentik_name;
+                auth_request_set $authentik_uid $upstream_http_x_authentik_uid;
+
+                add_header Set-Cookie $auth_cookie always;
+
+                proxy_set_header X-authentik-username $authentik_username;
+                proxy_set_header X-authentik-groups $authentik_groups;
+                proxy_set_header X-authentik-entitlements $authentik_entitlements;
+                proxy_set_header X-authentik-email $authentik_email;
+                proxy_set_header X-authentik-name $authentik_name;
+                proxy_set_header X-authentik-uid $authentik_uid;
+
+                rewrite ^/(generate/stream|generate|retrieve|stream)/?$ /$1 break;
+
+                proxy_pass http://retriever_upstream;
+                proxy_http_version 1.1;
+                proxy_set_header Host $host;
+                proxy_set_header X-Request-Id $request_id;
+                proxy_set_header X-Forwarded-Proto https;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Host $http_host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header Connection "";
+                proxy_buffering off;
+                proxy_request_buffering off;
+                proxy_read_timeout 3600s;
+                proxy_send_timeout 3600s;
+                chunked_transfer_encoding on;
+                gzip off;
+                add_header Cache-Control "no-store" always;
+            }
+
+            location / {
+                auth_request /outpost.goauthentik.io/auth/nginx;
+                error_page 401 = @goauthentik_proxy_signin;
+                error_page 403 = @goauthentik_proxy_signin;
+
+                auth_request_set $auth_cookie $upstream_http_set_cookie;
+                auth_request_set $authentik_username $upstream_http_x_authentik_username;
+                auth_request_set $authentik_groups $upstream_http_x_authentik_groups;
+                auth_request_set $authentik_entitlements $upstream_http_x_authentik_entitlements;
+                auth_request_set $authentik_email $upstream_http_x_authentik_email;
+                auth_request_set $authentik_name $upstream_http_x_authentik_name;
+                auth_request_set $authentik_uid $upstream_http_x_authentik_uid;
+
+                add_header Set-Cookie $auth_cookie always;
+                add_header X-authentik-username $authentik_username always;
+                add_header X-authentik-groups $authentik_groups always;
+                add_header X-authentik-entitlements $authentik_entitlements always;
+                add_header X-authentik-email $authentik_email always;
+                add_header X-authentik-name $authentik_name always;
+                add_header X-authentik-uid $authentik_uid always;
+
+                try_files $uri /index.html;
+                add_header Cache-Control "no-cache" always;
+            }
+
+            location @goauthentik_proxy_signin {
+                internal;
+                add_header Set-Cookie $auth_cookie always;
+                return 302 /outpost.goauthentik.io/start?rd=$scheme://$http_host$escaped_request_uri;
             }
         }
     }
