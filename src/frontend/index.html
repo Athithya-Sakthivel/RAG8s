@@ -17,13 +17,14 @@
       <img src="/assets/images/favicon.ico" alt="Logo" class="brand-icon">
       <div>
         <div class="brand-title">RAG UI</div>
-        <div class="brand-subtitle">Streaming chat with citations</div>
+        <div class="brand-subtitle">Streaming answers with citations</div>
       </div>
     </div>
 
-    <div class="topbar-actions" id="auth-controls">
-      <a class="link" href="/auth/login">Sign in</a>
-      <a class="link" href="/auth/logout">Logout</a>
+    <div class="topbar-actions">
+      <a class="link" href="https://auth.athithya.site/ui/console/" target="_blank" rel="noreferrer noopener">
+        Zitadel Console
+      </a>
     </div>
   </header>
 
@@ -57,10 +58,15 @@
             <input id="fetch_k" type="number" value="20" min="1" max="200">
           </label>
 
+          <label class="field">
+            <span>Max tokens</span>
+            <input id="max_tokens" type="number" value="400" min="64" max="4096">
+          </label>
+
           <button id="ask-btn" class="btn" type="submit">Ask</button>
         </div>
 
-        <div id="loading" class="loading" aria-live="polite">
+        <div id="loading" class="loading" aria-live="polite" style="display:none;">
           Streaming response...
         </div>
       </form>

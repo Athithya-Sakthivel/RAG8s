@@ -10,8 +10,6 @@ data:
   routes.yaml: |
     tunnel: default-tunnel-1
     ingress:
-      - hostname: auth.athithya.site
-        service: http://zitadel.zitadel.svc.cluster.local:8080
       - hostname: api.athithya.site
         service: http://frontend-nginx.inference.svc.cluster.local:8080
       - hostname: athithya.site

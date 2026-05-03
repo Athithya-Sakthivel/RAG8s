@@ -130,14 +130,16 @@ git add . && git commit -m "new" && git push origin main
 # kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
 # kubectl port-forward service/argocd-server -n argocd 8080:443 argocd 8080:443
 
+kubectl delete deployment zitadel-login -n inference --ignore-not-found
+kubectl delete svc zitadel-login -n inference --ignore-not-found
+kubectl delete ingress zitadel-login -n inference --ignore-not-found
+kubectl delete secret login-client -n inference --ignore-not-found
 
 export ZITADEL_MASTERKEY=$ZITADEL_MASTERKEY
 export ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD=$ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD
 export ZITADEL_DATABASE_POSTGRES_DSN="postgresql://$(kubectl -n default get secret postgres-cluster-app -o jsonpath='{.data.username}' | base64 -d):$(kubectl -n default get secret postgres-cluster-app -o jsonpath='{.data.password}' | base64 -d)@postgres-cluster-rw.default.svc.cluster.local:5432/zitadel_db?sslmode=disable"
-kubectl patch application zitadel -n argocd -p '{"metadata":{"finalizers":null}}' --type=merge
-kubectl delete pods -n inference -l app.kubernetes.io/name=zitadel
-kubectl delete jobs -n inference -l app.kubernetes.io/name=zitadel
-kubectl delete -f src/argocd/zitadel-application.yaml
+
+
 python3 src/infra/network/zitadel_setup.py --write --apply-secrets 
 kubectl apply -f src/argocd/zitadel-application.yaml
 kubectl get pods -n inference

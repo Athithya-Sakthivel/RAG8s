@@ -32,21 +32,6 @@ IMAGE_TAG = os.environ.get("ZITADEL_IMAGE_TAG", "v4.13.0").strip() or "v4.13.0"
 MASTERKEY_SECRET_NAME = os.environ.get("ZITADEL_MASTERKEY_SECRET_NAME", "zitadel-masterkey").strip() or "zitadel-masterkey"
 CONFIG_SECRET_NAME = os.environ.get("ZITADEL_CONFIG_SECRET_NAME", "zitadel-config-secret").strip() or "zitadel-config-secret"
 
-DEFAULT_MASTERKEY = (os.environ.get("ZITADEL_MASTERKEY") or "").strip()
-DEFAULT_ADMIN_PASSWORD = (os.environ.get("ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD") or "").strip()
-DEFAULT_DB_DSN = (os.environ.get("ZITADEL_DATABASE_POSTGRES_DSN") or "").strip()
-DEFAULT_INSTANCE_NAME = (os.environ.get("ZITADEL_INSTANCE_NAME", "athithya") or "athithya").strip() or "athithya"
-DEFAULT_ADMIN_EMAIL = (os.environ.get("ZITADEL_ADMIN_EMAIL", f"admin@{DOMAIN}") or f"admin@{DOMAIN}").strip() or f"admin@{DOMAIN}"
-
-DEFAULT_REPLICAS = int(os.environ.get("ZITADEL_REPLICAS", "1"))
-DEFAULT_CPU_REQUESTS = (os.environ.get("ZITADEL_CPU_REQUESTS", "200m") or "200m").strip() or "200m"
-DEFAULT_CPU_LIMITS = (os.environ.get("ZITADEL_CPU_LIMITS", "1000m") or "1000m").strip() or "1000m"
-DEFAULT_MEMORY_REQUESTS = (os.environ.get("ZITADEL_MEMORY_REQUESTS", "256Mi") or "256Mi").strip() or "256Mi"
-DEFAULT_MEMORY_LIMITS = (os.environ.get("ZITADEL_MEMORY_LIMITS", "1Gi") or "1Gi").strip() or "1Gi"
-
-DEFAULT_LOGIN_ENABLED = os.environ.get("ZITADEL_LOGIN_ENABLED", "true").strip().lower() in {"1", "true", "yes", "y", "on"}
-DEFAULT_INGRESS_ENABLED = os.environ.get("ZITADEL_INGRESS_ENABLED", "false").strip().lower() in {"1", "true", "yes", "y", "on"}
-DEFAULT_LOGIN_INGRESS_ENABLED = os.environ.get("ZITADEL_LOGIN_INGRESS_ENABLED", "false").strip().lower() in {"1", "true", "yes", "y", "on"}
 VERBOSE = os.environ.get("VERBOSE", "0").strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
@@ -163,26 +148,22 @@ class Config:
     cpu_limits: str
     memory_requests: str
     memory_limits: str
-    login_enabled: bool
     ingress_enabled: bool
-    login_ingress_enabled: bool
 
 
 def load_config() -> Config:
     return Config(
-        masterkey=env("ZITADEL_MASTERKEY", DEFAULT_MASTERKEY),
-        admin_password=env("ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD", DEFAULT_ADMIN_PASSWORD),
-        database_dsn=env("ZITADEL_DATABASE_POSTGRES_DSN", DEFAULT_DB_DSN),
-        instance_name=env("ZITADEL_INSTANCE_NAME", DEFAULT_INSTANCE_NAME),
-        admin_email=env("ZITADEL_ADMIN_EMAIL", DEFAULT_ADMIN_EMAIL),
-        replicas=env_int("ZITADEL_REPLICAS", DEFAULT_REPLICAS),
-        cpu_requests=env("ZITADEL_CPU_REQUESTS", DEFAULT_CPU_REQUESTS),
-        cpu_limits=env("ZITADEL_CPU_LIMITS", DEFAULT_CPU_LIMITS),
-        memory_requests=env("ZITADEL_MEMORY_REQUESTS", DEFAULT_MEMORY_REQUESTS),
-        memory_limits=env("ZITADEL_MEMORY_LIMITS", DEFAULT_MEMORY_LIMITS),
-        login_enabled=env_bool("ZITADEL_LOGIN_ENABLED", DEFAULT_LOGIN_ENABLED),
-        ingress_enabled=env_bool("ZITADEL_INGRESS_ENABLED", DEFAULT_INGRESS_ENABLED),
-        login_ingress_enabled=env_bool("ZITADEL_LOGIN_INGRESS_ENABLED", DEFAULT_LOGIN_INGRESS_ENABLED),
+        masterkey=env("ZITADEL_MASTERKEY", ""),
+        admin_password=env("ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD", ""),
+        database_dsn=env("ZITADEL_DATABASE_POSTGRES_DSN", ""),
+        instance_name=env("ZITADEL_INSTANCE_NAME", "athithya"),
+        admin_email=env("ZITADEL_ADMIN_EMAIL", f"admin@{DOMAIN}"),
+        replicas=env_int("ZITADEL_REPLICAS", 1),
+        cpu_requests=env("ZITADEL_CPU_REQUESTS", "200m"),
+        cpu_limits=env("ZITADEL_CPU_LIMITS", "1000m"),
+        memory_requests=env("ZITADEL_MEMORY_REQUESTS", "256Mi"),
+        memory_limits=env("ZITADEL_MEMORY_LIMITS", "1Gi"),
+        ingress_enabled=env_bool("ZITADEL_INGRESS_ENABLED", False),
     )
 
 
@@ -252,7 +233,7 @@ def render_secret_config(cfg: Config) -> dict[str, Any]:
 
 
 def render_values(cfg: Config) -> dict[str, Any]:
-    values: dict[str, Any] = {
+    return {
         "replicaCount": cfg.replicas,
         "image": {
             "repository": IMAGE_REPOSITORY,
@@ -264,6 +245,9 @@ def render_values(cfg: Config) -> dict[str, Any]:
             "configSecretName": CONFIG_SECRET_NAME,
             "configSecretKey": "config-yaml",
             "configmapConfig": render_runtime_config(),
+        },
+        "login": {
+            "enabled": False,
         },
         "ingress": {
             "enabled": cfg.ingress_enabled,
@@ -325,16 +309,6 @@ def render_values(cfg: Config) -> dict[str, Any]:
             }
         },
     }
-
-    if cfg.login_enabled:
-        values["login"] = {
-            "enabled": True,
-            "ingress": {
-                "enabled": cfg.login_ingress_enabled,
-            },
-        }
-
-    return values
 
 
 def render_secrets(cfg: Config) -> list[dict[str, Any]]:
@@ -440,25 +414,13 @@ def write_output(cfg: Config) -> None:
     log(f"Wrote {VALUES_OUTPUT}")
 
 
+def apply_docs(docs_yaml: str) -> None:
+    run_cmd(["kubectl", "apply", "-f", "-"], stdin=docs_yaml)
+
+
 def apply_secrets(cfg: Config) -> None:
     ensure_namespace(NAMESPACE)
-    run_cmd(["kubectl", "apply", "-f", "-"], stdin=render_cluster_secrets_payload(cfg))
-
-
-def delete_secrets() -> None:
-    require_cmd("kubectl")
-    run_cmd(
-        [
-            "kubectl",
-            "delete",
-            "secret",
-            MASTERKEY_SECRET_NAME,
-            CONFIG_SECRET_NAME,
-            "-n",
-            NAMESPACE,
-            "--ignore-not-found=true",
-        ]
-    )
+    apply_docs(render_cluster_secrets_payload(cfg))
 
 
 def apply_application(cfg: Config) -> None:
@@ -476,6 +438,22 @@ def delete_application() -> None:
             APP_NAME,
             "-n",
             APP_NAMESPACE,
+            "--ignore-not-found=true",
+        ]
+    )
+
+
+def delete_secrets() -> None:
+    require_cmd("kubectl")
+    run_cmd(
+        [
+            "kubectl",
+            "delete",
+            "secret",
+            MASTERKEY_SECRET_NAME,
+            CONFIG_SECRET_NAME,
+            "-n",
+            NAMESPACE,
             "--ignore-not-found=true",
         ]
     )

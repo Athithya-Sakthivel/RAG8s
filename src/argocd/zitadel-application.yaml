@@ -16,7 +16,7 @@ spec:
     targetRevision: 9.34.0
     helm:
       values: |
-        replicaCount: 2
+        replicaCount: 1
         image:
           repository: ghcr.io/zitadel/zitadel
           tag: v4.13.0
@@ -31,6 +31,8 @@ spec:
             ExternalSecure: true
             TLS:
               Enabled: false
+        login:
+          enabled: false
         ingress:
           enabled: false
         podSecurityContext:
@@ -72,8 +74,6 @@ spec:
                     values:
                     - zitadel
                 topologyKey: kubernetes.io/hostname
-        login:
-          enabled: true
   destination:
     server: https://kubernetes.default.svc
     namespace: inference

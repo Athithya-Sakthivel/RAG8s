@@ -17,7 +17,6 @@ except Exception as exc:  # pragma: no cover
     print("ERROR: PyYAML is required. Install with: pip install pyyaml", file=sys.stderr)
     raise SystemExit(2) from exc
 
-
 ROOT = Path(__file__).resolve().parents[3]
 NGINX_CONF_PATH = ROOT / "src" / "infra" / "network" / "nginx.conf"
 OUT_DIR = ROOT / "src" / "manifests" / "nginx"
@@ -37,8 +36,8 @@ CONTAINER_PORT = int(os.getenv("CONTAINER_PORT", "8080"))
 
 DOMAIN = os.getenv("DOMAIN", "athithya.site").strip().rstrip(".") or "athithya.site"
 APP_HOST = os.getenv("APP_HOST", DOMAIN).strip().rstrip(".") or DOMAIN
-API_HOST = os.getenv("API_HOST", f"api.{DOMAIN}").strip().rstrip(".") or f"api.{DOMAIN}"
-AUTH_HOST = os.getenv("AUTH_HOST", f"auth.{DOMAIN}").strip().rstrip(".") or f"auth.{DOMAIN}"
+API_HOST = os.getenv("API_HOST", "api.athithya.site").strip().rstrip(".") or "api.athithya.site"
+AUTH_HOST = os.getenv("AUTH_HOST", "").strip().rstrip(".") or ""
 
 ZITADEL_NAMESPACE = os.getenv("ZITADEL_NAMESPACE", "zitadel").strip() or "zitadel"
 ZITADEL_SERVICE_NAME = os.getenv("ZITADEL_SERVICE_NAME", "zitadel").strip() or "zitadel"
@@ -51,7 +50,7 @@ READINESS_PERIOD_SECONDS = int(os.getenv("READINESS_PERIOD_SECONDS", "5"))
 LIVENESS_INITIAL_DELAY_SECONDS = int(os.getenv("LIVENESS_INITIAL_DELAY_SECONDS", "15"))
 LIVENESS_PERIOD_SECONDS = int(os.getenv("LIVENESS_PERIOD_SECONDS", "10"))
 
-# Tokens that must not appear in nginx.conf
+# Minimal forbidden tokens for safety
 FORBIDDEN_TOKENS = (
     "$escaped_request_uri",
     "$escaped_uri",
@@ -59,34 +58,24 @@ FORBIDDEN_TOKENS = (
     "escaped_uri",
     "auth_request",
     "outpost.goauthentik.io",
-    "goauthentik",
-    "authentik",
-    "Authentik",
-    "X-authentik-",
-    "x-authentik-",
 )
 
 class Dumper(yaml.SafeDumper):
     pass
 
-
 def _str_representer(dumper: yaml.SafeDumper, data: str):
     style = "|" if "\n" in data else None
     return dumper.represent_scalar("tag:yaml.org,2002:str", data, style=style)
 
-
 Dumper.add_representer(str, _str_representer)
-
 
 def fatal(msg: str, code: int = 2) -> NoReturn:
     print(f"ERROR: {msg}", file=sys.stderr)
     raise SystemExit(code)
 
-
 def require(condition: bool, message: str) -> None:
     if not condition:
         fatal(message)
-
 
 def to_yaml(obj: Any) -> str:
     return yaml.dump(
@@ -99,11 +88,9 @@ def to_yaml(obj: Any) -> str:
         indent=2,
     )
 
-
 def sha256_obj(obj: Any) -> str:
     payload = json.dumps(obj, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
-
 
 def safe_write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -118,32 +105,26 @@ def safe_write(path: Path, content: str) -> None:
         tmp_path = Path(tmp.name)
     os.replace(tmp_path, path)
 
-
 def run(cmd: list[str], stdin: str | None = None) -> None:
     subprocess.run(cmd, input=stdin, text=True, check=True)
-
 
 def load_nginx_conf() -> str:
     require(NGINX_CONF_PATH.exists(), f"nginx.conf not found at {NGINX_CONF_PATH}")
     return NGINX_CONF_PATH.read_text(encoding="utf-8")
 
-
 def validate_nginx_conf(nginx_conf: str) -> None:
     """
-    Minimal, pragmatic validation:
-      - ensure file doesn't contain clearly forbidden tokens
-      - ensure required structural markers exist so generated manifests are sensible
-    This intentionally avoids brittle or "naive" checks that reject valid, environment-driven configs.
+    Pragmatic validation:
+      - ensure file exists and does not contain clearly forbidden tokens
+      - ensure minimal structural markers exist so generated manifests are sensible
+    This avoids brittle checks that would reject valid, environment-driven configs.
     """
     bad = [token for token in FORBIDDEN_TOKENS if token in nginx_conf]
     require(not bad, f"nginx.conf contains forbidden token(s): {', '.join(bad)}")
 
-    # Basic structural checks only
     require("listen 8080;" in nginx_conf, "nginx.conf must listen on 8080")
     require("server_name" in nginx_conf, "nginx.conf must declare server_name")
-    require("location ^~ /api/" in nginx_conf or "location ^~ /api" in nginx_conf, "nginx.conf should proxy /api/")
     require("try_files $uri $uri/ /index.html;" in nginx_conf, "nginx.conf must serve the SPA index fallback")
-
 
 def render_serviceaccount(namespace: str) -> dict[str, Any]:
     return {
@@ -158,7 +139,6 @@ def render_serviceaccount(namespace: str) -> dict[str, Any]:
             },
         },
     }
-
 
 def render_configmap(namespace: str, nginx_conf: str) -> dict[str, Any]:
     return {
@@ -176,7 +156,6 @@ def render_configmap(namespace: str, nginx_conf: str) -> dict[str, Any]:
             "nginx.conf": nginx_conf,
         },
     }
-
 
 def render_service(namespace: str) -> dict[str, Any]:
     return {
@@ -206,7 +185,6 @@ def render_service(namespace: str) -> dict[str, Any]:
             ],
         },
     }
-
 
 def render_deployment(namespace: str, image: str, replicas: int, checksum: str) -> dict[str, Any]:
     return {
@@ -317,11 +295,8 @@ def render_deployment(namespace: str, image: str, replicas: int, checksum: str) 
         },
     }
 
-
 def render_routes_reference() -> dict[str, Any]:
     frontend_origin = f"http://{SERVICE_NAME}.{NAMESPACE}.svc.cluster.local:{SERVICE_PORT}"
-    zitadel_origin = f"http://{ZITADEL_SERVICE_NAME}.{ZITADEL_NAMESPACE}.svc.cluster.local:{ZITADEL_SERVICE_PORT}"
-
     return {
         "apiVersion": "v1",
         "kind": "ConfigMap",
@@ -338,8 +313,6 @@ def render_routes_reference() -> dict[str, Any]:
                 [
                     "tunnel: default-tunnel-1",
                     "ingress:",
-                    f"  - hostname: {AUTH_HOST}",
-                    f"    service: {zitadel_origin}",
                     f"  - hostname: {API_HOST}",
                     f"    service: {frontend_origin}",
                     f"  - hostname: {APP_HOST}",
@@ -350,7 +323,6 @@ def render_routes_reference() -> dict[str, Any]:
             + "\n",
         },
     }
-
 
 def build() -> tuple[list[dict[str, Any]], str]:
     require(bool(FRONTEND_IMAGE), "FRONTEND_IMAGE is required")
@@ -392,7 +364,6 @@ def build() -> tuple[list[dict[str, Any]], str]:
     rendered = "\n---\n".join(to_yaml(d).rstrip() for d in docs) + "\n"
     return docs, rendered
 
-
 def write_manifests(docs: list[dict[str, Any]]) -> None:
     # Overwrite files atomically to avoid stale YAMLs
     OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -402,11 +373,9 @@ def write_manifests(docs: list[dict[str, Any]]) -> None:
     safe_write(OUT_DIR / "05-deployment.yaml", to_yaml(docs[3]).rstrip() + "\n")
     safe_write(OUT_DIR / "06-routes-reference.yaml", to_yaml(docs[4]).rstrip() + "\n")
 
-
 def apply_rollout(docs: list[dict[str, Any]]) -> None:
     payload = "\n---\n".join(to_yaml(d).rstrip() for d in docs) + "\n"
     run(["kubectl", "apply", "-f", "-"], stdin=payload)
-
 
 def destroy() -> None:
     run(
@@ -423,7 +392,6 @@ def destroy() -> None:
             "--ignore-not-found=true",
         ]
     )
-
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -444,7 +412,6 @@ def main() -> None:
 
     write_manifests(docs)
     apply_rollout(docs)
-
 
 if __name__ == "__main__":
     main()

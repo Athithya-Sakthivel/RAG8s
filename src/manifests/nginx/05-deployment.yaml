@@ -18,7 +18,7 @@ spec:
         app.kubernetes.io/name: frontend-nginx
         app.kubernetes.io/component: frontend
       annotations:
-        nginx/config-checksum: e6902a6690c5c1e439059a56ccd59366ed3540b6866f0d90a6a04feabeb8a94f
+        nginx/config-checksum: 6df84896895468afbce16c6ed09d94f88e9c9fe323065efde1e55fa5e1fd38e3
     spec:
       serviceAccountName: frontend-nginx
       automountServiceAccountToken: false

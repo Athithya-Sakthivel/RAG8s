@@ -34,7 +34,7 @@ DEFAULTS: dict[str, Any] = {
     "SERVICE_NAME": "retriever",
     "SERVICE_ACCOUNT_NAME": "retriever-sa",
     "SECRET_NAME": "retriever-secrets",
-    "IMAGE": "ghcr.io/athithya-sakthivel/retriever:2026-05-03-13-29--d13b057@sha256:2b4bb7f34c57db45e4241576951d43195f286bcdddf4f321fcd28b629ba72a3f",
+    "IMAGE": "ghcr.io/athithya-sakthivel/retriever:2026-05-03-19-30--0ae1848@sha256:d667a470ffa3f5ca4f5611efd3e3364019c21cd0b04f50bb1aa684c3c92f52bb",
     "IMAGE_PULL_POLICY": "IfNotPresent",
     "REPLICAS": 1,
     "CONTAINER_PORT": 8001,
@@ -557,8 +557,8 @@ def generate_manifests(cfg: dict[str, Any], secret_env: dict[str, str], dry_run:
     log.info("Manifests written to %s (inputs_hash=%s)", str(manifests_dir), inputs_hash)
 
     if verbose:
-        log.debug("Secret keys written to YAML: %s", sorted(secret_env_for_yaml.keys()))
-        log.debug("Secret keys applied directly: %s", sorted(secret_env_for_direct_apply.keys()))
+        log.debug("Secret keys written to YAML")
+        log.debug("Secret keys applied directly")
         log.debug("Deployment image: %s", cfg["IMAGE"])
 
     # Return a tuple-like string to indicate inputs_hash and whether there are direct secrets to apply.
@@ -595,8 +595,8 @@ def apply_to_cluster(cfg: dict[str, Any], secret_env: dict[str, str], dry_run: b
         try:
             create_namespace_if_missing(cfg["NAMESPACE"])
             apply_secret_direct(cfg, secret_env_for_direct_apply)
-        except subprocess.CalledProcessError as exc:
-            log.error("Failed to apply direct secrets: %s", exc)
+        except subprocess.CalledProcessError:
+            log.error("Failed to apply direct secrets")
             raise SystemExit(2) from None
 
     # If there is a secret manifest on disk (non-AWS keys), apply it.

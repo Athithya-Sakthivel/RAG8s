@@ -1,45 +1,41 @@
-/* src/frontend/assets/styles.css */
 :root {
-  --bg: #f6f7fb;
+  --bg: #f7f8fc;
   --card: #ffffff;
-  --text: #111827;
-  --muted: #6b7280;
-  --border: #e5e7eb;
+  --text: #0f172a;
+  --muted: #64748b;
+  --border: #e6e8ef;
+
   --accent: #2563eb;
-  --accent-hover: #1d4ed8;
-  --shadow: 0 10px 30px rgba(17, 24, 39, 0.08);
-  --radius: 16px;
-  --ok-bg: #e8f7ee;
-  --ok-text: #166534;
-  --neutral-bg: #eef2ff;
-  --neutral-text: #3730a3;
+  --accent-soft: rgba(37, 99, 235, 0.08);
+
+  --shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+  --radius: 14px;
 }
 
 * {
   box-sizing: border-box;
 }
 
-html, body {
+body {
   margin: 0;
-  min-height: 100%;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
   background: var(--bg);
   color: var(--text);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.5;
 }
 
-a {
-  color: inherit;
-  text-decoration: none;
-}
+/* =========================
+   TOPBAR
+========================= */
 
 .topbar {
-  max-width: 1080px;
+  max-width: 1040px;
   margin: 0 auto;
-  padding: 20px 20px 0;
+  padding: 16px 18px;
+
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 16px;
 }
 
 .brand {
@@ -49,79 +45,53 @@ a {
 }
 
 .brand-icon {
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   border-radius: 10px;
-  object-fit: cover;
-  background: #fff;
-  box-shadow: var(--shadow);
 }
 
 .brand-title {
-  font-size: 20px;
+  font-size: 16px;
   font-weight: 700;
-  line-height: 1.1;
 }
 
 .brand-subtitle {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--muted);
   margin-top: 2px;
 }
 
 .topbar-actions {
   display: flex;
+  gap: 10px;
   align-items: center;
-  gap: 12px;
 }
 
 .link {
-  font-size: 14px;
+  font-size: 13px;
   color: var(--accent);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: 6px 8px;
+  border-radius: 8px;
 }
 
 .link:hover {
-  text-decoration: underline;
+  background: var(--accent-soft);
 }
 
-.auth-pill,
-.pill {
-  display: inline-flex;
-  align-items: center;
-  height: 30px;
-  padding: 0 10px;
-  border-radius: 999px;
-  font-size: 13px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.auth-pill {
-  background: #e8f0ff;
-  color: #1d4ed8;
-}
-
-.pill {
-  background: var(--neutral-bg);
-  color: var(--neutral-text);
-}
-
-.pill-ok {
-  background: var(--ok-bg);
-  color: var(--ok-text);
-}
-
-.pill-neutral {
-  background: var(--neutral-bg);
-  color: var(--neutral-text);
-}
+/* =========================
+   LAYOUT
+========================= */
 
 .shell {
-  max-width: 1080px;
+  max-width: 1040px;
   margin: 0 auto;
-  padding: 20px;
+  padding: 14px 18px;
+
   display: grid;
-  gap: 18px;
+  gap: 14px;
 }
 
 .card {
@@ -131,221 +101,199 @@ a {
   box-shadow: var(--shadow);
 }
 
+/* =========================
+   FORM
+========================= */
+
 .ask-form {
-  padding: 20px;
+  padding: 16px;
 }
 
 .label {
-  display: block;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
+  display: block;
 }
 
 .textarea {
   width: 100%;
-  resize: vertical;
-  min-height: 120px;
-  padding: 14px;
+  min-height: 110px;
+  padding: 12px;
   border: 1px solid var(--border);
-  border-radius: 14px;
-  font: inherit;
-  color: var(--text);
-  background: #fff;
+  border-radius: var(--radius);
+  font-size: 14px;
   outline: none;
+  resize: vertical;
+  background: #fff;
 }
 
 .textarea:focus {
-  border-color: rgba(37, 99, 235, 0.5);
-  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12);
+  border-color: rgba(37, 99, 235, 0.4);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 
 .row {
-  margin-top: 14px;
+  margin-top: 12px;
   display: flex;
   flex-wrap: wrap;
-  align-items: end;
-  gap: 12px;
+  gap: 10px;
+  align-items: center;
 }
 
 .check {
-  display: inline-flex;
+  font-size: 13px;
+  color: var(--muted);
+  display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  color: var(--text);
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: #fafafa;
+  gap: 6px;
 }
 
 .field {
-  display: grid;
-  gap: 6px;
-  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
   color: var(--muted);
 }
 
 .field input {
-  width: 110px;
-  padding: 10px 12px;
+  width: 90px;
+  padding: 8px 10px;
   border: 1px solid var(--border);
-  border-radius: 12px;
-  font: inherit;
-  background: #fff;
+  border-radius: 10px;
 }
 
 .btn {
   margin-left: auto;
-  border: 0;
-  border-radius: 12px;
-  padding: 11px 16px;
-  font: inherit;
-  font-weight: 700;
-  color: #fff;
   background: var(--accent);
+  color: #fff;
+  border: 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-weight: 600;
   cursor: pointer;
 }
 
 .btn:hover {
-  background: var(--accent-hover);
-}
-
-.btn:disabled,
-.textarea:disabled,
-.field input:disabled,
-.check input:disabled {
-  opacity: 0.65;
-  cursor: not-allowed;
+  filter: brightness(0.95);
 }
 
 .loading {
   display: none;
-  margin-top: 14px;
-  font-size: 14px;
+  margin-top: 10px;
+  font-size: 13px;
   color: var(--muted);
 }
 
+/* =========================
+   RESULT
+========================= */
+
 .result {
-  padding: 20px;
+  padding: 16px;
 }
 
 .empty-state {
   color: var(--muted);
-  font-size: 15px;
-  padding: 20px 2px;
+  font-size: 14px;
 }
 
-.answer-card {
-  display: grid;
-  gap: 18px;
-}
-
-.answer-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 14px;
-  flex-wrap: wrap;
-}
-
-.answer-title,
-.sources-title {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 700;
-}
-
-.summary {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: flex-end;
-}
+/* Answer block */
 
 .answer-box {
-  background: #fff;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 16px;
+  display: grid;
+  gap: 14px;
 }
 
 .answer-text {
-  margin: 0;
   white-space: pre-wrap;
-  word-break: break-word;
-  line-height: 1.7;
-  font-size: 15px;
+  font-size: 14px;
+  line-height: 1.65;
+  margin: 0;
+}
+
+/* =========================
+   SOURCES (IMPORTANT PART)
+========================= */
+
+.sources-title {
+  font-size: 13px;
+  font-weight: 700;
+  margin-top: 8px;
+  color: var(--muted);
 }
 
 .sources-list {
   display: grid;
-  gap: 12px;
+  gap: 10px;
+  margin-top: 10px;
 }
 
 .source-item {
   border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 14px;
-  background: #fff;
+  border-radius: 12px;
+  padding: 12px;
+  background: #fafbff;
 }
 
 .source-head {
   display: flex;
   justify-content: space-between;
-  gap: 12px;
-  align-items: baseline;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .source-index {
+  font-size: 12px;
   font-weight: 700;
   color: var(--accent);
 }
 
 .source-meta {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--muted);
-  overflow-wrap: anywhere;
+  display: grid;
+  gap: 6px;
 }
 
 .source-content {
-  margin-top: 10px;
-  padding-top: 10px;
+  margin-top: 8px;
+  padding-top: 8px;
   border-top: 1px dashed var(--border);
+  font-size: 13px;
+  color: #1e293b;
   white-space: pre-wrap;
-  word-break: break-word;
-  font-size: 14px;
-  line-height: 1.65;
-  color: #1f2937;
 }
 
 .source-link {
   color: var(--accent);
+  word-break: break-word;
 }
 
 .source-link:hover {
   text-decoration: underline;
 }
 
+/* =========================
+   ERROR
+========================= */
+
 .error-box {
-  border: 1px solid #fecaca;
   background: #fef2f2;
+  border: 1px solid #fecaca;
   color: #991b1b;
-  border-radius: 14px;
-  padding: 14px;
+  padding: 12px;
+  border-radius: var(--radius);
+  font-size: 13px;
 }
 
-@media (max-width: 720px) {
-  .topbar,
-  .shell {
-    padding-left: 14px;
-    padding-right: 14px;
-  }
+/* =========================
+   MOBILE
+========================= */
 
-  .row {
-    align-items: stretch;
+@media (max-width: 720px) {
+  .topbar {
+    padding: 12px;
   }
 
   .btn {
@@ -353,11 +301,11 @@ a {
     margin-left: 0;
   }
 
-  .field input {
-    width: 100%;
+  .row {
+    align-items: stretch;
   }
 
-  .summary {
-    justify-content: flex-start;
+  .field input {
+    width: 100%;
   }
 }
