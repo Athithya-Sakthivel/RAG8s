@@ -21,7 +21,7 @@ import jwt
 import settings as settings_module
 import uvicorn
 from clients import AsyncBedrockClient, AsyncDenseClient, AsyncRerankerClient, AsyncSparseClient
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from helpers import build_prompt_and_ui_chunks, deterministic_summarize, validate_and_filter_citations
@@ -41,9 +41,21 @@ from pipeline import (
 )
 from settings import (
     ANSWER_PROMPT_TEMPLATE,
+    AUTH_ALLOWED_ALGORITHMS,
+    AUTH_AUTHORIZATION_ENDPOINT,
     AUTH_CALLBACK_PATH,
+    AUTH_CLIENT_ID,
+    AUTH_CLIENT_SECRET,
+    AUTH_FLOW,
+    AUTH_ISSUER_URL,
+    AUTH_JWKS_URI,
     AUTH_LOGIN_PATH,
     AUTH_LOGOUT_PATH,
+    AUTH_LOGOUT_REDIRECT_URI,
+    AUTH_REDIRECT_URI,
+    AUTH_SCOPES,
+    AUTH_TOKEN_ENDPOINT,
+    AUTH_USERINFO_ENDPOINT,
     AWS_REGION,
     BEDROCK_GUARDRAIL_IDENTIFIER,
     BEDROCK_GUARDRAIL_VERSION,
@@ -56,7 +68,9 @@ from settings import (
     DEFAULT_USER_RATE_LIMIT,
     DENSE_URL,
     DEPLOYMENT_ENVIRONMENT,
+    ENABLE_AUTH,
     ENV,
+    FETCH_K,
     HTTP_TIMEOUT,
     INSTANCE_ID,
     LLM_MAX_TOKENS,
@@ -68,6 +82,7 @@ from settings import (
     PROMPT_VERSION,
     QDRANT_API_KEY,
     QDRANT_URL,
+    RATE_LIMIT_KEY_MODE,
     RERANKER_URL,
     RETRIEVAL_VERSION,
     SERVICE_NAME,
@@ -79,23 +94,14 @@ from settings import (
     SESSION_SECRET,
     SESSION_TTL_SECONDS,
     SPARSE_URL,
-    ZITADEL_ALLOWED_ALGORITHMS,
-    ZITADEL_AUDIENCE,
-    ZITADEL_AUTHORIZATION_ENDPOINT,
-    ZITADEL_CLIENT_ID,
-    ZITADEL_ISSUER,
-    ZITADEL_JWKS_URI,
-    ZITADEL_REDIRECT_URI,
-    ZITADEL_SCOPES,
-    ZITADEL_TOKEN_ENDPOINT,
-    ZITADEL_USERINFO_ENDPOINT,
+    TENANT_ID,
     GenerateRequest,
+    validate_runtime_contract,
 )
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from starlette.background import BackgroundTask
-from starlette.datastructures import URL
 from store import QdrantStore, QdrantStoreConfig
 from telemetry import annotate_current_span, initialize_telemetry, json_log, safe_stack, setup_logging
 
@@ -112,6 +118,9 @@ _RETRIEVED_DOCS = None
 _FLOW_COOKIE_NAME = "retriever_oidc_flow"
 _FLOW_COOKIE_TTL_SECONDS = 600
 _DEFAULT_NEXT_PATH = "/generate/stream"
+_MAX_TOP_K = 7
+_MIN_FETCH_K = 10
+_MAX_FETCH_K = 50
 
 
 @dataclass(frozen=True)
@@ -346,8 +355,7 @@ def _session_secret() -> str:
     secret = (SESSION_SECRET or "").strip()
     if secret:
         return secret
-    fallback = (ZITADEL_CLIENT_ID or ZITADEL_ISSUER or SERVICE_NAME).strip()
-    return fallback or "retriever-dev-secret"
+    raise RuntimeError("SESSION_SECRET is required when auth is enabled")
 
 
 def _session_serializer():
@@ -412,9 +420,8 @@ def _clean_next_path(value: str | None) -> str:
 
 def _auth_redirect_url(request: Request, next_path: str | None = None) -> str:
     safe_next = _clean_next_path(next_path)
-    return str(
-        request.url_for("auth_login").include_query_params(next=safe_next)
-    )
+    return str(request.url_for("auth_login").include_query_params(next=safe_next))
+
 
 def _get_bearer_token(request: Request) -> str | None:
     auth = request.headers.get("authorization") or request.headers.get("Authorization")
@@ -430,18 +437,18 @@ def _get_bearer_token(request: Request) -> str | None:
 
 
 def _jwk_client() -> PyJWKClient:
-    return PyJWKClient(ZITADEL_JWKS_URI, cache_keys=True)
+    return PyJWKClient(AUTH_JWKS_URI, cache_keys=True)
 
 
 def _verify_jwt(token: str) -> dict[str, Any]:
     signing_key = _jwk_client().get_signing_key_from_jwt(token).key
-    audience = ZITADEL_AUDIENCE.strip() or None
+    audience = AUTH_CLIENT_ID.strip() or None
     claims = jwt.decode(
         token,
         signing_key,
-        algorithms=list(ZITADEL_ALLOWED_ALGORITHMS),
+        algorithms=list(AUTH_ALLOWED_ALGORITHMS),
         audience=audience,
-        issuer=ZITADEL_ISSUER,
+        issuer=AUTH_ISSUER_URL,
         options={
             "require": ["exp", "iat", "iss", "sub"],
             "verify_aud": bool(audience),
@@ -452,20 +459,23 @@ def _verify_jwt(token: str) -> dict[str, Any]:
 
 def _claims_to_principal(claims: dict[str, Any]) -> AuthPrincipal:
     scopes = claims.get("scope") or claims.get("scopes") or ""
-    scope_tuple: tuple[str, ...]
     if isinstance(scopes, str):
-        scope_tuple = tuple(s for s in scopes.split() if s)
+        scope_tuple: tuple[str, ...] = tuple(s for s in scopes.split() if s)
     elif isinstance(scopes, (list, tuple)):
         scope_tuple = tuple(str(s) for s in scopes if s)
     else:
         scope_tuple = ()
+
+    aud = claims.get("aud")
+    audience = " ".join(aud) if isinstance(aud, list) else str(aud or "")
+
     return AuthPrincipal(
         sub=str(claims.get("sub") or ""),
         email=claims.get("email"),
         name=claims.get("name"),
         preferred_username=claims.get("preferred_username"),
         issuer=claims.get("iss"),
-        audience=" ".join(claims.get("aud", [])) if isinstance(claims.get("aud"), list) else str(claims.get("aud") or ""),
+        audience=audience,
         scopes=scope_tuple,
         raw_claims=claims,
     )
@@ -522,13 +532,17 @@ def _principal_from_request_quick(request: Request) -> AuthPrincipal | None:
 
 def _rate_limit_key(request: Request) -> str:
     principal = _principal_from_request_quick(request)
-    if principal and principal.sub:
+    if principal and principal.sub and RATE_LIMIT_KEY_MODE == "sub":
         return f"user:{principal.sub}"
+    if principal and principal.sub and RATE_LIMIT_KEY_MODE == "session":
+        return f"session:{principal.sub}"
     return f"ip:{get_remote_address(request)}"
 
 
+def _resolve_authenticated_principal(request: Request) -> AuthPrincipal | RedirectResponse | None:
+    if not ENABLE_AUTH:
+        return None
 
-def _resolve_authenticated_principal(request: Request) -> AuthPrincipal | RedirectResponse:
     principal = _principal_from_session_cookie(request)
     if principal:
         request.state.user_sub = principal.sub
@@ -541,7 +555,7 @@ def _resolve_authenticated_principal(request: Request) -> AuthPrincipal | Redire
         request.state.principal = principal
         return principal
 
-    return RedirectResponse(_auth_redirect_url(request, next_path=_DEFAULT_NEXT_PATH), status_code=303)
+    return RedirectResponse(_auth_redirect_url(request, next_path=_DEFAULT_NEXT_PATH), status_code=status.HTTP_303_SEE_OTHER)
 
 
 async def _load_generate_request(request: Request) -> GenerateRequest:
@@ -556,21 +570,27 @@ async def _load_generate_request(request: Request) -> GenerateRequest:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+def _normalize_generation_limits(req: GenerateRequest) -> tuple[int, int, int]:
+    top_k = max(1, min(_MAX_TOP_K, int(req.top_k or 5)))
+    fetch_k = max(_MIN_FETCH_K, min(_MAX_FETCH_K, int(req.fetch_k or FETCH_K)))
+    max_tokens = max(64, min(4096, int(req.max_tokens or LLM_MAX_TOKENS)))
+    return top_k, fetch_k, max_tokens
+
+
 async def _exchange_code_for_tokens(code: str, code_verifier: str) -> dict[str, Any]:
     token_data = {
         "grant_type": "authorization_code",
         "code": code,
-        "redirect_uri": ZITADEL_REDIRECT_URI,
-        "client_id": ZITADEL_CLIENT_ID,
+        "redirect_uri": AUTH_REDIRECT_URI,
+        "client_id": AUTH_CLIENT_ID,
         "code_verifier": code_verifier,
     }
-    client_secret = (os.getenv("ZITADEL_CLIENT_SECRET") or os.getenv("OIDC_CLIENT_SECRET") or "").strip()
-    if client_secret:
-        token_data["client_secret"] = client_secret
+    if AUTH_FLOW == "confidential" and AUTH_CLIENT_SECRET.strip():
+        token_data["client_secret"] = AUTH_CLIENT_SECRET.strip()
 
     async with httpx.AsyncClient(timeout=httpx.Timeout(HTTP_TIMEOUT)) as client:
         resp = await client.post(
-            ZITADEL_TOKEN_ENDPOINT,
+            AUTH_TOKEN_ENDPOINT,
             data=token_data,
             headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
@@ -581,7 +601,7 @@ async def _exchange_code_for_tokens(code: str, code_verifier: str) -> dict[str, 
 async def _fetch_userinfo(access_token: str) -> dict[str, Any]:
     async with httpx.AsyncClient(timeout=httpx.Timeout(HTTP_TIMEOUT)) as client:
         resp = await client.get(
-            ZITADEL_USERINFO_ENDPOINT,
+            AUTH_USERINFO_ENDPOINT,
             headers={"Authorization": f"Bearer {access_token}"},
         )
         resp.raise_for_status()
@@ -590,19 +610,20 @@ async def _fetch_userinfo(access_token: str) -> dict[str, Any]:
 
 def _build_authorize_url(state: str, nonce: str, code_challenge: str) -> str:
     params = {
-        "client_id": ZITADEL_CLIENT_ID,
+        "client_id": AUTH_CLIENT_ID,
         "response_type": "code",
-        "scope": " ".join(ZITADEL_SCOPES),
-        "redirect_uri": ZITADEL_REDIRECT_URI,
+        "scope": " ".join(AUTH_SCOPES),
+        "redirect_uri": AUTH_REDIRECT_URI,
         "state": state,
         "nonce": nonce,
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
     }
-    return f"{ZITADEL_AUTHORIZATION_ENDPOINT}?{urlencode(params)}"
+    return f"{AUTH_AUTHORIZATION_ENDPOINT}?{urlencode(params)}"
 
 
 def _set_session_cookie(response: RedirectResponse, principal: AuthPrincipal) -> None:
+    now = int(time.time())
     payload = {
         "sub": principal.sub,
         "email": principal.email,
@@ -611,8 +632,8 @@ def _set_session_cookie(response: RedirectResponse, principal: AuthPrincipal) ->
         "iss": principal.issuer,
         "aud": principal.audience,
         "scopes": list(principal.scopes),
-        "iat": int(time.time()),
-        "exp": int(time.time()) + SESSION_TTL_SECONDS,
+        "iat": now,
+        "exp": now + SESSION_TTL_SECONDS,
     }
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
@@ -629,27 +650,15 @@ def _set_session_cookie(response: RedirectResponse, principal: AuthPrincipal) ->
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging(LOG_LEVEL)
-
-    if not (ZITADEL_CLIENT_ID or "").strip():
-        raise RuntimeError("ZITADEL_CLIENT_ID is required")
-    if not (ZITADEL_REDIRECT_URI or "").strip():
-        raise RuntimeError("ZITADEL_REDIRECT_URI is required")
-
-    if not (SESSION_SECRET or "").strip():
-        json_log(
-            "warning",
-            "session.secret.fallback",
-            "SESSION_SECRET is not set; using a fallback secret",
-            fallback_source="ZITADEL_CLIENT_ID_or_issuer",
-        )
+    validate_runtime_contract()
 
     try:
         initialize_telemetry(settings_module)
     except Exception as exc:
         json_log(
-            "error",
+            "warning",
             "telemetry.initialize_failed",
-            "telemetry initialization failed",
+            "telemetry initialization failed; continuing without hard exit",
             error_type=type(exc).__name__,
             error_message=str(exc),
         )
@@ -744,6 +753,7 @@ async def lifespan(app: FastAPI):
         except Exception:
             pass
 
+
 limiter = Limiter(key_func=_rate_limit_key, default_limits=[])
 app = FastAPI(lifespan=lifespan)
 app.state.limiter = limiter
@@ -756,14 +766,16 @@ async def _generate_stream_core(request: Request) -> StreamingResponse | Redirec
     if isinstance(auth_result, RedirectResponse):
         return auth_result
 
-    request.state.principal = auth_result
-    request.state.user_sub = auth_result.sub
-    annotate_current_span(
-        user_sub=auth_result.sub,
-        request_id=getattr(request.state, "request_id", None),
-    )
+    if auth_result is not None:
+        request.state.principal = auth_result
+        request.state.user_sub = auth_result.sub
+        annotate_current_span(
+            user_sub=auth_result.sub,
+            request_id=getattr(request.state, "request_id", None),
+        )
 
     req = await _load_generate_request(request)
+    top_k, fetch_k, max_tokens = _normalize_generation_limits(req)
 
     state = _state()
     query = (req.query or "").strip()
@@ -773,17 +785,17 @@ async def _generate_stream_core(request: Request) -> StreamingResponse | Redirec
     pipeline = await _build_pipeline_result(
         state,
         query=query,
-        top_k=int(req.top_k),
-        fetch_k=int(req.fetch_k),
+        top_k=top_k,
+        fetch_k=fetch_k,
         corpus_version=req.corpus_version or CORPUS_VERSION,
         prompt_version=req.prompt_version or PROMPT_VERSION,
         retrieval_version=req.retrieval_version or RETRIEVAL_VERSION,
         model_name=req.model_name or BEDROCK_MODEL_ID,
-        tenant_id=req.tenant_id,
+        tenant_id=req.tenant_id or TENANT_ID,
         allow_semantic_cache=bool(req.allow_semantic_cache),
         allow_rerank=True,
         include_answer=False,
-        max_tokens=int(req.max_tokens or LLM_MAX_TOKENS),
+        max_tokens=max_tokens,
     )
     _record_docs_returned("stream", pipeline)
 
@@ -886,7 +898,7 @@ async def _generate_stream_core(request: Request) -> StreamingResponse | Redirec
         try:
             async for delta in state.bedrock.stream(
                 prompt=prompt,
-                max_tokens=int(req.max_tokens or LLM_MAX_TOKENS),
+                max_tokens=max_tokens,
                 temperature=LLM_TEMPERATURE,
             ):
                 if await request.is_disconnected():
@@ -900,6 +912,7 @@ async def _generate_stream_core(request: Request) -> StreamingResponse | Redirec
             answer = "".join(answer_parts).strip()
             if not answer:
                 answer = deterministic_summarize(llm_lines)
+
             valid_indexes = [c["index"] for c in ui_chunks if isinstance(c, dict) and c.get("index") is not None]
             answer = validate_and_filter_citations(answer, valid_indexes)
             if not answer.strip():
@@ -981,17 +994,16 @@ async def general_exception_handler(request: Request, exc: Exception):
     )
     return JSONResponse(status_code=500, content={"detail": "internal server error"})
 
-@app.get(AUTH_LOGIN_PATH, name="auth_login")
-async def auth_login(
-    request: Request,
-    next: str = _DEFAULT_NEXT_PATH,
-):
-    next_path = _clean_next_path(next)
 
+@app.get(AUTH_LOGIN_PATH, name="auth_login")
+async def auth_login(request: Request, next: str = _DEFAULT_NEXT_PATH):
+    if not ENABLE_AUTH:
+        return RedirectResponse(_clean_next_path(next), status_code=status.HTTP_303_SEE_OTHER)
+
+    next_path = _clean_next_path(next)
     state_value = secrets.token_urlsafe(32)
     nonce_value = secrets.token_urlsafe(32)
     verifier, challenge = _pkce_pair()
-
     issued_at = int(time.time())
 
     flow_cookie = _flow_sign(
@@ -1005,19 +1017,13 @@ async def auth_login(
         }
     )
 
-    authorize_url = URL(
-        _build_authorize_url(
-            state=state_value,
-            nonce=nonce_value,
-            challenge=challenge,
-        )
+    authorize_url = _build_authorize_url(
+        state=state_value,
+        nonce=nonce_value,
+        code_challenge=challenge,
     )
 
-    response = RedirectResponse(
-        url=str(authorize_url),
-        status_code=302,
-    )
-
+    response = RedirectResponse(url=authorize_url, status_code=status.HTTP_302_FOUND)
     response.set_cookie(
         key=_FLOW_COOKIE_NAME,
         value=flow_cookie,
@@ -1028,10 +1034,20 @@ async def auth_login(
         samesite=SESSION_COOKIE_SAMESITE,
         path="/",
     )
-
     return response
+
+
 @app.get(AUTH_CALLBACK_PATH, name="auth_callback")
-async def auth_callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None, error_description: str | None = None):
+async def auth_callback(
+    request: Request,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    error_description: str | None = None,
+):
+    if not ENABLE_AUTH:
+        return RedirectResponse(_DEFAULT_NEXT_PATH, status_code=status.HTTP_303_SEE_OTHER)
+
     if error:
         raise HTTPException(status_code=400, detail=f"{error}: {error_description or 'authorization failed'}")
     if not code or not state:
@@ -1067,7 +1083,7 @@ async def auth_callback(request: Request, code: str | None = None, state: str | 
     principal = _claims_to_principal(merged_claims)
     next_path = _clean_next_path(str(flow.get("next") or _DEFAULT_NEXT_PATH))
 
-    response = RedirectResponse(next_path, status_code=303)
+    response = RedirectResponse(next_path, status_code=status.HTTP_303_SEE_OTHER)
     _set_session_cookie(response, principal)
     response.delete_cookie(key=_FLOW_COOKIE_NAME, path="/")
     return response
@@ -1075,7 +1091,8 @@ async def auth_callback(request: Request, code: str | None = None, state: str | 
 
 @app.get(AUTH_LOGOUT_PATH, name="auth_logout")
 async def auth_logout(request: Request):
-    response = RedirectResponse(_DEFAULT_NEXT_PATH, status_code=303)
+    target = _clean_next_path(AUTH_LOGOUT_REDIRECT_URI or "/")
+    response = RedirectResponse(target, status_code=status.HTTP_303_SEE_OTHER)
     response.delete_cookie(key=SESSION_COOKIE_NAME, path="/")
     response.delete_cookie(key=_FLOW_COOKIE_NAME, path="/")
     return response

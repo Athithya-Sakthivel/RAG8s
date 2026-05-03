@@ -13,26 +13,27 @@ from typing import Any, NoReturn
 
 import yaml
 
-# Determine repository root and output directory.
-try:
-    _this_file = Path(__file__).resolve()
-    if len(_this_file.parents) >= 4:
-        ROOT = _this_file.parents[3]
-    else:
-        ROOT = _this_file.parent
-except Exception:
-    ROOT = Path.cwd()
 
+def _repo_root() -> Path:
+    try:
+        this_file = Path(__file__).resolve()
+        if len(this_file.parents) >= 4:
+            return this_file.parents[3]
+    except Exception:
+        pass
+    return Path.cwd()
+
+
+ROOT = _repo_root()
 OUT_DIR = ROOT / "src" / "manifests" / "cloudflared"
 
-# frequently changed
 NAMESPACE = os.getenv("NAMESPACE", "inference").strip() or "inference"
 DOMAIN = os.getenv("DOMAIN", "athithya.site").strip().rstrip(".") or "athithya.site"
 ROOT_HOST = os.getenv("ROOT_HOST", DOMAIN).strip().rstrip(".") or DOMAIN
 API_HOST = os.getenv("API_HOST", f"api.{DOMAIN}").strip().rstrip(".") or f"api.{DOMAIN}"
 AUTH_HOST = os.getenv("AUTH_HOST", f"auth.{DOMAIN}").strip().rstrip(".") or f"auth.{DOMAIN}"
 
-ZITADEL_NAMESPACE = os.getenv("ZITADEL_NAMESPACE", "inference").strip() or "zitadel"
+ZITADEL_NAMESPACE = os.getenv("ZITADEL_NAMESPACE", "inference").strip() or "inference"
 ZITADEL_SERVICE_NAME = os.getenv("ZITADEL_SERVICE_NAME", "zitadel").strip() or "zitadel"
 ZITADEL_SERVICE_PORT = int(os.getenv("ZITADEL_SERVICE_PORT", "8080"))
 
@@ -42,7 +43,6 @@ FRONTEND_SERVICE_PORT = int(os.getenv("FRONTEND_SERVICE_PORT", "8080"))
 TUNNEL_NAME = os.getenv("CLOUDFLARE_TUNNEL_NAME", "default-tunnel-1").strip() or "default-tunnel-1"
 TUNNEL_TOKEN = os.getenv("CLOUDFLARE_TUNNEL_TOKEN", "").strip()
 
-# rarely changed
 SERVICE_ACCOUNT = os.getenv("SERVICE_ACCOUNT", "cloudflared-sa").strip() or "cloudflared-sa"
 CONFIGMAP_NAME = os.getenv("CONFIGMAP_NAME", "cloudflared-config").strip() or "cloudflared-config"
 SECRET_NAME = os.getenv("CLOUDFLARE_SECRET_NAME", "cloudflared-token").strip() or "cloudflared-token"
@@ -68,7 +68,7 @@ LIVENESS_PERIOD_SECONDS = int(os.getenv("CLOUDFLARED_LIVENESS_PERIOD_SECONDS", "
 VERBOSE = os.getenv("VERBOSE", "0").strip().lower() in {"1", "true", "yes", "y", "on"}
 ALLOWED_PROTOCOLS = {"auto", "http2", "quic"}
 
-# Configure logging
+
 LOG_LEVEL = logging.DEBUG if VERBOSE else logging.INFO
 logging.basicConfig(
     level=LOG_LEVEL,
@@ -77,22 +77,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger("cloudflared-manifest")
 
+
 class Dumper(yaml.SafeDumper):
     pass
+
 
 def _str_representer(dumper: yaml.SafeDumper, data: str):
     style = "|" if "\n" in data else None
     return dumper.represent_scalar("tag:yaml.org,2002:str", data, style=style)
 
+
 Dumper.add_representer(str, _str_representer)
 
-def fatal(msg: str, code: int = 2) -> NoReturn:
-    logger.error(msg)
-    raise SystemExit(code)
-
-def require(condition: bool, message: str) -> None:
-    if not condition:
-        fatal(message)
 
 def yaml_dump(data: Any) -> str:
     return yaml.dump(
@@ -104,6 +100,7 @@ def yaml_dump(data: Any) -> str:
         width=120,
         indent=2,
     )
+
 
 def atomic_write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -117,22 +114,32 @@ def atomic_write_text(path: Path, content: str) -> None:
         tmp.write(content)
         tmp_path = Path(tmp.name)
     os.replace(tmp_path, path)
-    logger.debug("Wrote file: %s", path)
+    logger.debug(f"Wrote file {path}")
+
 
 def run(cmd: list[str], stdin: str | None = None) -> None:
-    logger.debug("Executing command: %s", " ".join(map(str, cmd)))
-    try:
-        subprocess.run(list(map(str, cmd)), input=stdin, text=True, check=True)
-    except subprocess.CalledProcessError as e:
-        logger.error("Command failed (%s): exit=%s", " ".join(map(str, cmd)), e.returncode)
-        raise
+    logger.debug(f"Executing command: {' '.join(map(str, cmd))}")
+    subprocess.run(list(map(str, cmd)), input=stdin, text=True, check=True)
+
+
+def fatal(msg: str, code: int = 2) -> NoReturn:
+    logger.error(msg)
+    raise SystemExit(code)
+
+
+def require(condition: bool, message: str) -> None:
+    if not condition:
+        fatal(message)
+
 
 def hash_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
+
 def hash_obj(obj: Any) -> str:
     payload = json.dumps(obj, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
+
 
 def normalize_service(service: str) -> str:
     value = service.strip()
@@ -144,14 +151,20 @@ def normalize_service(service: str) -> str:
         value = f"http://{value}"
     return value.rstrip("/")
 
-def ingress_rules() -> list[dict[str, Any]]:
-    zitadel_upstream = f"{ZITADEL_SERVICE_NAME}.{ZITADEL_NAMESPACE}.svc.cluster.local:{ZITADEL_SERVICE_PORT}"
-    frontend_upstream = f"{FRONTEND_SERVICE_NAME}.{NAMESPACE}.svc.cluster.local:{FRONTEND_SERVICE_PORT}"
 
+def zitadel_upstream() -> str:
+    return f"{ZITADEL_SERVICE_NAME}.{ZITADEL_NAMESPACE}.svc.cluster.local:{ZITADEL_SERVICE_PORT}"
+
+
+def frontend_upstream() -> str:
+    return f"{FRONTEND_SERVICE_NAME}.{NAMESPACE}.svc.cluster.local:{FRONTEND_SERVICE_PORT}"
+
+
+def ingress_rules() -> list[dict[str, Any]]:
     return [
         {
             "hostname": AUTH_HOST,
-            "service": normalize_service(f"http://{zitadel_upstream}"),
+            "service": normalize_service(f"http://{zitadel_upstream()}"),
             "originRequest": {
                 "connectTimeout": "10s",
                 "keepAliveTimeout": "30s",
@@ -162,7 +175,7 @@ def ingress_rules() -> list[dict[str, Any]]:
         },
         {
             "hostname": API_HOST,
-            "service": normalize_service(f"http://{frontend_upstream}"),
+            "service": normalize_service(f"http://{frontend_upstream()}"),
             "originRequest": {
                 "connectTimeout": "10s",
                 "keepAliveTimeout": "30s",
@@ -172,7 +185,7 @@ def ingress_rules() -> list[dict[str, Any]]:
         },
         {
             "hostname": ROOT_HOST,
-            "service": normalize_service(f"http://{frontend_upstream}"),
+            "service": normalize_service(f"http://{frontend_upstream()}"),
             "originRequest": {
                 "connectTimeout": "10s",
                 "keepAliveTimeout": "30s",
@@ -182,6 +195,7 @@ def ingress_rules() -> list[dict[str, Any]]:
         },
         {"service": "http_status:404"},
     ]
+
 
 def validate() -> None:
     require(bool(NAMESPACE), "NAMESPACE is required")
@@ -196,6 +210,7 @@ def validate() -> None:
     require(ZITADEL_SERVICE_PORT > 0, "ZITADEL_SERVICE_PORT must be greater than 0")
     require(FRONTEND_SERVICE_PORT > 0, "FRONTEND_SERVICE_PORT must be greater than 0")
 
+
 def render_serviceaccount(namespace: str) -> dict[str, Any]:
     return {
         "apiVersion": "v1",
@@ -209,6 +224,7 @@ def render_serviceaccount(namespace: str) -> dict[str, Any]:
             },
         },
     }
+
 
 def render_secret(namespace: str) -> dict[str, Any]:
     require(bool(TUNNEL_TOKEN), "CLOUDFLARE_TUNNEL_TOKEN is required")
@@ -228,6 +244,7 @@ def render_secret(namespace: str) -> dict[str, Any]:
             SECRET_KEY: TUNNEL_TOKEN,
         },
     }
+
 
 def render_configmap(namespace: str) -> dict[str, Any]:
     config = {
@@ -250,6 +267,7 @@ def render_configmap(namespace: str) -> dict[str, Any]:
         },
     }
 
+
 def render_routes_reference() -> dict[str, Any]:
     return {
         "apiVersion": "v1",
@@ -271,6 +289,7 @@ def render_routes_reference() -> dict[str, Any]:
             ),
         },
     }
+
 
 def render_deployment(namespace: str, checksum: str) -> dict[str, Any]:
     return {
@@ -380,7 +399,9 @@ def render_deployment(namespace: str, checksum: str) -> dict[str, Any]:
                                 "runAsNonRoot": True,
                                 "runAsUser": 65532,
                                 "runAsGroup": 65532,
-                                "capabilities": {"drop": ["ALL"]},
+                                "capabilities": {
+                                    "drop": ["ALL"],
+                                },
                             },
                         }
                     ],
@@ -389,7 +410,8 @@ def render_deployment(namespace: str, checksum: str) -> dict[str, Any]:
         },
     }
 
-def build() -> tuple[list[dict[str, Any]], dict[str, Any], str]:
+
+def build() -> tuple[list[dict[str, Any]], dict[str, Any]]:
     validate()
 
     configmap = render_configmap(NAMESPACE)
@@ -424,9 +446,8 @@ def build() -> tuple[list[dict[str, Any]], dict[str, Any], str]:
         render_deployment(NAMESPACE, checksum),
         render_routes_reference(),
     ]
+    return docs, secret
 
-    rendered = "\n---\n".join(yaml_dump(d).rstrip() for d in docs) + "\n"
-    return docs, secret, rendered
 
 def write_manifests(docs: list[dict[str, Any]]) -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -434,21 +455,24 @@ def write_manifests(docs: list[dict[str, Any]]) -> None:
     atomic_write_text(OUT_DIR / "02-configmap.yaml", yaml_dump(docs[1]).rstrip() + "\n")
     atomic_write_text(OUT_DIR / "03-deployment.yaml", yaml_dump(docs[2]).rstrip() + "\n")
     atomic_write_text(OUT_DIR / "04-routes-reference.yaml", yaml_dump(docs[3]).rstrip() + "\n")
-    logger.info("Manifests written to: %s", OUT_DIR)
+    logger.info(f"Manifests written to {OUT_DIR}")
 
-def apply_secrets(secret: dict[str, Any]) -> None:
-    logger.info("Applying secret in namespace")
+
+def apply_secret(secret: dict[str, Any]) -> None:
+    logger.info("Applying tunnel credential to cluster")
     run(["kubectl", "apply", "-f", "-"], stdin=yaml_dump(secret).rstrip() + "\n")
-    logger.info("Secret applied successfully")
+    logger.info("Tunnel credential applied")
+
 
 def apply_rollout(docs: list[dict[str, Any]]) -> None:
-    logger.info("Applying workload manifests to namespace %s", NAMESPACE)
+    logger.info(f"Applying workload manifests to namespace {NAMESPACE}")
     payload = "\n---\n".join(yaml_dump(d).rstrip() for d in docs) + "\n"
     run(["kubectl", "apply", "-f", "-"], stdin=payload)
-    logger.info("Workload manifests applied successfully")
+    logger.info("Workload manifests applied")
+
 
 def delete_resources() -> None:
-    logger.info("Deleting resources in namespace %s (if present)", NAMESPACE)
+    logger.info(f"Deleting cloudflared resources in namespace {NAMESPACE}")
     run(
         [
             "kubectl",
@@ -463,36 +487,37 @@ def delete_resources() -> None:
             "--ignore-not-found=true",
         ]
     )
-    logger.info("Delete command executed (ignored not found resources)")
+    logger.info("Delete operation completed")
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Render and deploy Cloudflare Tunnel Kubernetes manifests.")
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--write", action="store_true", help="Render YAML files and apply only the tunnel secret.")
-    group.add_argument("--rollout", action="store_true", help="Render YAML files, apply the tunnel secret, then apply workload manifests.")
+    group.add_argument("--write", action="store_true", help="Render YAML files and apply only the tunnel credential.")
+    group.add_argument("--rollout", action="store_true", help="Render YAML files, apply the tunnel credential, then apply workload manifests.")
     group.add_argument("--delete", action="store_true", help="Delete the generated tunnel resources from the cluster.")
     args = parser.parse_args()
 
-    logger.debug("Starting build process (verbose=%s)", VERBOSE)
-    docs, secret, _rendered = build()
+    logger.debug(f"Starting build process with verbose={VERBOSE}")
+    docs, secret = build()
 
     if args.delete:
         delete_resources()
-        logger.info("Finished delete operation")
         return
 
     if args.write:
         write_manifests(docs)
-        apply_secrets(secret)
-        logger.info("Write operation complete. Manifests are available at: %s", OUT_DIR)
+        apply_secret(secret)
+        logger.info(f"Write operation complete; manifests are at {OUT_DIR}")
         return
 
     if args.rollout:
         write_manifests(docs)
-        apply_secrets(secret)
+        apply_secret(secret)
         apply_rollout(docs)
-        logger.info("Rollout operation complete. Manifests are available at: %s", OUT_DIR)
+        logger.info(f"Rollout operation complete; manifests are at {OUT_DIR}")
         return
+
 
 if __name__ == "__main__":
     main()

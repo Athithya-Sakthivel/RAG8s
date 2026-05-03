@@ -24,7 +24,7 @@ OUT_DIR = ROOT / "src" / "manifests" / "nginx"
 NAMESPACE = os.getenv("NAMESPACE", "inference").strip() or "inference"
 FRONTEND_IMAGE = os.getenv(
     "FRONTEND_IMAGE",
-    "ghcr.io/athithya-sakthivel/frontend:2026-05-02-07-05--02a4032@sha256:bec20a1a54e6ea49738dcac641a2c757d7f7af489f1f5ad7e00cb20133ac7185",
+    "ghcr.io/athithya-sakthivel/frontend:2026-05-03-20-44--a39efe0@sha256:f220b3701f2d64f6a7a261db3c0dcfac6059d067b726d87b3a9c1e599464dc12",
 ).strip()
 SERVICE_NAME = os.getenv("SERVICE_NAME", "frontend-nginx").strip() or "frontend-nginx"
 SERVICE_ACCOUNT = os.getenv("SERVICE_ACCOUNT", "frontend-nginx").strip() or "frontend-nginx"

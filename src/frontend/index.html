@@ -49,21 +49,25 @@
           </label>
 
           <label class="field">
-            <span>Top K</span>
-            <input id="top_k" type="number" value="5" min="1" max="50">
+            <span>Top K <small>(1–7)</small></span>
+            <input id="top_k" type="number" value="5" min="1" max="7" step="1" inputmode="numeric">
           </label>
 
           <label class="field">
-            <span>Fetch K</span>
-            <input id="fetch_k" type="number" value="20" min="1" max="200">
+            <span>Fetch K <small>(10–50)</small></span>
+            <input id="fetch_k" type="number" value="20" min="10" max="50" step="1" inputmode="numeric">
           </label>
 
           <label class="field">
             <span>Max tokens</span>
-            <input id="max_tokens" type="number" value="400" min="64" max="4096">
+            <input id="max_tokens" type="number" value="400" min="64" max="4096" step="1" inputmode="numeric">
           </label>
 
           <button id="ask-btn" class="btn" type="submit">Ask</button>
+        </div>
+
+        <div class="hint">
+          top_k is constrained to 1–7 and fetch_k is constrained to 10–50.
         </div>
 
         <div id="loading" class="loading" aria-live="polite" style="display:none;">

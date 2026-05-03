@@ -9,6 +9,8 @@
   const fetchKEl = document.getElementById("fetch_k");
   const maxTokensEl = document.getElementById("max_tokens");
 
+  const AUTH_CONSOLE_URL = "https://auth.athithya.site/ui/console/";
+
   let activeAbortController = null;
 
   function escapeHtml(value) {
@@ -21,6 +23,33 @@
     }[m]));
   }
 
+  function clampInt(value, min, max, fallback) {
+    const parsed = Number.parseInt(String(value ?? ""), 10);
+    if (Number.isNaN(parsed)) return fallback;
+    return Math.min(max, Math.max(min, parsed));
+  }
+
+  function sanitizeParams() {
+    const top_k = clampInt(topKEl.value, 1, 7, 5);
+    const fetch_k = clampInt(fetchKEl.value, 10, 50, 20);
+    const max_tokens = clampInt(maxTokensEl.value, 64, 4096, 400);
+
+    topKEl.value = String(top_k);
+    fetchKEl.value = String(fetch_k);
+    maxTokensEl.value = String(max_tokens);
+
+    return {
+      top_k,
+      fetch_k,
+      max_tokens,
+      return_chunks: returnChunksEl.checked === true
+    };
+  }
+
+  function redirectToConsole() {
+    window.location.assign(AUTH_CONSOLE_URL);
+  }
+
   function setBusy(busy) {
     askBtn.disabled = busy;
     queryEl.disabled = busy;
@@ -30,10 +59,6 @@
     maxTokensEl.disabled = busy;
     loading.style.display = busy ? "block" : "none";
     askBtn.textContent = busy ? "Streaming..." : "Ask";
-  }
-
-  function redirectToConsole() {
-    window.location.assign("https://auth.athithya.site/ui/console/");
   }
 
   function renderShell() {
@@ -57,14 +82,16 @@
 
     const parts = [];
 
-    if (summary.cache_hit === true) {
-      parts.push(`<span class="pill pill-ok">cache hit</span>`);
-    } else if (summary.cache_hit === false) {
-      parts.push(`<span class="pill pill-neutral">cache miss</span>`);
+    if (typeof summary.cache_hit === "boolean") {
+      parts.push(
+        `<span class="pill ${summary.cache_hit ? "pill-ok" : "pill-neutral"}">
+          cache ${summary.cache_hit ? "hit" : "miss"}
+        </span>`
+      );
     }
 
     if (typeof summary.cache_score === "number") {
-      parts.push(`<span class="pill">cache ${escapeHtml(summary.cache_score.toFixed(3))}</span>`);
+      parts.push(`<span class="pill">score ${escapeHtml(summary.cache_score.toFixed(3))}</span>`);
     }
 
     if (summary.retrieval_mode) {
@@ -79,27 +106,24 @@
       );
     }
 
-    target.innerHTML = parts.join(" ");
+    target.innerHTML = parts.join("");
   }
 
   function normalizeMetaItems(chunk) {
     if (!chunk || typeof chunk !== "object") return [];
 
-    const skip = new Set([
-      "index", "rank", "meta_items", "meta",
-      "content", "text", "snippet", "answer"
-    ]);
-
-    if (Array.isArray(chunk.meta_items)) {
-      return chunk.meta_items;
-    }
-
+    if (Array.isArray(chunk.meta_items)) return chunk.meta_items;
     if (Array.isArray(chunk.meta)) {
       return chunk.meta.map((item) => {
         if (item && typeof item === "object" && "k" in item) return item;
         return { k: "meta", v: item };
       });
     }
+
+    const skip = new Set([
+      "index", "rank", "meta_items", "meta",
+      "content", "text", "snippet", "answer"
+    ]);
 
     const out = [];
     for (const [k, v] of Object.entries(chunk)) {
@@ -124,7 +148,6 @@
       const c = chunks[i] || {};
       const index = c.index ?? c.rank ?? (i + 1);
       const meta = normalizeMetaItems(c);
-
       const content = c.content ?? c.text ?? c.snippet ?? "";
 
       html += `
@@ -230,10 +253,7 @@
     const query = queryEl.value.trim();
     if (!query) return;
 
-    const top_k = Math.max(1, Math.min(50, parseInt(topKEl.value || "5", 10)));
-    const fetch_k = Math.max(1, Math.min(200, parseInt(fetchKEl.value || "20", 10)));
-    const max_tokens = Math.max(64, Math.min(4096, parseInt(maxTokensEl.value || "400", 10)));
-    const return_chunks = returnChunksEl.checked === true;
+    const params = sanitizeParams();
 
     if (activeAbortController) {
       activeAbortController.abort();
@@ -255,11 +275,11 @@
         credentials: "same-origin",
         body: JSON.stringify({
           query,
-          top_k,
-          fetch_k,
-          return_chunks,
+          top_k: params.top_k,
+          fetch_k: params.fetch_k,
+          return_chunks: params.return_chunks,
           allow_semantic_cache: true,
-          max_tokens
+          max_tokens: params.max_tokens
         })
       });
 
@@ -348,7 +368,6 @@
 
           renderSummary(summary);
           renderSources(finalChunks);
-          return;
         }
       });
 

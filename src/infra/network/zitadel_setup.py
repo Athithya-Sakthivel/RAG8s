@@ -32,7 +32,9 @@ IMAGE_TAG = os.environ.get("ZITADEL_IMAGE_TAG", "v4.13.0").strip() or "v4.13.0"
 MASTERKEY_SECRET_NAME = os.environ.get("ZITADEL_MASTERKEY_SECRET_NAME", "zitadel-masterkey").strip() or "zitadel-masterkey"
 CONFIG_SECRET_NAME = os.environ.get("ZITADEL_CONFIG_SECRET_NAME", "zitadel-config-secret").strip() or "zitadel-config-secret"
 
-VERBOSE = os.environ.get("VERBOSE", "0").strip().lower() in {"1", "true", "yes", "y", "on"}
+LOGIN_CLIENT_SECRET_PREFIX = (os.environ.get("ZITADEL_LOGIN_CLIENT_SECRET_PREFIX", "") or "").strip()
+
+VERBOSE = (os.environ.get("VERBOSE", "0") or "0").strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 class Dumper(yaml.SafeDumper):
@@ -114,6 +116,17 @@ def env_bool(name: str, default: bool) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def env_file_text(name: str) -> str:
+    raw = os.environ.get(name, "")
+    raw = raw.strip()
+    if not raw:
+        return ""
+    path = Path(raw).expanduser()
+    if not path.is_file():
+        fatal(f"{name} points to a missing file: {path}")
+    return path.read_text(encoding="utf-8").strip()
+
+
 def require_cmd(name: str) -> None:
     if which(name) is None:
         fatal(f"Required command not found: {name}")
@@ -136,6 +149,17 @@ def ensure_namespace(namespace: str) -> None:
         run_cmd(["kubectl", "create", "namespace", namespace])
 
 
+def secret_exists(namespace: str, name: str) -> bool:
+    require_cmd("kubectl")
+    result = subprocess.run(
+        ["kubectl", "get", "secret", name, "-n", namespace],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+    return result.returncode == 0
+
+
 @dataclass(frozen=True)
 class Config:
     masterkey: str
@@ -148,10 +172,19 @@ class Config:
     cpu_limits: str
     memory_requests: str
     memory_limits: str
+    login_enabled: bool
     ingress_enabled: bool
+    login_ingress_enabled: bool
+    login_client_pat: str
+    login_client_secret_name: str
 
 
 def load_config() -> Config:
+    login_enabled = env_bool("ZITADEL_LOGIN_ENABLED", False)
+    login_client_secret_name = (
+        f"{LOGIN_CLIENT_SECRET_PREFIX}login-client" if LOGIN_CLIENT_SECRET_PREFIX else "login-client"
+    )
+
     return Config(
         masterkey=env("ZITADEL_MASTERKEY", ""),
         admin_password=env("ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD", ""),
@@ -163,7 +196,11 @@ def load_config() -> Config:
         cpu_limits=env("ZITADEL_CPU_LIMITS", "1000m"),
         memory_requests=env("ZITADEL_MEMORY_REQUESTS", "256Mi"),
         memory_limits=env("ZITADEL_MEMORY_LIMITS", "1Gi"),
+        login_enabled=login_enabled,
         ingress_enabled=env_bool("ZITADEL_INGRESS_ENABLED", False),
+        login_ingress_enabled=env_bool("ZITADEL_LOGIN_INGRESS_ENABLED", False),
+        login_client_pat=env("ZITADEL_LOGIN_CLIENT_PAT", "") or env_file_text("ZITADEL_LOGIN_CLIENT_PAT_FILE"),
+        login_client_secret_name=login_client_secret_name,
     )
 
 
@@ -191,6 +228,9 @@ def validate(cfg: Config) -> None:
 
     if not cfg.admin_email:
         fatal("ZITADEL_ADMIN_EMAIL cannot be empty")
+
+    if cfg.login_enabled and not cfg.login_client_secret_name:
+        fatal("login-client secret name cannot be empty")
 
 
 def render_runtime_config() -> dict[str, Any]:
@@ -233,7 +273,7 @@ def render_secret_config(cfg: Config) -> dict[str, Any]:
 
 
 def render_values(cfg: Config) -> dict[str, Any]:
-    return {
+    values: dict[str, Any] = {
         "replicaCount": cfg.replicas,
         "image": {
             "repository": IMAGE_REPOSITORY,
@@ -310,9 +350,38 @@ def render_values(cfg: Config) -> dict[str, Any]:
         },
     }
 
+    if cfg.login_enabled:
+        values["login"] = {
+            "enabled": True,
+            "ingress": {
+                "enabled": cfg.login_ingress_enabled,
+            },
+        }
+
+    return values
+
+
+def render_login_client_secret(cfg: Config) -> dict[str, Any]:
+    return {
+        "apiVersion": "v1",
+        "kind": "Secret",
+        "metadata": {
+            "name": cfg.login_client_secret_name,
+            "namespace": NAMESPACE,
+            "labels": {
+                "app.kubernetes.io/name": APP_NAME,
+                "app.kubernetes.io/component": "login",
+            },
+        },
+        "type": "Opaque",
+        "stringData": {
+            "pat": cfg.login_client_pat,
+        },
+    }
+
 
 def render_secrets(cfg: Config) -> list[dict[str, Any]]:
-    return [
+    docs: list[dict[str, Any]] = [
         {
             "apiVersion": "v1",
             "kind": "Secret",
@@ -346,6 +415,21 @@ def render_secrets(cfg: Config) -> list[dict[str, Any]]:
             },
         },
     ]
+
+    if cfg.login_enabled:
+        if secret_exists(NAMESPACE, cfg.login_client_secret_name):
+            log(f"login-client secret already exists in namespace {NAMESPACE}")
+        else:
+            if not cfg.login_client_pat:
+                fatal(
+                    "ZITADEL_LOGIN_ENABLED=true but the login-client secret is missing. "
+                    "Provide ZITADEL_LOGIN_CLIENT_PAT or ZITADEL_LOGIN_CLIENT_PAT_FILE with a real PAT."
+                )
+            if len(cfg.login_client_pat.strip()) < 20:
+                fatal("ZITADEL_LOGIN_CLIENT_PAT looks invalid; provide a real PAT, not a placeholder.")
+            docs.append(render_login_client_secret(cfg))
+
+    return docs
 
 
 def build_application(cfg: Config) -> dict[str, Any]:
