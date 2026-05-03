@@ -258,7 +258,10 @@ def setup_logging(level: str | None = None) -> str:
     root = logging.getLogger()
     root.setLevel(log_level)
 
-    console_handler = next((handler for handler in root.handlers if getattr(handler, "_retrieval_console_handler", False)), None)
+    console_handler = next(
+        (handler for handler in root.handlers if getattr(handler, "_retrieval_console_handler", False)),
+        None,
+    )
     if console_handler is None:
         root.handlers.clear()
         console_handler = logging.StreamHandler()
@@ -297,12 +300,12 @@ def safe_stack(exc: BaseException | None) -> str:
 
 
 def _normalize_protocol(raw: str | None) -> str:
-    value = (_clean_str(raw) or "http/protobuf").strip().lower()
-    if value in {"http", "http/protobuf", "http-protobuf"}:
-        return "http/protobuf"
+    value = (_clean_str(raw) or "grpc").strip().lower()
     if value in {"grpc", "gprc"}:
         return "grpc"
-    return "http/protobuf"
+    if value in {"http", "http/protobuf", "http-protobuf"}:
+        return "http/protobuf"
+    return "grpc"
 
 
 def _endpoint_url(raw: str | None, default_scheme: str = "http") -> str | None:
@@ -474,12 +477,14 @@ def _config_key(
         ),
         _require_positive_int(
             "otel_metric_export_interval_ms",
-            _get_setting(settings, "otel_metric_export_interval_ms", None) or _get_setting(settings, "OTEL_METRIC_EXPORT_INTERVAL_MS", None),
+            _get_setting(settings, "otel_metric_export_interval_ms", None)
+            or _get_setting(settings, "OTEL_METRIC_EXPORT_INTERVAL_MS", None),
             OTEL_METRIC_EXPORT_INTERVAL_MS,
         ),
         _require_positive_int(
             "otel_metric_export_timeout_ms",
-            _get_setting(settings, "otel_metric_export_timeout_ms", None) or _get_setting(settings, "OTEL_METRIC_EXPORT_TIMEOUT_MS", None),
+            _get_setting(settings, "otel_metric_export_timeout_ms", None)
+            or _get_setting(settings, "OTEL_METRIC_EXPORT_TIMEOUT_MS", None),
             OTEL_METRIC_EXPORT_TIMEOUT_MS,
         ),
         log_level_name,
@@ -494,9 +499,7 @@ class _DropOpenTelemetryRecords(logging.Filter):
         return not record.name.startswith("opentelemetry")
 
 
-def _log_record_factory(
-    previous_factory: Callable[..., logging.LogRecord],
-) -> Callable[..., logging.LogRecord]:
+def _log_record_factory(previous_factory: Callable[..., logging.LogRecord]) -> Callable[..., logging.LogRecord]:
     def factory(*args: Any, **kwargs: Any) -> logging.LogRecord:
         record = previous_factory(*args, **kwargs)
         try:
@@ -565,6 +568,22 @@ def _log_exporter(protocol: str):
     if HttpOTLPLogExporter is None:
         raise RuntimeError("http OTLP log exporter is not available")
     return HttpOTLPLogExporter
+
+
+def annotate_current_span(*, user_sub: str | None = None, tenant_id: str | None = None, request_id: str | None = None) -> None:
+    try:
+        span = trace.get_current_span()
+        ctx = span.get_span_context()
+        if ctx is None or not ctx.is_valid:
+            return
+        if user_sub:
+            span.set_attribute("enduser.id", user_sub)
+        if tenant_id:
+            span.set_attribute("tenant.id", tenant_id)
+        if request_id:
+            span.set_attribute("http.request.id", request_id)
+    except Exception:
+        return
 
 
 @dataclass
@@ -644,9 +663,7 @@ def initialize_telemetry(settings: Any) -> TelemetryHandle:
 
     with _STATE_LOCK:
         log_level_name = _normalize_level_name(
-            _get_setting(settings, "log_level", None)
-            or _get_setting(settings, "LOG_LEVEL", None)
-            or LOG_LEVEL
+            _get_setting(settings, "log_level", None) or _get_setting(settings, "LOG_LEVEL", None) or LOG_LEVEL
         )
 
         protocol = _normalize_protocol(
@@ -659,14 +676,13 @@ def initialize_telemetry(settings: Any) -> TelemetryHandle:
         endpoint = _clean_str(
             _get_setting(settings, "otel_endpoint", None)
             or _get_setting(settings, "OTEL_ENDPOINT", None)
+            or _get_setting(settings, "OTEL_EXPORTER_OTLP_ENDPOINT", None)
             or OTEL_ENDPOINT
         )
 
         resource = _resource(settings)
         resource_attrs = {
-            k: v
-            for k, v in resource.attributes.items()
-            if isinstance(k, str) and isinstance(v, str)
+            k: v for k, v in resource.attributes.items() if isinstance(k, str) and isinstance(v, str)
         }
 
         traces_enabled = _env_flag("ENABLE_OTEL_TRACES", ENABLE_OTEL_TRACES)
@@ -773,9 +789,9 @@ def initialize_telemetry(settings: Any) -> TelemetryHandle:
 
         if traces_enabled and endpoint:
             try:
+                tracer_provider = TracerProvider(resource=resource, sampler=_build_sampler(settings))
                 if protocol == "grpc":
                     grpc_endpoint, insecure = _grpc_endpoint(endpoint)
-                    tracer_provider = TracerProvider(resource=resource, sampler=_build_sampler(settings))
                     tracer_provider.add_span_processor(
                         BatchSpanProcessor(
                             span_exporter_cls(
@@ -787,7 +803,6 @@ def initialize_telemetry(settings: Any) -> TelemetryHandle:
                     )
                 else:
                     http_endpoint = _http_signal_endpoint(endpoint, "traces")
-                    tracer_provider = TracerProvider(resource=resource, sampler=_build_sampler(settings))
                     tracer_provider.add_span_processor(
                         BatchSpanProcessor(
                             span_exporter_cls(
@@ -917,6 +932,7 @@ def initialize_telemetry(settings: Any) -> TelemetryHandle:
 
 __all__ = [
     "TelemetryHandle",
+    "annotate_current_span",
     "apply_after_uvicorn",
     "initialize_telemetry",
     "json_log",

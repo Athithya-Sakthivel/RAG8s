@@ -16,47 +16,25 @@ spec:
     targetRevision: 9.34.0
     helm:
       values: |
+        replicaCount: 2
         image:
           repository: ghcr.io/zitadel/zitadel
           tag: v4.13.0
           pullPolicy: IfNotPresent
         login:
           enabled: false
+          ingress:
+            enabled: false
         zitadel:
           masterkeySecretName: zitadel-masterkey
+          configSecretName: zitadel-config-secret
+          configSecretKey: config-yaml
           configmapConfig:
             ExternalDomain: auth.athithya.site
             ExternalPort: 443
             ExternalSecure: true
             TLS:
               Enabled: false
-            FirstInstance:
-              InstanceName: athithya
-              DefaultLanguage: en
-              Org:
-                Name: athithya
-                Human:
-                  UserName: admin
-                  FirstName: admin
-                  LastName: admin
-                  Email:
-                    Address: athithya651@gmail.com
-                    Verified: true
-                  Password: zitadeladmin@144
-                  PasswordChangeRequired: true
-          extraEnv:
-          - name: ZITADEL_DATABASE_POSTGRES_DSN
-            valueFrom:
-              secretKeyRef:
-                name: zitadel-config-secret
-                key: dsn
-          - name: ZITADEL_TRACING_TYPE
-            value: otel
-          - name: ZITADEL_TRACING_ENDPOINT
-            value: signoz-otel-collector.signoz.svc.cluster.local:4317
-          - name: ZITADEL_TRACING_SERVICENAME
-            value: zitadel
-        replicaCount: 2
         ingress:
           enabled: false
         podSecurityContext:

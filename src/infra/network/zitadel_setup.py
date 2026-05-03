@@ -1,15 +1,4 @@
 #!/usr/bin/env python3
-# Reads ZITADEL config from env (masterkey, DSN, admin, resources) with strong defaults
-# Enforces invariants: 32-byte masterkey, valid postgres DSN, replicas ≥1, non-empty resources
-# Generates Helm values.yaml with external domain, bootstrap admin, OTel tracing, hardened security
-# Embeds values.yaml into an ArgoCD Application using official zitadel chart/version
-# Supports write, apply, rollout, and delete workflows for GitOps and direct deploy
-# Creates/updates Kubernetes secrets directly from env vars (masterkey, DSN, admin password)
-# Writes output atomically to src/argocd/zitadel-application.yaml and supports drift checking
-
-# local iteration no argocd:   python3 src/infra/network/zitadel_setup.py --rollout --apply-secrets
-# write + git commit for argocd sync:    python3 src/infra/network/zitadel_setup.py --write --apply-secrets
-
 from __future__ import annotations
 
 import argparse
@@ -19,39 +8,46 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from shutil import which
 from typing import Any, NoReturn
 
 import yaml
 
-# frequently changed
-DOMAIN = os.environ.get("DOMAIN", "athithya.site").strip().rstrip(".") or "athithya.site"
-AUTH_HOST = os.environ.get("AUTH_HOST", f"auth.{DOMAIN}").strip().rstrip(".") or f"auth.{DOMAIN}"
-ADMIN_EMAIL = os.environ.get("ZITADEL_ADMIN_EMAIL", "athithya651@gmail.com").strip() or f"admin@{DOMAIN}"
-DEFAULT_MASTERKEY = os.environ.get("ZITADEL_MASTERKEY").strip()
-DEFAULT_ADMIN_PASSWORD = os.environ.get("ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD").strip()
-DEFAULT_DB_DSN = os.environ.get("ZITADEL_DATABASE_POSTGRES_DSN","",).strip()
-DEFAULT_INSTANCE_NAME = os.environ.get("ZITADEL_INSTANCE_NAME", "athithya").strip() or "athithya"
-DEFAULT_REPLICAS = int(os.environ.get("ZITADEL_REPLICAS", "2"))
-DEFAULT_CPU_REQUESTS = os.environ.get("ZITADEL_CPU_REQUESTS", "200m").strip() or "200m"
-DEFAULT_CPU_LIMITS = os.environ.get("ZITADEL_CPU_LIMITS", "1000m").strip() or "1000m"
-DEFAULT_MEMORY_REQUESTS = os.environ.get("ZITADEL_MEMORY_REQUESTS", "256Mi").strip() or "256Mi"
-DEFAULT_MEMORY_LIMITS = os.environ.get("ZITADEL_MEMORY_LIMITS", "1Gi").strip() or "1Gi"
+DOMAIN = (os.environ.get("DOMAIN", "athithya.site") or "athithya.site").strip().rstrip(".") or "athithya.site"
+AUTH_HOST = (os.environ.get("AUTH_HOST", f"auth.{DOMAIN}") or f"auth.{DOMAIN}").strip().rstrip(".") or f"auth.{DOMAIN}"
+NAMESPACE = (os.environ.get("ZITADEL_NAMESPACE", "inference") or "inference").strip() or "inference"
 
-# rarely changed
-NAMESPACE = os.environ.get("ZITADEL_NAMESPACE", "inference").strip()
-CHART_VERSION = os.environ.get("ZITADEL_CHART_VERSION", "9.34.0").strip() or "9.34.0"
-IMAGE_REPOSITORY = os.environ.get("ZITADEL_IMAGE_REPOSITORY", "ghcr.io/zitadel/zitadel").strip() or "ghcr.io/zitadel/zitadel"
-IMAGE_TAG = os.environ.get("ZITADEL_IMAGE_TAG", "v4.13.0").strip() or "v4.13.0"
-VERBOSE = os.environ.get("VERBOSE", "0").strip().lower() in {"1", "true", "yes", "y", "on"}
-
-# constants
-VALUES_OUTPUT = "src/argocd/zitadel-application.yaml"
 APP_NAME = "zitadel"
 APP_NAMESPACE = "argocd"
 DEST_SERVER = "https://kubernetes.default.svc"
-MASTERKEY_SECRET_NAME = "zitadel-masterkey"
-CONFIG_SECRET_NAME = "zitadel-config-secret"
-ADMIN_SECRET_NAME = "zitadel-admin-credentials"
+
+VALUES_OUTPUT = Path("src/argocd/zitadel-application.yaml")
+
+CHART_REPO = os.environ.get("ZITADEL_CHART_REPO", "https://charts.zitadel.com").strip() or "https://charts.zitadel.com"
+CHART_NAME = os.environ.get("ZITADEL_CHART_NAME", "zitadel").strip() or "zitadel"
+CHART_VERSION = os.environ.get("ZITADEL_CHART_VERSION", "9.34.0").strip() or "9.34.0"
+IMAGE_REPOSITORY = os.environ.get("ZITADEL_IMAGE_REPOSITORY", "ghcr.io/zitadel/zitadel").strip() or "ghcr.io/zitadel/zitadel"
+IMAGE_TAG = os.environ.get("ZITADEL_IMAGE_TAG", "v4.13.0").strip() or "v4.13.0"
+
+MASTERKEY_SECRET_NAME = os.environ.get("ZITADEL_MASTERKEY_SECRET_NAME", "zitadel-masterkey").strip() or "zitadel-masterkey"
+CONFIG_SECRET_NAME = os.environ.get("ZITADEL_CONFIG_SECRET_NAME", "zitadel-config-secret").strip() or "zitadel-config-secret"
+
+DEFAULT_MASTERKEY = (os.environ.get("ZITADEL_MASTERKEY") or "").strip()
+DEFAULT_ADMIN_PASSWORD = (os.environ.get("ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD") or "").strip()
+DEFAULT_DB_DSN = (os.environ.get("ZITADEL_DATABASE_POSTGRES_DSN") or "").strip()
+DEFAULT_INSTANCE_NAME = (os.environ.get("ZITADEL_INSTANCE_NAME", "athithya") or "athithya").strip() or "athithya"
+DEFAULT_ADMIN_EMAIL = (os.environ.get("ZITADEL_ADMIN_EMAIL", f"admin@{DOMAIN}") or f"admin@{DOMAIN}").strip() or f"admin@{DOMAIN}"
+
+DEFAULT_REPLICAS = int(os.environ.get("ZITADEL_REPLICAS", "2"))
+DEFAULT_CPU_REQUESTS = (os.environ.get("ZITADEL_CPU_REQUESTS", "200m") or "200m").strip() or "200m"
+DEFAULT_CPU_LIMITS = (os.environ.get("ZITADEL_CPU_LIMITS", "1000m") or "1000m").strip() or "1000m"
+DEFAULT_MEMORY_REQUESTS = (os.environ.get("ZITADEL_MEMORY_REQUESTS", "256Mi") or "256Mi").strip() or "256Mi"
+DEFAULT_MEMORY_LIMITS = (os.environ.get("ZITADEL_MEMORY_LIMITS", "1Gi") or "1Gi").strip() or "1Gi"
+DEFAULT_LOGIN_ENABLED = (os.environ.get("ZITADEL_LOGIN_ENABLED", "false") or "false").strip().lower() in {"1", "true", "yes", "y", "on"}
+DEFAULT_INGRESS_ENABLED = (os.environ.get("ZITADEL_INGRESS_ENABLED", "false") or "false").strip().lower() in {"1", "true", "yes", "y", "on"}
+DEFAULT_LOGIN_INGRESS_ENABLED = (os.environ.get("ZITADEL_LOGIN_INGRESS_ENABLED", "false") or "false").strip().lower() in {"1", "true", "yes", "y", "on"}
+VERBOSE = (os.environ.get("VERBOSE", "0") or "0").strip().lower() in {"1", "true", "yes", "y", "on"}
+
 
 class Dumper(yaml.SafeDumper):
     pass
@@ -63,6 +59,32 @@ def _str_representer(dumper: yaml.SafeDumper, data: str):
 
 
 Dumper.add_representer(str, _str_representer)
+
+
+def yaml_dump(data: Any) -> str:
+    return yaml.dump(
+        data,
+        Dumper=Dumper,
+        sort_keys=False,
+        default_flow_style=False,
+        allow_unicode=True,
+        width=120,
+        indent=2,
+    )
+
+
+def atomic_write_text(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        "w",
+        encoding="utf-8",
+        delete=False,
+        dir=str(path.parent),
+        prefix=f".{path.name}.",
+    ) as tmp:
+        tmp.write(content)
+        tmp_path = Path(tmp.name)
+    os.replace(tmp_path, path)
 
 
 def log(*parts: object) -> None:
@@ -95,40 +117,11 @@ def env_int(name: str, default: int) -> int:
         return default
     try:
         return int(value)
-    except ValueError as exc:
+    except ValueError:
         fatal(f"{name} must be an integer")
-        raise exc  # pragma: no cover
-
-
-def yaml_dump(data: Any) -> str:
-    return yaml.dump(
-        data,
-        Dumper=Dumper,
-        sort_keys=False,
-        default_flow_style=False,
-        allow_unicode=True,
-        width=120,
-        indent=2,
-    )
-
-
-def atomic_write_text(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        "w",
-        encoding="utf-8",
-        delete=False,
-        dir=str(path.parent),
-        prefix=f".{path.name}.",
-    ) as tmp:
-        tmp.write(content)
-        tmp_path = Path(tmp.name)
-    os.replace(tmp_path, path)
 
 
 def require_cmd(name: str) -> None:
-    from shutil import which
-
     if which(name) is None:
         fatal(f"Required command not found: {name}")
 
@@ -156,11 +149,15 @@ class Config:
     admin_password: str
     database_dsn: str
     instance_name: str
+    admin_email: str
     replicas: int
     cpu_requests: str
     cpu_limits: str
     memory_requests: str
     memory_limits: str
+    login_enabled: bool
+    ingress_enabled: bool
+    login_ingress_enabled: bool
 
 
 def load_config() -> Config:
@@ -169,11 +166,15 @@ def load_config() -> Config:
         admin_password=env("ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD", DEFAULT_ADMIN_PASSWORD),
         database_dsn=env("ZITADEL_DATABASE_POSTGRES_DSN", DEFAULT_DB_DSN),
         instance_name=env("ZITADEL_INSTANCE_NAME", DEFAULT_INSTANCE_NAME),
+        admin_email=env("ZITADEL_ADMIN_EMAIL", DEFAULT_ADMIN_EMAIL),
         replicas=env_int("ZITADEL_REPLICAS", DEFAULT_REPLICAS),
         cpu_requests=env("ZITADEL_CPU_REQUESTS", DEFAULT_CPU_REQUESTS),
         cpu_limits=env("ZITADEL_CPU_LIMITS", DEFAULT_CPU_LIMITS),
         memory_requests=env("ZITADEL_MEMORY_REQUESTS", DEFAULT_MEMORY_REQUESTS),
         memory_limits=env("ZITADEL_MEMORY_LIMITS", DEFAULT_MEMORY_LIMITS),
+        login_enabled=DEFAULT_LOGIN_ENABLED,
+        ingress_enabled=DEFAULT_INGRESS_ENABLED,
+        login_ingress_enabled=DEFAULT_LOGIN_INGRESS_ENABLED,
     )
 
 
@@ -199,14 +200,27 @@ def validate(cfg: Config) -> None:
     if not cfg.admin_password:
         fatal("ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD cannot be empty")
 
+    if not cfg.admin_email:
+        fatal("ZITADEL_ADMIN_EMAIL cannot be empty")
 
-def render_configmap_config(cfg: Config) -> dict[str, Any]:
+
+def render_runtime_config(cfg: Config) -> dict[str, Any]:
     return {
         "ExternalDomain": AUTH_HOST,
         "ExternalPort": 443,
         "ExternalSecure": True,
         "TLS": {
             "Enabled": False,
+        },
+    }
+
+
+def render_secret_config(cfg: Config) -> dict[str, Any]:
+    return {
+        "Database": {
+            "Postgres": {
+                "DSN": cfg.database_dsn,
+            }
         },
         "FirstInstance": {
             "InstanceName": cfg.instance_name,
@@ -218,7 +232,7 @@ def render_configmap_config(cfg: Config) -> dict[str, Any]:
                     "FirstName": "admin",
                     "LastName": "admin",
                     "Email": {
-                        "Address": ADMIN_EMAIL,
+                        "Address": cfg.admin_email,
                         "Verified": True,
                     },
                     "Password": cfg.admin_password,
@@ -231,44 +245,26 @@ def render_configmap_config(cfg: Config) -> dict[str, Any]:
 
 def render_values(cfg: Config) -> dict[str, Any]:
     return {
+        "replicaCount": cfg.replicas,
         "image": {
             "repository": IMAGE_REPOSITORY,
             "tag": IMAGE_TAG,
             "pullPolicy": "IfNotPresent",
         },
         "login": {
-            "enabled": False,
+            "enabled": cfg.login_enabled,
+            "ingress": {
+                "enabled": cfg.login_ingress_enabled,
+            },
         },
         "zitadel": {
             "masterkeySecretName": MASTERKEY_SECRET_NAME,
-            "configmapConfig": render_configmap_config(cfg),
-            "extraEnv": [
-                {
-                    "name": "ZITADEL_DATABASE_POSTGRES_DSN",
-                    "valueFrom": {
-                        "secretKeyRef": {
-                            "name": CONFIG_SECRET_NAME,
-                            "key": "dsn",
-                        }
-                    },
-                },
-                {
-                    "name": "ZITADEL_TRACING_TYPE",
-                    "value": "otel",
-                },
-                {
-                    "name": "ZITADEL_TRACING_ENDPOINT",
-                    "value": "signoz-otel-collector.signoz.svc.cluster.local:4317",
-                },
-                {
-                    "name": "ZITADEL_TRACING_SERVICENAME",
-                    "value": "zitadel",
-                },
-            ],
+            "configSecretName": CONFIG_SECRET_NAME,
+            "configSecretKey": "config-yaml",
+            "configmapConfig": render_runtime_config(cfg),
         },
-        "replicaCount": cfg.replicas,
         "ingress": {
-            "enabled": False,
+            "enabled": cfg.ingress_enabled,
         },
         "podSecurityContext": {
             "runAsNonRoot": True,
@@ -360,23 +356,7 @@ def render_secrets(cfg: Config) -> list[dict[str, Any]]:
             },
             "type": "Opaque",
             "stringData": {
-                "dsn": cfg.database_dsn,
-            },
-        },
-        {
-            "apiVersion": "v1",
-            "kind": "Secret",
-            "metadata": {
-                "name": ADMIN_SECRET_NAME,
-                "namespace": NAMESPACE,
-                "labels": {
-                    "app.kubernetes.io/name": APP_NAME,
-                    "app.kubernetes.io/component": "secrets",
-                },
-            },
-            "type": "Opaque",
-            "stringData": {
-                "password": cfg.admin_password,
+                "config-yaml": yaml_dump(render_secret_config(cfg)).rstrip() + "\n",
             },
         },
     ]
@@ -401,8 +381,8 @@ def build_application(cfg: Config) -> dict[str, Any]:
         "spec": {
             "project": "default",
             "source": {
-                "repoURL": "https://charts.zitadel.com",
-                "chart": "zitadel",
+                "repoURL": CHART_REPO,
+                "chart": CHART_NAME,
                 "targetRevision": CHART_VERSION,
                 "helm": {
                     "values": values_yaml,
@@ -444,9 +424,8 @@ def render_cluster_secrets_payload(cfg: Config) -> str:
 
 
 def write_output(cfg: Config) -> None:
-    output_path = Path(VALUES_OUTPUT)
-    atomic_write_text(output_path, render_application(cfg))
-    log(f"Wrote {output_path}")
+    atomic_write_text(VALUES_OUTPUT, render_application(cfg))
+    log(f"Wrote {VALUES_OUTPUT}")
 
 
 def apply_secrets(cfg: Config) -> None:
@@ -463,7 +442,6 @@ def delete_secrets() -> None:
             "secret",
             MASTERKEY_SECRET_NAME,
             CONFIG_SECRET_NAME,
-            ADMIN_SECRET_NAME,
             "-n",
             NAMESPACE,
             "--ignore-not-found=true",
@@ -492,16 +470,12 @@ def delete_application() -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Render and deploy production-ready ZITADEL Argo CD Application YAML.")
+    parser = argparse.ArgumentParser(description="Render and deploy ZITADEL Argo CD Application YAML.")
     mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--write", action="store_true", help="Write the rendered Application YAML to disk.")
-    mode.add_argument("--rollout", action="store_true", help="Write the rendered Application YAML and apply it to the cluster.")
-    mode.add_argument("--destroy", action="store_true", help="Delete the Application and the ZITADEL secrets.")
-    parser.add_argument(
-        "--apply-secrets",
-        action="store_true",
-        help="Also apply the env-backed Kubernetes secrets.",
-    )
+    mode.add_argument("--write", action="store_true")
+    mode.add_argument("--rollout", action="store_true")
+    mode.add_argument("--destroy", action="store_true")
+    parser.add_argument("--apply-secrets", action="store_true")
     args = parser.parse_args(argv)
 
     cfg = load_config()
@@ -523,4 +497,4 @@ def main(argv: list[str] | None = None) -> None:
 
 
 if __name__ == "__main__":
-    main()  # do not remove other logic
+    main()
