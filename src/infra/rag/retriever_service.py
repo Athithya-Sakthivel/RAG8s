@@ -14,6 +14,13 @@ from typing import Any
 
 import yaml
 
+# From original file:
+# LOG_LEVEL = os.environ.get("RETRIEVER_GEN_LOGLEVEL", "INFO").upper()
+# SECRET_KEYS = ("QDRANT_API_KEY", "ZITADEL_CLIENT_ID", "ZITADEL_CLIENT_SECRET", "SESSION_SECRET", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",)
+#
+# The rewritten file below avoids writing AWS_* secrets into YAML files while still allowing them
+# to be applied into the cluster and made available to pods when USE_IAM=false.
+
 LOG_LEVEL = os.environ.get("RETRIEVER_GEN_LOGLEVEL", "INFO").upper()
 logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO), format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("gen_retriever")
@@ -52,6 +59,10 @@ DEFAULTS: dict[str, Any] = {
     "READONLY_ROOTFS": True,
 }
 
+# Keys that are considered sensitive AWS credentials
+AWS_SECRET_KEYS = ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY")
+
+# All secret keys we consider for collection (keeps parity with original)
 SECRET_KEYS = (
     "QDRANT_API_KEY",
     "ZITADEL_CLIENT_ID",
@@ -60,6 +71,7 @@ SECRET_KEYS = (
     "AWS_ACCESS_KEY_ID",
     "AWS_SECRET_ACCESS_KEY",
 )
+
 
 def _env_str(name: str, default: str) -> str:
     raw = os.getenv(name)
@@ -195,14 +207,22 @@ def _probe_http(path: str, port: int, initial_delay: int, period: int, timeout: 
 
 
 def collect_secret_env() -> dict[str, str]:
+    """
+    Collect secret values from environment. This returns all non-empty values for keys in SECRET_KEYS.
+    Note: AWS keys are included here when present; later logic decides whether to write them to YAML
+    or apply them directly to the cluster (to avoid hardcoding them into manifest files).
+    """
     secret_env: dict[str, str] = {}
     for key in SECRET_KEYS:
-        value = os.getenv(key, "").strip()
-        if not value:
+        value = os.getenv(key, "")
+        if value is None:
             continue
-        if key in {"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"} and _env_bool("USE_IAM", DEFAULTS["USE_IAM"]):
+        v = value.strip()
+        if not v:
             continue
-        secret_env[key] = value
+        # If USE_IAM is true, we should not include AWS keys at all (they are ignored).
+        # The caller will check cfg["USE_IAM"] and act accordingly.
+        secret_env[key] = v
     return secret_env
 
 
@@ -217,8 +237,12 @@ def build_service_account_doc(cfg: dict[str, Any]) -> dict[str, Any]:
     return {"apiVersion": "v1", "kind": "ServiceAccount", "metadata": metadata}
 
 
-def build_secret_doc(cfg: dict[str, Any], secret_env: dict[str, str]) -> dict[str, Any] | None:
-    if not secret_env:
+def build_secret_doc(cfg: dict[str, Any], secret_env_for_yaml: dict[str, str]) -> dict[str, Any] | None:
+    """
+    Build a Secret manifest only for the keys that are safe to write into YAML.
+    AWS_* keys will be excluded from secret_env_for_yaml when we want to avoid writing them.
+    """
+    if not secret_env_for_yaml:
         return None
     return {
         "apiVersion": "v1",
@@ -229,7 +253,7 @@ def build_secret_doc(cfg: dict[str, Any], secret_env: dict[str, str]) -> dict[st
             "labels": _base_labels(cfg),
         },
         "type": "Opaque",
-        "stringData": secret_env,
+        "stringData": secret_env_for_yaml,
     }
 
 
@@ -412,8 +436,12 @@ def create_namespace_if_missing(namespace: str) -> None:
 
 
 def apply_secret_direct(cfg: dict[str, Any], secret_env: dict[str, str]) -> None:
+    """
+    Apply secrets directly into the cluster using kubectl create secret generic --from-literal ...
+    This avoids writing sensitive values into YAML files on disk.
+    """
     if not secret_env:
-        log.info("No secret values provided; skipping secret apply.")
+        log.info("No secret values provided for direct apply; skipping secret apply.")
         return
     cmd = ["kubectl", "create", "secret", "generic", cfg["SECRET_NAME"], "-n", cfg["NAMESPACE"]]
     for key, value in sorted(secret_env.items()):
@@ -421,7 +449,7 @@ def apply_secret_direct(cfg: dict[str, Any], secret_env: dict[str, str]) -> None
     cmd.extend(["--dry-run=client", "-o", "yaml"])
     proc = subprocess.run(cmd, check=True, capture_output=True, text=True)
     subprocess.run(["kubectl", "apply", "-f", "-"], input=proc.stdout, text=True, check=True, capture_output=True)
-    log.info("Applied secrets")
+    log.info("Applied secrets directly to cluster (not written to YAML).")
 
 
 def delete_secret_direct(cfg: dict[str, Any]) -> None:
@@ -434,10 +462,45 @@ def delete_secret_direct(cfg: dict[str, Any]) -> None:
 
 
 def generate_manifests(cfg: dict[str, Any], secret_env: dict[str, str], dry_run: bool = False, verbose: bool = False) -> str | None:
+    """
+    Generate manifests on disk. To avoid hardcoding AWS credentials into YAML files,
+    this function splits secret_env into two buckets:
+      - secret_env_for_yaml: keys that will be written into 02-secret.yaml
+      - secret_env_for_direct_apply: keys that will be applied directly to the cluster (not written)
+    Behavior:
+      - If USE_IAM is True, AWS keys are ignored entirely (they won't be written nor applied).
+      - If USE_IAM is False, AWS keys (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY) will be applied directly
+        to the cluster and will NOT be written into 02-secret.yaml.
+      - The Deployment will reference the secret name via envFrom secretRef if any secrets are present,
+        so pods will receive the values from the in-cluster Secret regardless of whether it was written to disk.
+    """
     manifests_dir: Path = cfg["MANIFESTS_DIR"]
     ensure_dir(manifests_dir)
 
-    secret_keys_hash = sha256_secret_keys(secret_env)
+    # Decide which secrets to write to YAML and which to apply directly
+    secret_env_for_yaml: dict[str, str] = {}
+    secret_env_for_direct_apply: dict[str, str] = {}
+
+    # If USE_IAM is true, we should not include AWS keys at all.
+    use_iam = bool(cfg.get("USE_IAM", False))
+
+    for k, v in secret_env.items():
+        if k in AWS_SECRET_KEYS:
+            if use_iam:
+                # When using IAM, do not include AWS keys anywhere.
+                log.debug("USE_IAM=true; ignoring AWS key %s", k)
+                continue
+            # USE_IAM is False: apply AWS keys directly to cluster, but do not write them to YAML.
+            secret_env_for_direct_apply[k] = v
+        else:
+            # Non-AWS keys: safe to write to YAML (these are still sensitive; writing them is optional)
+            # We will write non-AWS keys to YAML so they can be managed as manifests, but AWS keys are kept out.
+            secret_env_for_yaml[k] = v
+
+    # Determine whether the deployment should reference the secret
+    has_secret = bool(secret_env_for_yaml) or bool(secret_env_for_direct_apply)
+
+    secret_keys_hash = sha256_secret_keys({**secret_env_for_yaml, **secret_env_for_direct_apply})
     docs_for_hash = [
         {"serviceaccount": cfg["SERVICE_ACCOUNT_NAME"], "namespace": cfg["NAMESPACE"]},
         {"deployment": cfg["DEPLOYMENT_NAME"], "image": cfg["IMAGE"], "replicas": cfg["REPLICAS"], "secret_keys_hash": secret_keys_hash},
@@ -460,20 +523,24 @@ def generate_manifests(cfg: dict[str, Any], secret_env: dict[str, str], dry_run:
         return None
 
     sa_doc = build_service_account_doc(cfg)
-    sec_doc = build_secret_doc(cfg, secret_env)
-    dep_doc = build_deployment_doc(cfg, has_secret=bool(sec_doc))
+    sec_doc = build_secret_doc(cfg, secret_env_for_yaml)
+    dep_doc = build_deployment_doc(cfg, has_secret=has_secret)
     svc_doc = build_service_doc(cfg)
     pdb_doc = build_pdb_doc(cfg)
 
     write_yaml_atomic(cfg["FILES"]["serviceaccount"], sa_doc)
 
+    # Only write a secret manifest if there are non-AWS keys to write.
     if sec_doc is not None:
         write_yaml_atomic(cfg["FILES"]["secret"], sec_doc)
-    elif cfg["FILES"]["secret"].exists():
-        try:
-            cfg["FILES"]["secret"].unlink()
-        except Exception:
-            log.debug("Could not remove stale secret manifest", exc_info=True)
+    else:
+        # If a secret manifest exists on disk but we intentionally don't want to write AWS keys to it,
+        # remove the stale file to avoid committing secrets to the repo.
+        if cfg["FILES"]["secret"].exists():
+            try:
+                cfg["FILES"]["secret"].unlink()
+            except Exception:
+                log.debug("Could not remove stale secret manifest", exc_info=True)
 
     write_yaml_atomic(cfg["FILES"]["deployment"], dep_doc)
     write_yaml_atomic(cfg["FILES"]["service"], svc_doc)
@@ -490,9 +557,13 @@ def generate_manifests(cfg: dict[str, Any], secret_env: dict[str, str], dry_run:
     log.info("Manifests written to %s (inputs_hash=%s)", str(manifests_dir), inputs_hash)
 
     if verbose:
-        log.debug("Secret keys: %s", sorted(secret_env.keys()))
+        log.debug("Secret keys written to YAML: %s", sorted(secret_env_for_yaml.keys()))
+        log.debug("Secret keys applied directly: %s", sorted(secret_env_for_direct_apply.keys()))
         log.debug("Deployment image: %s", cfg["IMAGE"])
 
+    # Return a tuple-like string to indicate inputs_hash and whether there are direct secrets to apply.
+    # The caller (apply_to_cluster) will inspect secret_env and apply direct secrets as needed.
+    # For backward compatibility we return inputs_hash (string).
     return inputs_hash
 
 
@@ -501,17 +572,37 @@ def apply_to_cluster(cfg: dict[str, Any], secret_env: dict[str, str], dry_run: b
         log.error("kubectl not found; aborting apply.")
         raise SystemExit(2)
 
-    inputs_hash = generate_manifests(cfg, secret_env, dry_run=dry_run, verbose=verbose)
+    # Recompute the split so we know which secrets were written to YAML and which must be applied directly.
+    secret_env_for_yaml: dict[str, str] = {}
+    secret_env_for_direct_apply: dict[str, str] = {}
+    use_iam = bool(cfg.get("USE_IAM", False))
+
+    for k, v in secret_env.items():
+        if k in AWS_SECRET_KEYS:
+            if use_iam:
+                continue
+            secret_env_for_direct_apply[k] = v
+        else:
+            secret_env_for_yaml[k] = v
+
+    generate_manifests(cfg, secret_env, dry_run=dry_run, verbose=verbose)
     if dry_run:
         log.info("Dry-run requested; skipping apply actions.")
         return
 
-    if inputs_hash is None:
-        log.info("No manifest changes; still proceeding with secret apply if requested.")
+    # If there are direct secrets to apply (e.g., AWS keys), apply them directly to the cluster now.
+    if secret_env_for_direct_apply:
+        try:
+            create_namespace_if_missing(cfg["NAMESPACE"])
+            apply_secret_direct(cfg, secret_env_for_direct_apply)
+        except subprocess.CalledProcessError as exc:
+            log.error("Failed to apply direct secrets: %s", exc)
+            raise SystemExit(2) from None
 
-    create_namespace_if_missing(cfg["NAMESPACE"])
-
+    # If there is a secret manifest on disk (non-AWS keys), apply it.
     try:
+        create_namespace_if_missing(cfg["NAMESPACE"])
+
         apply_yaml(cfg["FILES"]["serviceaccount"])
         if cfg["FILES"]["secret"].exists():
             apply_yaml(cfg["FILES"]["secret"])
@@ -605,6 +696,7 @@ def main(argv: list[str] | None = None) -> int:
                 log.info("Dry-run requested; not applying secrets.")
                 return 0
             create_namespace_if_missing(cfg["NAMESPACE"])
+            # Apply all secrets directly (this will include AWS keys when USE_IAM=false).
             apply_secret_direct(cfg, secret_env)
             return 0
 
