@@ -437,9 +437,9 @@ def write_manifests(docs: list[dict[str, Any]]) -> None:
     logger.info("Manifests written to: %s", OUT_DIR)
 
 def apply_secrets(secret: dict[str, Any]) -> None:
-    logger.info("Applying secret %s in namespace %s", SECRET_NAME, NAMESPACE)
+    logger.info("Applying secret in namespace %s", NAMESPACE)
     run(["kubectl", "apply", "-f", "-"], stdin=yaml_dump(secret).rstrip() + "\n")
-    logger.info("Secret %s applied successfully", SECRET_NAME)
+    logger.info("Secret applied successfully")
 
 def apply_rollout(docs: list[dict[str, Any]]) -> None:
     logger.info("Applying workload manifests to namespace %s", NAMESPACE)

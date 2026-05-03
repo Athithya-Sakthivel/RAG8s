@@ -95,6 +95,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from starlette.background import BackgroundTask
+from starlette.datastructures import URL
 from store import QdrantStore, QdrantStoreConfig
 from telemetry import annotate_current_span, initialize_telemetry, json_log, safe_stack, setup_logging
 
@@ -410,11 +411,10 @@ def _clean_next_path(value: str | None) -> str:
 
 
 def _auth_redirect_url(request: Request, next_path: str | None = None) -> str:
-    path = _clean_next_path(next_path)
-    query = urlencode({"next": path})
-    base = request.url_for("auth_login")
-    return f"{base!s}?{query}"
-
+    safe_next = _clean_next_path(next_path)
+    return str(
+        request.url_for("auth_login").include_query_params(next=safe_next)
+    )
 
 def _get_bearer_token(request: Request) -> str | None:
     auth = request.headers.get("authorization") or request.headers.get("Authorization")
@@ -981,13 +981,18 @@ async def general_exception_handler(request: Request, exc: Exception):
     )
     return JSONResponse(status_code=500, content={"detail": "internal server error"})
 
-
 @app.get(AUTH_LOGIN_PATH, name="auth_login")
-async def auth_login(request: Request, next: str = _DEFAULT_NEXT_PATH):
+async def auth_login(
+    request: Request,
+    next: str = _DEFAULT_NEXT_PATH,
+):
     next_path = _clean_next_path(next)
+
     state_value = secrets.token_urlsafe(32)
     nonce_value = secrets.token_urlsafe(32)
     verifier, challenge = _pkce_pair()
+
+    issued_at = int(time.time())
 
     flow_cookie = _flow_sign(
         {
@@ -995,12 +1000,24 @@ async def auth_login(request: Request, next: str = _DEFAULT_NEXT_PATH):
             "nonce": nonce_value,
             "verifier": verifier,
             "next": next_path,
-            "iat": int(time.time()),
-            "exp": int(time.time()) + _FLOW_COOKIE_TTL_SECONDS,
+            "iat": issued_at,
+            "exp": issued_at + _FLOW_COOKIE_TTL_SECONDS,
         }
     )
 
-    response = RedirectResponse(_build_authorize_url(state_value, nonce_value, challenge), status_code=302)
+    authorize_url = URL(
+        _build_authorize_url(
+            state=state_value,
+            nonce=nonce_value,
+            challenge=challenge,
+        )
+    )
+
+    response = RedirectResponse(
+        url=str(authorize_url),
+        status_code=302,
+    )
+
     response.set_cookie(
         key=_FLOW_COOKIE_NAME,
         value=flow_cookie,
@@ -1011,9 +1028,8 @@ async def auth_login(request: Request, next: str = _DEFAULT_NEXT_PATH):
         samesite=SESSION_COOKIE_SAMESITE,
         path="/",
     )
+
     return response
-
-
 @app.get(AUTH_CALLBACK_PATH, name="auth_callback")
 async def auth_callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None, error_description: str | None = None):
     if error:

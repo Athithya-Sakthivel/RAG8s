@@ -27,10 +27,8 @@ spec:
     spec:
       serviceAccountName: retriever-sa
       automountServiceAccountToken: true
+      terminationGracePeriodSeconds: 30
       securityContext:
-        runAsNonRoot: true
-        runAsUser: 1000
-        runAsGroup: 1000
         fsGroup: 1000
       volumes:
       - name: tmp
@@ -43,14 +41,7 @@ spec:
         - name: http
           containerPort: 8001
           protocol: TCP
-        envFrom:
-        - configMapRef:
-            name: retriever
         env:
-        - name: INSTANCE_ID
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.name
         - name: POD_NAME
           valueFrom:
             fieldRef:
@@ -59,16 +50,20 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+        envFrom:
+        - secretRef:
+            name: retriever-secrets
         volumeMounts:
         - name: tmp
           mountPath: /tmp
         - name: tmp
           mountPath: /var/tmp
-        - name: tmp
-          mountPath: /usr/tmp
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+          runAsGroup: 1000
         resources:
           requests:
             cpu: 250m

@@ -139,7 +139,7 @@ def _split_csv(raw: str | None, default: tuple[str, ...]) -> tuple[str, ...]:
 
 SERVICE_NAME = _env_first("SERVICE_NAME", "OTEL_SERVICE_NAME", default="retrieval") or "retrieval"
 SERVICE_VERSION = _env_first("SERVICE_VERSION", "OTEL_SERVICE_VERSION", default="unknown") or "unknown"
-ENV = (_env_first("ENV", "DEPLOYMENT_ENVIRONMENT", default="STAGING") or "STAGING").strip().upper() or "STAGING"
+ENV = (_env_first("ENV", "DEPLOYMENT_ENVIRONMENT", default="PROD") or "PROD").strip().upper() or "PROD"
 DEPLOYMENT_ENVIRONMENT = (_env_str("DEPLOYMENT_ENVIRONMENT", ENV) or ENV).strip().upper() or ENV
 
 CLUSTER_NAME = _env_first("K8S_CLUSTER_NAME", "CLUSTER_NAME", default="") or ""
@@ -150,9 +150,18 @@ QDRANT_URL = (_env_str("QDRANT_URL", "http://qdrant.qdrant.svc.cluster.local:633
 QDRANT_API_KEY = _env_str("QDRANT_API_KEY", "") or None
 COLLECTION_NAME = (_env_str("COLLECTION_NAME", "default_rag_collection1") or "").strip()
 
-DENSE_URL = (_env_str("DENSE_URL", "http://dense-svc.models.svc.cluster.local:8200") or "").strip()
-SPARSE_URL = (_env_str("SPARSE_URL", "http://sparse-svc.models.svc.cluster.local:8201") or "").strip()
-RERANKER_URL = (_env_str("RERANKER_URL", "http://reranker-svc.models.svc.cluster.local:8202") or "").strip()
+DENSE_URL = (
+    _env_str("DENSE_URL", "http://dense-svc.inference.svc.cluster.local:8200")
+    or ""
+).strip()
+SPARSE_URL = (
+    _env_str("SPARSE_URL", "http://sparse-svc.inference.svc.cluster.local:8201")
+    or ""
+).strip()
+RERANKER_URL = (
+    _env_str("RERANKER_URL", "http://reranker-svc.inference.svc.cluster.local:8202")
+    or ""
+).strip()
 
 BEDROCK_MODEL_ID = (
     _env_str("BEDROCK_MODEL_ID", None)
@@ -211,16 +220,39 @@ RETRY_MAX_DELAY = _env_float("RETRY_MAX_DELAY", 0.8)
 BREAKER_FAILURE_THRESHOLD = _env_int("BREAKER_FAILURE_THRESHOLD", 3)
 BREAKER_RESET_TIMEOUT = _env_float("BREAKER_RESET_TIMEOUT", 20.0)
 
-# ZITADEL / OIDC
 ZITADEL_ISSUER = _env_first("ZITADEL_ISSUER", "OIDC_ISSUER", default="https://auth.athithya.site") or "https://auth.athithya.site"
-ZITADEL_DISCOVERY_URL = _env_first("ZITADEL_DISCOVERY_URL", default=f"{ZITADEL_ISSUER.rstrip('/')}/.well-known/openid-configuration") or f"{ZITADEL_ISSUER.rstrip('/')}/.well-known/openid-configuration"
-ZITADEL_JWKS_URI = _env_first("ZITADEL_JWKS_URI", default=f"{ZITADEL_ISSUER.rstrip('/')}/oauth/v2/keys") or f"{ZITADEL_ISSUER.rstrip('/')}/oauth/v2/keys"
-ZITADEL_AUTHORIZATION_ENDPOINT = _env_first("ZITADEL_AUTHORIZATION_ENDPOINT", default=f"{ZITADEL_ISSUER.rstrip('/')}/oauth/v2/authorize") or f"{ZITADEL_ISSUER.rstrip('/')}/oauth/v2/authorize"
-ZITADEL_TOKEN_ENDPOINT = _env_first("ZITADEL_TOKEN_ENDPOINT", default=f"{ZITADEL_ISSUER.rstrip('/')}/oauth/v2/token") or f"{ZITADEL_ISSUER.rstrip('/')}/oauth/v2/token"
-ZITADEL_USERINFO_ENDPOINT = _env_first("ZITADEL_USERINFO_ENDPOINT", default=f"{ZITADEL_ISSUER.rstrip('/')}/oidc/v1/userinfo") or f"{ZITADEL_ISSUER.rstrip('/')}/oidc/v1/userinfo"
-ZITADEL_INTROSPECTION_ENDPOINT = _env_first("ZITADEL_INTROSPECTION_ENDPOINT", default=f"{ZITADEL_ISSUER.rstrip('/')}/oauth/v2/introspect") or f"{ZITADEL_ISSUER.rstrip('/')}/oauth/v2/introspect"
-ZITADEL_REVOCATION_ENDPOINT = _env_first("ZITADEL_REVOCATION_ENDPOINT", default=f"{ZITADEL_ISSUER.rstrip('/')}/oauth/v2/revoke") or f"{ZITADEL_ISSUER.rstrip('/')}/oauth/v2/revoke"
-ZITADEL_END_SESSION_ENDPOINT = _env_first("ZITADEL_END_SESSION_ENDPOINT", default=f"{ZITADEL_ISSUER.rstrip('/')}/oidc/v1/end_session") or f"{ZITADEL_ISSUER.rstrip('/')}/oidc/v1/end_session"
+ZITADEL_DISCOVERY_URL = _env_first(
+    "ZITADEL_DISCOVERY_URL",
+    default=f"{ZITADEL_ISSUER.rstrip('/')}/.well-known/openid-configuration",
+) or f"{ZITADEL_ISSUER.rstrip('/')}/.well-known/openid-configuration"
+ZITADEL_JWKS_URI = _env_first(
+    "ZITADEL_JWKS_URI",
+    default=f"{ZITADEL_ISSUER.rstrip('/')}/oauth/v2/keys",
+) or f"{ZITADEL_ISSUER.rstrip('/')}/oauth/v2/keys"
+ZITADEL_AUTHORIZATION_ENDPOINT = _env_first(
+    "ZITADEL_AUTHORIZATION_ENDPOINT",
+    default=f"{ZITADEL_ISSUER.rstrip('/')}/oauth/v2/authorize",
+) or f"{ZITADEL_ISSUER.rstrip('/')}/oauth/v2/authorize"
+ZITADEL_TOKEN_ENDPOINT = _env_first(
+    "ZITADEL_TOKEN_ENDPOINT",
+    default=f"{ZITADEL_ISSUER.rstrip('/')}/oauth/v2/token",
+) or f"{ZITADEL_ISSUER.rstrip('/')}/oauth/v2/token"
+ZITADEL_USERINFO_ENDPOINT = _env_first(
+    "ZITADEL_USERINFO_ENDPOINT",
+    default=f"{ZITADEL_ISSUER.rstrip('/')}/oidc/v1/userinfo",
+) or f"{ZITADEL_ISSUER.rstrip('/')}/oidc/v1/userinfo"
+ZITADEL_INTROSPECTION_ENDPOINT = _env_first(
+    "ZITADEL_INTROSPECTION_ENDPOINT",
+    default=f"{ZITADEL_ISSUER.rstrip('/')}/oauth/v2/introspect",
+) or f"{ZITADEL_ISSUER.rstrip('/')}/oauth/v2/introspect"
+ZITADEL_REVOCATION_ENDPOINT = _env_first(
+    "ZITADEL_REVOCATION_ENDPOINT",
+    default=f"{ZITADEL_ISSUER.rstrip('/')}/oauth/v2/revoke",
+) or f"{ZITADEL_ISSUER.rstrip('/')}/oauth/v2/revoke"
+ZITADEL_END_SESSION_ENDPOINT = _env_first(
+    "ZITADEL_END_SESSION_ENDPOINT",
+    default=f"{ZITADEL_ISSUER.rstrip('/')}/oidc/v1/end_session",
+) or f"{ZITADEL_ISSUER.rstrip('/')}/oidc/v1/end_session"
 ZITADEL_CLIENT_ID = _env_str("ZITADEL_CLIENT_ID", "") or ""
 ZITADEL_AUDIENCE = _env_str("ZITADEL_AUDIENCE", ZITADEL_CLIENT_ID) or ZITADEL_CLIENT_ID
 ZITADEL_REDIRECT_URI = _env_str("ZITADEL_REDIRECT_URI", "https://api.athithya.site/auth/callback") or "https://api.athithya.site/auth/callback"
@@ -236,7 +268,10 @@ SESSION_TTL_SECONDS = _env_int("SESSION_TTL_SECONDS", 86400)
 SESSION_SECRET = _env_str("SESSION_SECRET", "") or ""
 
 AUTH_REQUIRED_PATHS = _split_csv(_env_str("AUTH_REQUIRED_PATHS", "/generate/stream"), ("/generate/stream",))
-AUTH_EXEMPT_PATHS = _split_csv(_env_str("AUTH_EXEMPT_PATHS", "/healthz,/readyz,/auth/login,/auth/callback,/auth/logout"), ("/healthz", "/readyz", "/auth/login", "/auth/callback", "/auth/logout"))
+AUTH_EXEMPT_PATHS = _split_csv(
+    _env_str("AUTH_EXEMPT_PATHS", "/healthz,/readyz,/auth/login,/auth/callback,/auth/logout"),
+    ("/healthz", "/readyz", "/auth/login", "/auth/callback", "/auth/logout"),
+)
 AUTH_LOGIN_PATH = _env_str("AUTH_LOGIN_PATH", "/auth/login") or "/auth/login"
 AUTH_CALLBACK_PATH = _env_str("AUTH_CALLBACK_PATH", "/auth/callback") or "/auth/callback"
 AUTH_LOGOUT_PATH = _env_str("AUTH_LOGOUT_PATH", "/auth/logout") or "/auth/logout"
@@ -244,30 +279,33 @@ AUTH_LOGOUT_PATH = _env_str("AUTH_LOGOUT_PATH", "/auth/logout") or "/auth/logout
 DEFAULT_ANON_RATE_LIMIT = _env_str("DEFAULT_ANON_RATE_LIMIT", "10/minute") or "10/minute"
 DEFAULT_USER_RATE_LIMIT = _env_str("DEFAULT_USER_RATE_LIMIT", "60/minute") or "60/minute"
 
-OTEL_ENDPOINT = _env_first(
-    "OTEL_EXPORTER_OTLP_ENDPOINT",
-    "OTEL_ENDPOINT",
-    default="http://signoz-otel-collector.signoz.svc.cluster.local:4317",
-)
-OTEL_PROTOCOL = (_env_first("OTEL_EXPORTER_OTLP_PROTOCOL", "OTEL_PROTOCOL", default="grpc") or "grpc").strip().lower()
-if OTEL_PROTOCOL in {"grpc", "gprc"}:
-    OTEL_PROTOCOL = "grpc"
-elif OTEL_PROTOCOL in {"http", "http/protobuf", "http-protobuf"}:
-    OTEL_PROTOCOL = "http/protobuf"
-else:
+OTEL_ENDPOINT = (
+    _env_first(
+        "OTEL_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+        default="http://signoz-otel-collector.signoz.svc.cluster.local:4317",
+    )
+    or "http://signoz-otel-collector.signoz.svc.cluster.local:4317"
+).strip()
+
+OTEL_PROTOCOL = (
+    _env_first(
+        "OTEL_PROTOCOL",
+        "OTEL_EXPORTER_OTLP_PROTOCOL",
+        default="grpc",
+    )
+    or "grpc"
+).strip().lower()
+
+if OTEL_PROTOCOL not in {"grpc", "http/protobuf"}:
     OTEL_PROTOCOL = "grpc"
 
 OTEL_TIMEOUT_SECONDS = _env_otlp_timeout_seconds(5.0)
-OTEL_METRIC_EXPORT_INTERVAL_MS = _env_int_any(
-    ("OTEL_METRIC_EXPORT_INTERVAL", "OTEL_METRIC_EXPORT_INTERVAL_MS"),
-    15000,
-)
-OTEL_METRIC_EXPORT_TIMEOUT_MS = _env_int_any(
-    ("OTEL_METRIC_EXPORT_TIMEOUT", "OTEL_METRIC_EXPORT_TIMEOUT_MS"),
-    10000,
-)
+OTEL_METRIC_EXPORT_INTERVAL_MS = _env_int_any(("OTEL_METRIC_EXPORT_INTERVAL_MS",), 15000)
+OTEL_METRIC_EXPORT_TIMEOUT_MS = _env_int_any(("OTEL_METRIC_EXPORT_TIMEOUT_MS",), 10000)
 OTEL_TRACES_SAMPLER = _normalize_sampler_name(_env_str("OTEL_TRACES_SAMPLER", "parentbased_traceidratio"))
-TRACE_SAMPLE_RATIO = _sampler_ratio(OTEL_TRACES_SAMPLER, os.getenv("OTEL_TRACES_SAMPLER_ARG"))
+OTEL_TRACES_SAMPLER_ARG = _env_str("OTEL_TRACES_SAMPLER_ARG", "0.1") or "0.1"
+TRACE_SAMPLE_RATIO = _sampler_ratio(OTEL_TRACES_SAMPLER, OTEL_TRACES_SAMPLER_ARG)
 LOG_LEVEL = _validate_log_level(_env_str("LOG_LEVEL", "WARNING"))
 
 ENABLE_OTEL_TRACES = _env_bool("ENABLE_OTEL_TRACES", True)
@@ -401,6 +439,7 @@ __all__ = [
     "OTEL_PROTOCOL",
     "OTEL_TIMEOUT_SECONDS",
     "OTEL_TRACES_SAMPLER",
+    "OTEL_TRACES_SAMPLER_ARG",
     "PROMPT_MAX_CONTENT_CHARS",
     "PROMPT_VERSION",
     "QDRANT_API_KEY",
@@ -422,8 +461,8 @@ __all__ = [
     "SERVICE_VERSION",
     "SESSION_COOKIE_HTTPONLY",
     "SESSION_COOKIE_NAME",
-    "SESSION_COOKIE_SECURE",
     "SESSION_COOKIE_SAMESITE",
+    "SESSION_COOKIE_SECURE",
     "SESSION_SECRET",
     "SESSION_TTL_SECONDS",
     "SPARSE_URL",
@@ -432,12 +471,11 @@ __all__ = [
     "ZITADEL_ALLOWED_ALGORITHMS",
     "ZITADEL_AUDIENCE",
     "ZITADEL_AUTHORIZATION_ENDPOINT",
-    "ZITADEL_CALLBACK_PATH" if False else "AUTH_CALLBACK_PATH",
     "ZITADEL_CLIENT_ID",
     "ZITADEL_DISCOVERY_URL",
     "ZITADEL_END_SESSION_ENDPOINT",
-    "ZITADEL_ISSUER",
     "ZITADEL_INTROSPECTION_ENDPOINT",
+    "ZITADEL_ISSUER",
     "ZITADEL_JWKS_URI",
     "ZITADEL_REDIRECT_URI",
     "ZITADEL_REVOCATION_ENDPOINT",
