@@ -216,3 +216,4 @@ terraform.tfstate.backup
 
 terraform.tfstate
 tfplan
+.state

@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloudflared-routes-reference
+  namespace: inference
+  labels:
+    app.kubernetes.io/name: cloudflared
+    app.kubernetes.io/component: tunnel-reference
+data:
+  routes.yaml: |
+    tunnel: default-tunnel-1
+    ingress:
+    - hostname: auth.athithya.site
+      service: http://zitadel.inference.svc.cluster.local:8080
+      originRequest:
+        connectTimeout: 10s
+        keepAliveTimeout: 30s
+        noTLSVerify: true
+        httpHostHeader: auth.athithya.site
+        disableChunkedEncoding: true
+    - hostname: api.athithya.site
+      service: http://frontend-nginx.inference.svc.cluster.local:8080
+      originRequest:
+        connectTimeout: 10s
+        keepAliveTimeout: 30s
+        noTLSVerify: true
+        disableChunkedEncoding: true
+    - hostname: athithya.site
+      service: http://frontend-nginx.inference.svc.cluster.local:8080
+      originRequest:
+        connectTimeout: 10s
+        keepAliveTimeout: 30s
+        noTLSVerify: true
+        disableChunkedEncoding: true
+    - service: http_status:404
