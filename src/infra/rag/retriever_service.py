@@ -19,13 +19,14 @@ log = logging.getLogger("gen_retriever")
 
 MANIFESTS_DIR = Path("src/manifests/retriever")
 STATE_DIRNAME = ".state"
+
 DEFAULTS: dict[str, Any] = {
     "NAMESPACE": "inference",
     "DEPLOYMENT_NAME": "retriever",
     "SERVICE_NAME": "retriever",
     "SERVICE_ACCOUNT_NAME": "retriever-sa",
     "SECRET_NAME": "retriever-secrets",
-    "IMAGE": "ghcr.io/athithya-sakthivel/retriever:2026-05-01-14-56--7edc587@sha256:ff60267c9e71bd00bdf2636d6c9e81f477023687bd4cf12bd825a05e19a4c49d",
+    "IMAGE": "ghcr.io/athithya-sakthivel/retriever:2026-05-03-13-29--d13b057@sha256:2b4bb7f34c57db45e4241576951d43195f286bcdddf4f321fcd28b629ba72a3f",
     "IMAGE_PULL_POLICY": "IfNotPresent",
     "REPLICAS": 1,
     "CONTAINER_PORT": 8001,
@@ -74,8 +75,88 @@ APP_ENV_DEFAULTS: dict[str, str] = {
     "ENABLE_OTEL_TRACES": "true",
     "ENABLE_OTEL_METRICS": "true",
     "ENABLE_OTEL_LOGS": "true",
-    "OTEL_EXPORTER_OTLP_ENDPOINT": "signoz-otel-collector.signoz.svc.cluster.local:4317",
-    "QDRANT_ON_DISK_PAYLOAD": "false"
+    "OTEL_PROTOCOL": "grpc",
+    "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc",
+    "OTEL_ENDPOINT": "http://signoz-otel-collector.signoz.svc.cluster.local:4317",
+    "OTEL_EXPORTER_OTLP_ENDPOINT": "http://signoz-otel-collector.signoz.svc.cluster.local:4317",
+    "OTEL_TIMEOUT_SECONDS": "5",
+    "OTEL_METRIC_EXPORT_INTERVAL_MS": "15000",
+    "OTEL_METRIC_EXPORT_TIMEOUT_MS": "10000",
+    "OTEL_TRACES_SAMPLER": "parentbased_traceidratio",
+    "OTEL_TRACES_SAMPLER_ARG": "0.1",
+    "QDRANT_ON_DISK_PAYLOAD": "false",
+    "BREAKER_FAILURE_THRESHOLD": "3",
+    "BREAKER_RESET_TIMEOUT": "20.0",
+    "RETRY_MAX_ATTEMPTS": "3",
+    "RETRY_BASE_DELAY": "0.08",
+    "RETRY_MAX_DELAY": "0.8",
+    "HTTP_TIMEOUT": "10.0",
+    "HTTP_MAX_CONNECTIONS": "100",
+    "HTTP_MAX_KEEPALIVE": "20",
+    "MAX_CONCURRENT_REQUESTS": "64",
+    "FETCH_K": "20",
+    "QUERY_TOPK_DENSE": "50",
+    "QUERY_TOPK_SPARSE": "50",
+    "MAX_CHUNKS_TO_LLM": "5",
+    "RERANKER_TOP_K": "10",
+    "RERANKER_MODE": "AUTO",
+    "RERANK_AUTO_THRESHOLD": "0.75",
+    "RERANK_MARGIN": "0.08",
+    "RERANK_ALPHA": "0.6",
+    "RRF_K": "60",
+    "CACHE_SCORE_THRESHOLD": "0.72",
+    "CACHE_TTL_SECONDS": "86400",
+    "CACHE_CLEANUP_INTERVAL_SECONDS": "900",
+    "PROMPT_MAX_CONTENT_CHARS": "2500",
+    "CHUNK_OUTPUT_MAX_CHARS": "1600",
+    "MAX_PROMPT_CHARS": "40000",
+    "LLM_MAX_TOKENS": "400",
+    "LLM_TEMPERATURE": "0.0",
+    "CORPUS_VERSION": "v1",
+    "PROMPT_VERSION": "v1",
+    "RETRIEVAL_VERSION": "retrieval-v1",
+    "TENANT_ID": "",
+    "BEDROCK_MODEL_ID": "meta.llama3-8b-instruct-v1:0",
+    "ANSWER_PROMPT_TEMPLATE": (
+        "You are a knowledge assistant who must explain explicitly to an end-user by referring ONLY to the provided passages below.\n"
+        "You MUST end every passage with a citation in the exact format [n], where n is one of the numbered passage blocks.\n"
+        "Use ONLY the provided passage numbers. Do NOT output filenames, secrets, URLs, page numbers, or any other metadata.\n"
+        "Do NOT invent citations.\n"
+        "PASSAGES:\n{passages}\n\n"
+        "QUESTION: {question}\n\n"
+        "Answer:"
+    ),
+    "BEDROCK_GUARDRAIL_IDENTIFIER": "",
+    "BEDROCK_GUARDRAIL_VERSION": "",
+    # Auth / ZITADEL
+    "ZITADEL_ISSUER": "https://auth.athithya.site",
+    "ZITADEL_DISCOVERY_URL": "https://auth.athithya.site/.well-known/openid-configuration",
+    "ZITADEL_JWKS_URI": "https://auth.athithya.site/oauth/v2/keys",
+    "ZITADEL_AUTHORIZATION_ENDPOINT": "https://auth.athithya.site/oauth/v2/authorize",
+    "ZITADEL_TOKEN_ENDPOINT": "https://auth.athithya.site/oauth/v2/token",
+    "ZITADEL_USERINFO_ENDPOINT": "https://auth.athithya.site/oidc/v1/userinfo",
+    "ZITADEL_INTROSPECTION_ENDPOINT": "https://auth.athithya.site/oauth/v2/introspect",
+    "ZITADEL_REVOCATION_ENDPOINT": "https://auth.athithya.site/oauth/v2/revoke",
+    "ZITADEL_END_SESSION_ENDPOINT": "https://auth.athithya.site/oidc/v1/end_session",
+    "ZITADEL_CLIENT_ID": "",
+    "ZITADEL_AUDIENCE": "",
+    "ZITADEL_REDIRECT_URI": "https://api.athithya.site/auth/callback",
+    "ZITADEL_SCOPES": "openid,profile,email",
+    "ZITADEL_ALLOWED_ALGORITHMS": "RS256,EdDSA",
+    "ZITADEL_USER_ID_CLAIM": "sub",
+    "SESSION_COOKIE_NAME": "retriever_session",
+    "SESSION_COOKIE_SECURE": "true",
+    "SESSION_COOKIE_HTTPONLY": "true",
+    "SESSION_COOKIE_SAMESITE": "Lax",
+    "SESSION_TTL_SECONDS": "86400",
+    "SESSION_SECRET": "",
+    "AUTH_REQUIRED_PATHS": "/generate/stream",
+    "AUTH_EXEMPT_PATHS": "/healthz,/readyz,/auth/login,/auth/callback,/auth/logout",
+    "AUTH_LOGIN_PATH": "/auth/login",
+    "AUTH_CALLBACK_PATH": "/auth/callback",
+    "AUTH_LOGOUT_PATH": "/auth/logout",
+    "DEFAULT_ANON_RATE_LIMIT": "10/minute",
+    "DEFAULT_USER_RATE_LIMIT": "60/minute",
 }
 
 APP_ENV_ORDER = list(APP_ENV_DEFAULTS.keys())
@@ -117,9 +198,22 @@ def atomic_write(path: Path, content: str) -> None:
     tmp.replace(path)
 
 
-def run_cmd(cmd: list[str], capture: bool = True, check: bool = False, timeout: int | None = None, input_text: str | None = None) -> tuple[int, str, str]:
+def run_cmd(
+    cmd: list[str],
+    capture: bool = True,
+    check: bool = False,
+    timeout: int | None = None,
+    input_text: str | None = None,
+) -> tuple[int, str, str]:
     try:
-        proc = subprocess.run(cmd, input=input_text, capture_output=capture, text=True, check=check, timeout=timeout)
+        proc = subprocess.run(
+            cmd,
+            input=input_text,
+            capture_output=capture,
+            text=True,
+            check=check,
+            timeout=timeout,
+        )
         return proc.returncode, proc.stdout or "", proc.stderr or ""
     except subprocess.CalledProcessError as e:
         return e.returncode, e.stdout or "", e.stderr or ""
@@ -182,23 +276,29 @@ def load_config() -> dict[str, Any]:
     app_env: dict[str, str] = {}
     for name in APP_ENV_ORDER:
         app_env[name] = _env_str(name, APP_ENV_DEFAULTS[name])
-    for k in ("ENABLE_OTEL_TRACES", "ENABLE_OTEL_METRICS", "ENABLE_OTEL_LOGS"):
+
+    for k in ("ENABLE_OTEL_TRACES", "ENABLE_OTEL_METRICS", "ENABLE_OTEL_LOGS", "SESSION_COOKIE_SECURE", "SESSION_COOKIE_HTTPONLY"):
         if k in app_env:
             app_env[k] = app_env[k].lower()
-    cfg["APP_ENV"] = app_env
 
-    manifests_dir = cfg["MANIFESTS_DIR"]
+    cfg["APP_ENV"] = app_env
     cfg["FILES"] = {
-        "serviceaccount": manifests_dir / "01-serviceaccount.yaml",
-        "configmap": manifests_dir / "02-configmap.yaml",
-        # intentionally no "secret" file
-        "deployment": manifests_dir / "04-deployment.yaml",
-        "service": manifests_dir / "05-service.yaml",
-        "pdb": manifests_dir / "06-pdb.yaml",
+        "serviceaccount": cfg["MANIFESTS_DIR"] / "01-serviceaccount.yaml",
+        "configmap": cfg["MANIFESTS_DIR"] / "02-configmap.yaml",
+        "secret": cfg["MANIFESTS_DIR"] / "03-secret.yaml",
+        "deployment": cfg["MANIFESTS_DIR"] / "04-deployment.yaml",
+        "service": cfg["MANIFESTS_DIR"] / "05-service.yaml",
+        "pdb": cfg["MANIFESTS_DIR"] / "06-pdb.yaml",
     }
 
     cfg["UUID_SHORT"] = str(uuid.uuid4())[:8]
-    log.info("Loaded config: namespace=%s deployment=%s replicas=%d image=%s", cfg["NAMESPACE"], cfg["DEPLOYMENT_NAME"], cfg["REPLICAS"], cfg["IMAGE"])
+    log.info(
+        "Loaded config: namespace=%s deployment=%s replicas=%d image=%s",
+        cfg["NAMESPACE"],
+        cfg["DEPLOYMENT_NAME"],
+        cfg["REPLICAS"],
+        cfg["IMAGE"],
+    )
     return cfg
 
 
@@ -216,20 +316,91 @@ def _pod_labels(cfg: dict[str, Any]) -> dict[str, str]:
     labels["app.kubernetes.io/part-of"] = cfg["SERVICE_NAME"]
     return labels
 
-
 def _configmap_data(app_env: dict[str, str]) -> dict[str, str]:
     data: dict[str, str] = {}
+
+    secret_like = {
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "QDRANT_API_KEY",
+        "ZITADEL_CLIENT_SECRET",
+        "SESSION_SECRET",
+    }
+
     for key in APP_ENV_ORDER:
-        if key in {"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "QDRANT_API_KEY"}:
+        if key in secret_like:
             continue
-        value = app_env.get(key, "")
-        if value == "":
+
+        value = str(app_env.get(key, "")).strip()
+        if not value:
             continue
+
         data[key] = value
-    if "ENV" not in data:
-        data["ENV"] = app_env.get("ENV", "prod")
-    if "DEPLOYMENT_ENVIRONMENT" not in data:
-        data["DEPLOYMENT_ENVIRONMENT"] = app_env.get("DEPLOYMENT_ENVIRONMENT", data["ENV"])
+
+    env_name = app_env.get("ENV", APP_ENV_DEFAULTS["ENV"])
+
+    data.setdefault("ENV", env_name)
+    data.setdefault(
+        "DEPLOYMENT_ENVIRONMENT",
+        app_env.get(
+            "DEPLOYMENT_ENVIRONMENT",
+            APP_ENV_DEFAULTS["DEPLOYMENT_ENVIRONMENT"],
+        ),
+    )
+
+    # Strong OTEL defaults for SigNoz gRPC ingestion.
+    # Always include scheme to avoid exporter parsing bugs.
+    data.setdefault(
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+        app_env.get(
+            "OTEL_EXPORTER_OTLP_ENDPOINT",
+            APP_ENV_DEFAULTS["OTEL_EXPORTER_OTLP_ENDPOINT"],
+        ),
+    )
+
+    data.setdefault(
+        "OTEL_EXPORTER_OTLP_PROTOCOL",
+        app_env.get(
+            "OTEL_EXPORTER_OTLP_PROTOCOL",
+            APP_ENV_DEFAULTS.get(
+                "OTEL_EXPORTER_OTLP_PROTOCOL",
+                "grpc",
+            ),
+        ),
+    )
+
+    # Backward compatibility aliases used by older app code.
+    data.setdefault(
+        "OTEL_ENDPOINT",
+        app_env.get(
+            "OTEL_ENDPOINT",
+            data["OTEL_EXPORTER_OTLP_ENDPOINT"],
+        ),
+    )
+
+    data.setdefault(
+        "OTEL_PROTOCOL",
+        app_env.get(
+            "OTEL_PROTOCOL",
+            data["OTEL_EXPORTER_OTLP_PROTOCOL"],
+        ),
+    )
+
+    return data
+
+def _secret_data(app_env: dict[str, str]) -> dict[str, str]:
+    secret_like = {
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "QDRANT_API_KEY",
+        "ZITADEL_CLIENT_SECRET",
+        "SESSION_SECRET",
+    }
+    data: dict[str, str] = {}
+    for key in secret_like:
+        value = app_env.get(key, "").strip()
+        if value:
+            data[key] = value
     return data
 
 
@@ -264,59 +435,72 @@ def build_configmap_doc(cfg: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _container_env(cfg: dict[str, Any], secret_env: dict[str, str]) -> list[dict[str, Any]]:
-    env: list[dict[str, Any]] = []
-    env.append({"name": "ENV", "value": cfg["APP_ENV"].get("ENV", "prod")})
-    env.append({"name": "DEPLOYMENT_ENVIRONMENT", "value": cfg["APP_ENV"].get("DEPLOYMENT_ENVIRONMENT", cfg["APP_ENV"].get("ENV", "prod"))})
-    env.append({"name": "INSTANCE_ID", "valueFrom": {"fieldRef": {"fieldPath": "metadata.name"}}})
-    for key in APP_ENV_ORDER:
-        if key in {"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "QDRANT_API_KEY", "INSTANCE_ID"}:
-            continue
-        val = cfg["APP_ENV"].get(key)
-        if val is None or val == "":
-            continue
-        env.append({"name": key, "value": val})
-    # Add secretKeyRef entries only (no secret values written to disk)
-    if secret_env:
-        for name in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "QDRANT_API_KEY"):
-            if name in secret_env:
-                env.append({"name": name, "valueFrom": {"secretKeyRef": {"name": cfg["SECRET_NAME"], "key": name}}})
-    return env
+def build_secret_doc(cfg: dict[str, Any]) -> dict[str, Any] | None:
+    data = _secret_data(cfg["APP_ENV"])
+    if not data:
+        return None
+    return {
+        "apiVersion": "v1",
+        "kind": "Secret",
+        "metadata": {"name": cfg["SECRET_NAME"], "namespace": cfg["NAMESPACE"], "labels": _base_labels(cfg)},
+        "type": "Opaque",
+        "stringData": data,
+    }
 
 
-def build_deployment_doc(cfg: dict[str, Any], secret_env: dict[str, str]) -> dict[str, Any]:
+def build_deployment_doc(cfg: dict[str, Any], has_secret: bool) -> dict[str, Any]:
     pod_labels = _pod_labels(cfg)
     base_labels = _base_labels(cfg)
+
+    env_from = [{"configMapRef": {"name": cfg["DEPLOYMENT_NAME"]}}]
+    if has_secret:
+        env_from.append({"secretRef": {"name": cfg["SECRET_NAME"]}})
+
     container = {
         "name": cfg["DEPLOYMENT_NAME"],
         "image": cfg["IMAGE"],
         "imagePullPolicy": cfg["IMAGE_PULL_POLICY"],
         "ports": [{"name": "http", "containerPort": cfg["CONTAINER_PORT"], "protocol": "TCP"}],
-        "env": _container_env(cfg, secret_env),
+        "envFrom": env_from,
+        "env": [
+            {"name": "INSTANCE_ID", "valueFrom": {"fieldRef": {"fieldPath": "metadata.name"}}},
+            {"name": "POD_NAME", "valueFrom": {"fieldRef": {"fieldPath": "metadata.name"}}},
+            {"name": "POD_NAMESPACE", "valueFrom": {"fieldRef": {"fieldPath": "metadata.namespace"}}},
+        ],
         "volumeMounts": [{"name": "tmp", "mountPath": "/tmp"}],
         "securityContext": {
             "allowPrivilegeEscalation": bool(cfg["ALLOW_PRIV_ESC"]),
             "readOnlyRootFilesystem": bool(cfg["READONLY_ROOTFS"]),
         },
-        "resources": {"requests": {"cpu": cfg["CPU_REQUEST"], "memory": cfg["MEMORY_REQUEST"]}, "limits": {"cpu": cfg["CPU_LIMIT"], "memory": cfg["MEMORY_LIMIT"]}},
-        "readinessProbe": _probe_http("/readyz", cfg["CONTAINER_PORT"], cfg["READINESS_INITIAL_DELAY"], cfg["PROBE_PERIOD_SECONDS"], cfg["PROBE_TIMEOUT_SECONDS"], 3),
-        "livenessProbe": _probe_http("/healthz", cfg["CONTAINER_PORT"], cfg["LIVENESS_INITIAL_DELAY"], cfg["PROBE_PERIOD_SECONDS"], cfg["PROBE_TIMEOUT_SECONDS"], 6),
-        "startupProbe": _probe_http("/healthz", cfg["CONTAINER_PORT"], cfg["LIVENESS_INITIAL_DELAY"], cfg["PROBE_PERIOD_SECONDS"], cfg["PROBE_TIMEOUT_SECONDS"], cfg["STARTUP_FAILURE_THRESHOLD"]),
+        "resources": {
+            "requests": {"cpu": cfg["CPU_REQUEST"], "memory": cfg["MEMORY_REQUEST"]},
+            "limits": {"cpu": cfg["CPU_LIMIT"], "memory": cfg["MEMORY_LIMIT"]},
+        },
+        "readinessProbe": _probe_http(
+            "/readyz",
+            cfg["CONTAINER_PORT"],
+            cfg["READINESS_INITIAL_DELAY"],
+            cfg["PROBE_PERIOD_SECONDS"],
+            cfg["PROBE_TIMEOUT_SECONDS"],
+            3,
+        ),
+        "livenessProbe": _probe_http(
+            "/healthz",
+            cfg["CONTAINER_PORT"],
+            cfg["LIVENESS_INITIAL_DELAY"],
+            cfg["PROBE_PERIOD_SECONDS"],
+            cfg["PROBE_TIMEOUT_SECONDS"],
+            6,
+        ),
+        "startupProbe": _probe_http(
+            "/healthz",
+            cfg["CONTAINER_PORT"],
+            cfg["LIVENESS_INITIAL_DELAY"],
+            cfg["PROBE_PERIOD_SECONDS"],
+            cfg["PROBE_TIMEOUT_SECONDS"],
+            cfg["STARTUP_FAILURE_THRESHOLD"],
+        ),
     }
-
-    if cfg.get("READONLY_ROOTFS", True):
-        existing_mounts = container.get("volumeMounts", []) or []
-        tmp_mounts = [
-            {"name": "tmp", "mountPath": "/tmp"},
-            {"name": "tmp", "mountPath": "/var/tmp"},
-            {"name": "tmp", "mountPath": "/usr/tmp"},
-        ]
-        for m in tmp_mounts:
-            if not any(vm.get("mountPath") == m["mountPath"] for vm in existing_mounts):
-                existing_mounts.append(m)
-        if not any(vm.get("mountPath") == "/models_cache" for vm in existing_mounts):
-            existing_mounts.append({"name": "models-cache", "mountPath": "/models_cache"})
-        container["volumeMounts"] = existing_mounts
 
     deployment = {
         "apiVersion": "apps/v1",
@@ -325,13 +509,24 @@ def build_deployment_doc(cfg: dict[str, Any], secret_env: dict[str, str]) -> dic
         "spec": {
             "replicas": cfg["REPLICAS"],
             "revisionHistoryLimit": 3,
-            "selector": {"matchLabels": {"app.kubernetes.io/name": cfg["SERVICE_NAME"], "app.kubernetes.io/instance": cfg["DEPLOYMENT_NAME"], "app.kubernetes.io/component": "retriever"}},
+            "selector": {
+                "matchLabels": {
+                    "app.kubernetes.io/name": cfg["SERVICE_NAME"],
+                    "app.kubernetes.io/instance": cfg["DEPLOYMENT_NAME"],
+                    "app.kubernetes.io/component": "retriever",
+                }
+            },
             "template": {
                 "metadata": {"labels": pod_labels},
                 "spec": {
                     "serviceAccountName": cfg["SERVICE_ACCOUNT_NAME"],
                     "automountServiceAccountToken": True,
-                    "securityContext": {"runAsNonRoot": bool(cfg["RUN_AS_NONROOT"]), "runAsUser": int(cfg["RUN_AS_USER"]), "runAsGroup": int(cfg["RUN_AS_GROUP"]), "fsGroup": int(cfg["FS_GROUP"])},
+                    "securityContext": {
+                        "runAsNonRoot": bool(cfg["RUN_AS_NONROOT"]),
+                        "runAsUser": int(cfg["RUN_AS_USER"]),
+                        "runAsGroup": int(cfg["RUN_AS_GROUP"]),
+                        "fsGroup": int(cfg["FS_GROUP"]),
+                    },
                     "volumes": [{"name": "tmp", "emptyDir": {}}],
                     "containers": [container],
                 },
@@ -339,10 +534,12 @@ def build_deployment_doc(cfg: dict[str, Any], secret_env: dict[str, str]) -> dic
         },
     }
 
-    vols = deployment["spec"]["template"]["spec"].get("volumes", []) or []
-    if not any(v.get("name") == "models-cache" for v in vols):
-        vols.append({"name": "models-cache", "emptyDir": {}})
-    deployment["spec"]["template"]["spec"]["volumes"] = vols
+    if cfg["READONLY_ROOTFS"]:
+        container["volumeMounts"] = [
+            {"name": "tmp", "mountPath": "/tmp"},
+            {"name": "tmp", "mountPath": "/var/tmp"},
+            {"name": "tmp", "mountPath": "/usr/tmp"},
+        ]
 
     return deployment
 
@@ -354,8 +551,19 @@ def build_service_doc(cfg: dict[str, Any]) -> dict[str, Any]:
         "metadata": {"name": cfg["SERVICE_NAME"], "namespace": cfg["NAMESPACE"], "labels": _base_labels(cfg)},
         "spec": {
             "type": cfg["SERVICE_TYPE"],
-            "selector": {"app.kubernetes.io/name": cfg["SERVICE_NAME"], "app.kubernetes.io/instance": cfg["DEPLOYMENT_NAME"], "app.kubernetes.io/component": "retriever"},
-            "ports": [{"name": "http", "port": cfg["CONTAINER_PORT"], "targetPort": cfg["CONTAINER_PORT"], "protocol": "TCP"}],
+            "selector": {
+                "app.kubernetes.io/name": cfg["SERVICE_NAME"],
+                "app.kubernetes.io/instance": cfg["DEPLOYMENT_NAME"],
+                "app.kubernetes.io/component": "retriever",
+            },
+            "ports": [
+                {
+                    "name": "http",
+                    "port": cfg["CONTAINER_PORT"],
+                    "targetPort": cfg["CONTAINER_PORT"],
+                    "protocol": "TCP",
+                }
+            ],
         },
     }
 
@@ -367,7 +575,16 @@ def build_pdb_doc(cfg: dict[str, Any]) -> dict[str, Any] | None:
         "apiVersion": "policy/v1",
         "kind": "PodDisruptionBudget",
         "metadata": {"name": f"{cfg['DEPLOYMENT_NAME']}-pdb", "namespace": cfg["NAMESPACE"], "labels": _base_labels(cfg)},
-        "spec": {"minAvailable": 1, "selector": {"matchLabels": {"app.kubernetes.io/name": cfg["SERVICE_NAME"], "app.kubernetes.io/instance": cfg["DEPLOYMENT_NAME"], "app.kubernetes.io/component": "retriever"}}},
+        "spec": {
+            "minAvailable": 1,
+            "selector": {
+                "matchLabels": {
+                    "app.kubernetes.io/name": cfg["SERVICE_NAME"],
+                    "app.kubernetes.io/instance": cfg["DEPLOYMENT_NAME"],
+                    "app.kubernetes.io/component": "retriever",
+                }
+            },
+        },
     }
 
 
@@ -389,6 +606,13 @@ def write_yaml_atomic(path: Path, doc: dict[str, Any]) -> None:
     log.debug("Wrote manifest %s", str(path))
 
 
+def create_namespace_if_missing(namespace: str) -> None:
+    rc = subprocess.run(["kubectl", "get", "ns", namespace], capture_output=True)
+    if rc.returncode != 0:
+        log.info("Namespace %s not found; creating", namespace)
+        subprocess.run(["kubectl", "create", "ns", namespace], check=True, capture_output=True)
+
+
 def apply_yaml(path: Path) -> None:
     log.info("Applying %s", str(path))
     subprocess.run(["kubectl", "apply", "-f", str(path)], check=True, capture_output=True)
@@ -399,20 +623,7 @@ def delete_yaml(path: Path) -> None:
     subprocess.run(["kubectl", "delete", "-f", str(path), "--ignore-not-found"], check=True, capture_output=True)
 
 
-def create_namespace_if_missing(namespace: str) -> None:
-    rc = subprocess.run(["kubectl", "get", "ns", namespace], capture_output=True)
-    if rc.returncode != 0:
-        log.info("Namespace %s not found; creating", namespace)
-        subprocess.run(["kubectl", "create", "ns", namespace], check=True, capture_output=True)
-    else:
-        log.debug("Namespace %s already exists", namespace)
-
-
 def apply_secret_direct(cfg: dict[str, Any], secret_env: dict[str, str]) -> None:
-    """
-    Create or update the secret directly in-cluster without writing a manifest file.
-    Uses kubectl create secret generic ... --dry-run=client -o yaml | kubectl apply -f -
-    """
     if not secret_env:
         log.info("No secret values provided; skipping secret apply.")
         return
@@ -426,130 +637,149 @@ def apply_secret_direct(cfg: dict[str, Any], secret_env: dict[str, str]) -> None
 
 
 def delete_secret_direct(cfg: dict[str, Any]) -> None:
-    try:
-        subprocess.run(["kubectl", "delete", "secret", cfg["SECRET_NAME"], "-n", cfg["NAMESPACE"], "--ignore-not-found"], check=True, capture_output=True)
-        log.info("Deleted secret")
-    except subprocess.CalledProcessError:
-        log.warning("Failed to delete secret")
+    subprocess.run(
+        ["kubectl", "delete", "secret", cfg["SECRET_NAME"], "-n", cfg["NAMESPACE"], "--ignore-not-found"],
+        check=False,
+        capture_output=True,
+    )
+    log.info("Deleted secret if it existed")
+
+
+def collect_secret_env() -> dict[str, str]:
+    secret_env: dict[str, str] = {}
+    for key in ("QDRANT_API_KEY", "SESSION_SECRET", "ZITADEL_CLIENT_SECRET", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"):
+        value = os.getenv(key, "").strip()
+        if value:
+            if key in {"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"} and _env_bool("USE_IAM", DEFAULTS["USE_IAM"]):
+                continue
+            secret_env[key] = value
+    return secret_env
 
 
 def generate_manifests(cfg: dict[str, Any], secret_env: dict[str, str], dry_run: bool = False, verbose: bool = False) -> str | None:
     manifests_dir: Path = cfg["MANIFESTS_DIR"]
     ensure_dir(manifests_dir)
-    inputs_hash = canonical_inputs_hash({**cfg, "secret_keys": sorted(secret_env.keys())})
+
+    secret_keys_hash = sha256_secret_keys(secret_env)
+    docs_for_hash = [
+        {"serviceaccount": cfg["SERVICE_ACCOUNT_NAME"], "namespace": cfg["NAMESPACE"]},
+        {"configmap": _configmap_data(cfg["APP_ENV"])},
+        {"deployment": cfg["DEPLOYMENT_NAME"], "image": cfg["IMAGE"], "replicas": cfg["REPLICAS"], "secret_keys_hash": secret_keys_hash},
+        {"service": cfg["SERVICE_NAME"], "port": cfg["CONTAINER_PORT"]},
+    ]
+    inputs_hash = canonical_inputs_hash({"docs": docs_for_hash, "secret_keys_hash": secret_keys_hash, "cfg": cfg})
     state_dir = manifests_dir / cfg["STATE_DIRNAME"]
     ensure_dir(state_dir)
+
     existing: str | None = None
-    try:
-        inputs_path = state_dir / "inputs.sha256"
-        if inputs_path.exists():
+    inputs_path = state_dir / "inputs.sha256"
+    if inputs_path.exists():
+        try:
             existing = inputs_path.read_text(encoding="utf-8").strip()
-    except Exception:
-        existing = None
+        except Exception:
+            existing = None
+
     if existing == inputs_hash and not dry_run:
         log.info("No changes detected; skipping manifest generation.")
         return None
 
     sa_doc = build_service_account_doc(cfg)
     cm_doc = build_configmap_doc(cfg)
-    deployment_doc = build_deployment_doc(cfg, secret_env)
-    service_doc = build_service_doc(cfg)
+    sec_doc = build_secret_doc(cfg)
+    dep_doc = build_deployment_doc(cfg, has_secret=bool(sec_doc))
+    svc_doc = build_service_doc(cfg)
     pdb_doc = build_pdb_doc(cfg)
 
     write_yaml_atomic(cfg["FILES"]["serviceaccount"], sa_doc)
     write_yaml_atomic(cfg["FILES"]["configmap"], cm_doc)
-    write_yaml_atomic(cfg["FILES"]["deployment"], deployment_doc)
-    write_yaml_atomic(cfg["FILES"]["service"], service_doc)
+    if sec_doc is not None:
+        write_yaml_atomic(cfg["FILES"]["secret"], sec_doc)
+    elif cfg["FILES"]["secret"].exists():
+        try:
+            cfg["FILES"]["secret"].unlink()
+        except Exception:
+            log.debug("Could not remove stale secret manifest", exc_info=True)
+    write_yaml_atomic(cfg["FILES"]["deployment"], dep_doc)
+    write_yaml_atomic(cfg["FILES"]["service"], svc_doc)
     if pdb_doc:
         write_yaml_atomic(cfg["FILES"]["pdb"], pdb_doc)
+    elif cfg["FILES"]["pdb"].exists():
+        try:
+            cfg["FILES"]["pdb"].unlink()
+        except Exception:
+            log.debug("Could not remove stale pdb manifest", exc_info=True)
 
-    (state_dir / "inputs.sha256").write_text(inputs_hash + "\n", encoding="utf-8")
+    inputs_path.write_text(inputs_hash + "\n", encoding="utf-8")
     log.info("Manifests written to %s (inputs_hash=%s)", str(manifests_dir), inputs_hash)
+
     if verbose:
-        log.debug("Deployment manifest head:\n%s", "\n".join(yaml.safe_dump(deployment_doc, sort_keys=False).splitlines()[:120]))
+        log.debug("ConfigMap data keys: %s", sorted(cm_doc["data"].keys()))
+        if sec_doc:
+            log.debug("Secret keys: %s", sorted(sec_doc["stringData"].keys()))
     return inputs_hash
 
 
 def apply_to_cluster(cfg: dict[str, Any], secret_env: dict[str, str], dry_run: bool = False, verbose: bool = False) -> None:
-    kubectl = shutil.which("kubectl")
-    if not kubectl:
+    if not shutil.which("kubectl"):
         log.error("kubectl not found; aborting apply.")
-        raise SystemExit(2) from None
+        raise SystemExit(2)
 
     inputs_hash = generate_manifests(cfg, secret_env, dry_run=dry_run, verbose=verbose)
     if dry_run:
         log.info("Dry-run requested; skipping apply actions.")
         return
+
     if inputs_hash is None:
         log.info("No manifest changes; still proceeding with secret apply if requested.")
-    try:
-        create_namespace_if_missing(cfg["NAMESPACE"])
-    except subprocess.CalledProcessError as exc:
-        log.error("Failed to ensure namespace %s: %s", cfg["NAMESPACE"], exc)
-        raise SystemExit(2) from None
 
-    # Apply non-secret manifests so ArgoCD can pick them up (we still apply them here for local convenience)
+    create_namespace_if_missing(cfg["NAMESPACE"])
+
     try:
         apply_yaml(cfg["FILES"]["serviceaccount"])
         apply_yaml(cfg["FILES"]["configmap"])
+        if cfg["FILES"]["secret"].exists():
+            apply_yaml(cfg["FILES"]["secret"])
         apply_yaml(cfg["FILES"]["deployment"])
         apply_yaml(cfg["FILES"]["service"])
-        if (cfg["FILES"]["pdb"]).exists():
+        if cfg["FILES"]["pdb"].exists():
             apply_yaml(cfg["FILES"]["pdb"])
     except subprocess.CalledProcessError as exc:
         log.error("kubectl apply failed: %s", exc)
         raise SystemExit(2) from None
 
-    log.info("Manifests applied (ArgoCD will manage rollout).")
+    log.info("Manifests applied.")
 
 
 def delete_manifests(cfg: dict[str, Any]) -> None:
-    def _delete(dir_path: Path, state_dirname: str) -> None:
-        if not dir_path or str(dir_path).strip() in ("", "/", "."):
-            return
-        if not dir_path.exists():
-            log.info("No manifests found at %s", str(dir_path))
-            return
-        try:
-            subprocess.run(["kubectl", "delete", "-f", str(dir_path), "--ignore-not-found=true"], check=False, capture_output=True)
-        except Exception:
-            log.debug("kubectl delete failed for %s", dir_path, exc_info=True)
-        for p in sorted(dir_path.glob("*")):
+    for path in (cfg["FILES"]["serviceaccount"], cfg["FILES"]["configmap"], cfg["FILES"]["secret"], cfg["FILES"]["deployment"], cfg["FILES"]["service"], cfg["FILES"]["pdb"]):
+        if path.exists():
             try:
-                if p.is_file():
-                    p.unlink()
+                delete_yaml(path)
             except Exception:
-                log.debug("Failed to remove %s", p, exc_info=True)
-        state_dir = dir_path / state_dirname
-        try:
-            if state_dir.exists():
-                for p in sorted(state_dir.glob("*")):
+                log.debug("Failed to delete %s", path, exc_info=True)
+
+    try:
+        if cfg["MANIFESTS_DIR"].exists():
+            for p in sorted(cfg["MANIFESTS_DIR"].glob("*")):
+                if p.is_file():
                     try:
-                        if p.is_file():
-                            p.unlink()
+                        p.unlink()
                     except Exception:
                         log.debug("Failed to remove %s", p, exc_info=True)
-                state_dir.rmdir()
-        except Exception:
-            log.debug("Failed to cleanup state dir %s", state_dir, exc_info=True)
-
-    manifests_dir = Path(os.getenv("MANIFESTS_DIR", str(MANIFESTS_DIR)))
-    _delete(manifests_dir, os.getenv("STATE_DIRNAME", STATE_DIRNAME))
-
-
-def collect_secret_env() -> dict[str, str]:
-    secret_env: dict[str, str] = {}
-    qdrant_key = os.getenv("QDRANT_API_KEY", "").strip()
-    if qdrant_key:
-        secret_env["QDRANT_API_KEY"] = qdrant_key
-    if not _env_bool("USE_IAM", DEFAULTS["USE_IAM"]):
-        aws_key = os.getenv("AWS_ACCESS_KEY_ID", "").strip()
-        aws_secret = os.getenv("AWS_SECRET_ACCESS_KEY", "").strip()
-        if aws_key:
-            secret_env["AWS_ACCESS_KEY_ID"] = aws_key
-        if aws_secret:
-            secret_env["AWS_SECRET_ACCESS_KEY"] = aws_secret
-    return secret_env
+            state_dir = cfg["MANIFESTS_DIR"] / cfg["STATE_DIRNAME"]
+            if state_dir.exists():
+                for p in sorted(state_dir.glob("*")):
+                    if p.is_file():
+                        try:
+                            p.unlink()
+                        except Exception:
+                            log.debug("Failed to remove %s", p, exc_info=True)
+                try:
+                    state_dir.rmdir()
+                except Exception:
+                    log.debug("Failed to remove state dir %s", state_dir, exc_info=True)
+    except Exception:
+        log.debug("Manifest cleanup had errors", exc_info=True)
 
 
 def parse_args(argv: list[str] | None = None) -> Any:
@@ -558,10 +788,11 @@ def parse_args(argv: list[str] | None = None) -> Any:
     p = argparse.ArgumentParser(description="Generate and manage Retriever manifests and secrets.")
     group = p.add_mutually_exclusive_group(required=True)
     group.add_argument("--apply-secrets", action="store_true", help="Create/update secrets in-cluster (no secret files written).")
-    group.add_argument("--write", action="store_true", help="Write manifests to disk (no secrets).")
-    group.add_argument("--delete", action="store_true", help="Delete manifests from disk and optionally delete in-cluster secret.")
+    group.add_argument("--write", action="store_true", help="Write manifests to disk (no cluster apply).")
+    group.add_argument("--apply", action="store_true", help="Write manifests and apply them to cluster.")
+    group.add_argument("--delete", action="store_true", help="Delete manifests from disk and cluster files.")
     p.add_argument("--delete-secret", action="store_true", help="When used with --delete, also delete the in-cluster secret.")
-    p.add_argument("--dry-run", action="store_true", help="Do not apply anything to cluster; only generate files when used with --write.")
+    p.add_argument("--dry-run", action="store_true", help="Do not apply anything to cluster; only generate files when used with --write or --apply.")
     p.add_argument("--verbose", action="store_true", help="Enable verbose debug output.")
     return p.parse_args(argv or sys.argv[1:])
 
@@ -571,15 +802,21 @@ def main(argv: list[str] | None = None) -> int:
     cfg = load_config()
     if args.verbose:
         log.setLevel(logging.DEBUG)
+
     secret_env = collect_secret_env()
 
     try:
         if args.write:
             generate_manifests(cfg, secret_env, dry_run=args.dry_run, verbose=args.verbose)
             return 0
+
+        if args.apply:
+            apply_to_cluster(cfg, secret_env, dry_run=args.dry_run, verbose=args.verbose)
+            return 0
+
         if args.apply_secrets:
             if cfg["USE_IAM"]:
-                log.info("USE_IAM=true; skipping secret apply. If you intended to apply secrets, set USE_IAM=false.")
+                log.info("USE_IAM=true; skipping secret apply.")
                 return 0
             if not secret_env:
                 log.warning("No secret values found in environment; nothing to apply.")
@@ -590,13 +827,15 @@ def main(argv: list[str] | None = None) -> int:
             create_namespace_if_missing(cfg["NAMESPACE"])
             apply_secret_direct(cfg, secret_env)
             return 0
+
         if args.delete:
-            # delete manifests and optionally secret
             delete_manifests(cfg)
             if args.delete_secret:
                 delete_secret_direct(cfg)
             return 0
+
         return 1
+
     except subprocess.CalledProcessError as exc:
         log.error("kubectl command failed: %s", exc)
         return exc.returncode or 1

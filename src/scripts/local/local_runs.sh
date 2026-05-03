@@ -126,13 +126,14 @@ bash src/infra/core/argo_setup.sh --rollout
 kubectl create ns argocd || true && bash src/infra/core/signoz_setup.sh --apply-secrets
 git add . && git commit -m "new" && git push origin main
 
-export ZITADEL_MASTERKEY=$ZITADEL_MASTERKEY
-export ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD=$ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD
-export ZITADEL_DATABASE_POSTGRES_DSN="postgresql://$(kubectl -n default get secret postgres-cluster-app -o jsonpath='{.data.username}' | base64 -d):$(kubectl -n default get secret postgres-cluster-app -o jsonpath='{.data.password}' | base64 -d)@postgres-cluster-rw.default.svc.cluster.local:5432/zitadel_db?sslmode=disable"
 # kubectl run psql-fix --rm -it --image=postgres -- bash -c "psql \"postgresql://app:$(kubectl get secret postgres-cluster-app -o jsonpath='{.data.password}' | base64 -d)@postgres-cluster-rw.default.svc.cluster.local:5432/zitadel_db?sslmode=disable\" -c 'ALTER ROLE app WITH SUPERUSER;'"
 # kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
 # kubectl port-forward service/argocd-server -n argocd 8080:443 argocd 8080:443
 
+
+export ZITADEL_MASTERKEY=$ZITADEL_MASTERKEY
+export ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD=$ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD
+export ZITADEL_DATABASE_POSTGRES_DSN="postgresql://$(kubectl -n default get secret postgres-cluster-app -o jsonpath='{.data.username}' | base64 -d):$(kubectl -n default get secret postgres-cluster-app -o jsonpath='{.data.password}' | base64 -d)@postgres-cluster-rw.default.svc.cluster.local:5432/zitadel_db?sslmode=disable"
 kubectl patch application zitadel -n argocd -p '{"metadata":{"finalizers":null}}' --type=merge
 kubectl delete pods -n inference -l app.kubernetes.io/name=zitadel
 kubectl delete jobs -n inference -l app.kubernetes.io/name=zitadel

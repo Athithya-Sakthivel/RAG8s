@@ -21,10 +21,6 @@ spec:
           repository: ghcr.io/zitadel/zitadel
           tag: v4.13.0
           pullPolicy: IfNotPresent
-        login:
-          enabled: false
-          ingress:
-            enabled: false
         zitadel:
           masterkeySecretName: zitadel-masterkey
           configSecretName: zitadel-config-secret
@@ -76,6 +72,8 @@ spec:
                     values:
                     - zitadel
                 topologyKey: kubernetes.io/hostname
+        login:
+          enabled: true
   destination:
     server: https://kubernetes.default.svc
     namespace: inference

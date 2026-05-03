@@ -38,15 +38,16 @@ DEFAULT_DB_DSN = (os.environ.get("ZITADEL_DATABASE_POSTGRES_DSN") or "").strip()
 DEFAULT_INSTANCE_NAME = (os.environ.get("ZITADEL_INSTANCE_NAME", "athithya") or "athithya").strip() or "athithya"
 DEFAULT_ADMIN_EMAIL = (os.environ.get("ZITADEL_ADMIN_EMAIL", f"admin@{DOMAIN}") or f"admin@{DOMAIN}").strip() or f"admin@{DOMAIN}"
 
-DEFAULT_REPLICAS = int(os.environ.get("ZITADEL_REPLICAS", "2"))
+DEFAULT_REPLICAS = int(os.environ.get("ZITADEL_REPLICAS", "1"))
 DEFAULT_CPU_REQUESTS = (os.environ.get("ZITADEL_CPU_REQUESTS", "200m") or "200m").strip() or "200m"
 DEFAULT_CPU_LIMITS = (os.environ.get("ZITADEL_CPU_LIMITS", "1000m") or "1000m").strip() or "1000m"
 DEFAULT_MEMORY_REQUESTS = (os.environ.get("ZITADEL_MEMORY_REQUESTS", "256Mi") or "256Mi").strip() or "256Mi"
 DEFAULT_MEMORY_LIMITS = (os.environ.get("ZITADEL_MEMORY_LIMITS", "1Gi") or "1Gi").strip() or "1Gi"
-DEFAULT_LOGIN_ENABLED = (os.environ.get("ZITADEL_LOGIN_ENABLED", "false") or "false").strip().lower() in {"1", "true", "yes", "y", "on"}
-DEFAULT_INGRESS_ENABLED = (os.environ.get("ZITADEL_INGRESS_ENABLED", "false") or "false").strip().lower() in {"1", "true", "yes", "y", "on"}
-DEFAULT_LOGIN_INGRESS_ENABLED = (os.environ.get("ZITADEL_LOGIN_INGRESS_ENABLED", "false") or "false").strip().lower() in {"1", "true", "yes", "y", "on"}
-VERBOSE = (os.environ.get("VERBOSE", "0") or "0").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+DEFAULT_LOGIN_ENABLED = os.environ.get("ZITADEL_LOGIN_ENABLED", "true").strip().lower() in {"1", "true", "yes", "y", "on"}
+DEFAULT_INGRESS_ENABLED = os.environ.get("ZITADEL_INGRESS_ENABLED", "false").strip().lower() in {"1", "true", "yes", "y", "on"}
+DEFAULT_LOGIN_INGRESS_ENABLED = os.environ.get("ZITADEL_LOGIN_INGRESS_ENABLED", "false").strip().lower() in {"1", "true", "yes", "y", "on"}
+VERBOSE = os.environ.get("VERBOSE", "0").strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 class Dumper(yaml.SafeDumper):
@@ -121,6 +122,13 @@ def env_int(name: str, default: int) -> int:
         fatal(f"{name} must be an integer")
 
 
+def env_bool(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 def require_cmd(name: str) -> None:
     if which(name) is None:
         fatal(f"Required command not found: {name}")
@@ -172,9 +180,9 @@ def load_config() -> Config:
         cpu_limits=env("ZITADEL_CPU_LIMITS", DEFAULT_CPU_LIMITS),
         memory_requests=env("ZITADEL_MEMORY_REQUESTS", DEFAULT_MEMORY_REQUESTS),
         memory_limits=env("ZITADEL_MEMORY_LIMITS", DEFAULT_MEMORY_LIMITS),
-        login_enabled=DEFAULT_LOGIN_ENABLED,
-        ingress_enabled=DEFAULT_INGRESS_ENABLED,
-        login_ingress_enabled=DEFAULT_LOGIN_INGRESS_ENABLED,
+        login_enabled=env_bool("ZITADEL_LOGIN_ENABLED", DEFAULT_LOGIN_ENABLED),
+        ingress_enabled=env_bool("ZITADEL_INGRESS_ENABLED", DEFAULT_INGRESS_ENABLED),
+        login_ingress_enabled=env_bool("ZITADEL_LOGIN_INGRESS_ENABLED", DEFAULT_LOGIN_INGRESS_ENABLED),
     )
 
 
@@ -204,7 +212,7 @@ def validate(cfg: Config) -> None:
         fatal("ZITADEL_ADMIN_EMAIL cannot be empty")
 
 
-def render_runtime_config(cfg: Config) -> dict[str, Any]:
+def render_runtime_config() -> dict[str, Any]:
     return {
         "ExternalDomain": AUTH_HOST,
         "ExternalPort": 443,
@@ -244,24 +252,18 @@ def render_secret_config(cfg: Config) -> dict[str, Any]:
 
 
 def render_values(cfg: Config) -> dict[str, Any]:
-    return {
+    values: dict[str, Any] = {
         "replicaCount": cfg.replicas,
         "image": {
             "repository": IMAGE_REPOSITORY,
             "tag": IMAGE_TAG,
             "pullPolicy": "IfNotPresent",
         },
-        "login": {
-            "enabled": cfg.login_enabled,
-            "ingress": {
-                "enabled": cfg.login_ingress_enabled,
-            },
-        },
         "zitadel": {
             "masterkeySecretName": MASTERKEY_SECRET_NAME,
             "configSecretName": CONFIG_SECRET_NAME,
             "configSecretKey": "config-yaml",
-            "configmapConfig": render_runtime_config(cfg),
+            "configmapConfig": render_runtime_config(),
         },
         "ingress": {
             "enabled": cfg.ingress_enabled,
@@ -323,6 +325,16 @@ def render_values(cfg: Config) -> dict[str, Any]:
             }
         },
     }
+
+    if cfg.login_enabled:
+        values["login"] = {
+            "enabled": True,
+            "ingress": {
+                "enabled": cfg.login_ingress_enabled,
+            },
+        }
+
+    return values
 
 
 def render_secrets(cfg: Config) -> list[dict[str, Any]]:
