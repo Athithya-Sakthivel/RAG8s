@@ -89,11 +89,11 @@ spec:
         - name: LOG_LEVEL
           value: WARNING
         - name: ENABLE_OTEL_TRACES
-          value: 'false'
+          value: 'true'
         - name: ENABLE_OTEL_METRICS
-          value: 'false'
+          value: 'true'
         - name: ENABLE_OTEL_LOGS
-          value: 'false'
+          value: 'true'
         - name: OTEL_EXPORTER_OTLP_ENDPOINT
           value: signoz-otel-collector.signoz.svc.cluster.local:4317
         - name: QDRANT_ON_DISK_PAYLOAD

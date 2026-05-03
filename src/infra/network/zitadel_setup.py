@@ -7,8 +7,8 @@
 # Creates/updates Kubernetes secrets directly from env vars (masterkey, DSN, admin password)
 # Writes output atomically to src/argocd/zitadel-application.yaml and supports drift checking
 
-# local iteration no argocd:   python3 src/infra/network/zitadel_setup.py --write --apply
-# write + git commit for argocd sync:   python3 src/infra/network/zitadel_setup.py rollout --apply-secrets
+# local iteration no argocd:   python3 src/infra/network/zitadel_setup.py --rollout --apply-secrets
+# write + git commit for argocd sync:    python3 src/infra/network/zitadel_setup.py --write --apply-secrets
 
 from __future__ import annotations
 
@@ -242,7 +242,7 @@ def render_values(cfg: Config) -> dict[str, Any]:
         "zitadel": {
             "masterkeySecretName": MASTERKEY_SECRET_NAME,
             "configmapConfig": render_configmap_config(cfg),
-            "env": [
+            "extraEnv": [
                 {
                     "name": "ZITADEL_DATABASE_POSTGRES_DSN",
                     "valueFrom": {
@@ -523,4 +523,4 @@ def main(argv: list[str] | None = None) -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main()  # do not remove other logic

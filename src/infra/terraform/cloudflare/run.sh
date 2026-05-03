@@ -40,8 +40,8 @@ export TF_VAR_api_host="${TF_VAR_api_host:-${API_HOST:-api.${TF_VAR_domain}}}"
 export TF_VAR_auth_host="${TF_VAR_auth_host:-${AUTH_HOST:-auth.${TF_VAR_domain}}}"
 export TF_VAR_enable_always_use_https="${TF_VAR_enable_always_use_https:-true}"
 export TF_VAR_enable_tls_1_3="${TF_VAR_enable_tls_1_3:-true}"
-export TF_VAR_enable_bot_fight_mode="${TF_VAR_enable_bot_fight_mode:-true}"
-export TF_VAR_enable_js_detections="${TF_VAR_enable_js_detections:-true}"
+export TF_VAR_enable_bot_fight_mode="${TF_VAR_enable_bot_fight_mode:-false}"
+export TF_VAR_enable_js_detections="${TF_VAR_enable_js_detections:-false}"
 export TF_IN_AUTOMATION=1
 export TF_INPUT=0
 

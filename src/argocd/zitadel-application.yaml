@@ -44,7 +44,7 @@ spec:
                     Verified: true
                   Password: zitadeladmin@144
                   PasswordChangeRequired: true
-          env:
+          extraEnv:
           - name: ZITADEL_DATABASE_POSTGRES_DSN
             valueFrom:
               secretKeyRef:

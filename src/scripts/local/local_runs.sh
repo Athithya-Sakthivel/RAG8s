@@ -93,7 +93,6 @@ curl -N http://localhost:8203/generate/stream \
 
 
 
-rm -rf src/manifests/dense-service src/manifests/sparse-service src/manifests/retriever src/manifests/reranker-service
 make local-cluster
 python3 src/infra/rag/qdrant_service.py --rollout
 export PER_POD=true
@@ -107,9 +106,26 @@ python3 src/infra/rag/retriever_service.py --write
 python3 src/infra/rag/reranker_service.py --write
 python3 src/infra/rag/sparse_service.py --generate
 python3 src/infra/rag/dense_service.py --dry-run
+
+
+python3 src/infra/network/zitadel_setup.py --write --apply-secrets
+export CLOUDFLARE_TUNNEL_TOKEN="$(tofu -chdir=src/infra/terraform/cloudflare output -raw cloudflare_tunnel_token)"
+export CLOUDFLARE_TUNNEL_NAME="$(tofu -chdir=src/infra/terraform/cloudflare output -raw cloudflare_tunnel_name)"
+export CLOUDFLARE_SECRET_NAME="cloudflared-token"
+export CLOUDFLARE_SECRET_KEY="token"
+export DOMAIN="athithya.site"
+python3 src/infra/network/cloudflared.py --write --apply-secrets
+
 find src/manifests -name "00-namespace.yaml" -delete
 git add . && git commit -m "argocd full sync" && git push origin main
 bash src/infra/core/argo_setup.sh --rollout
 
 # kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
 # kubectl port-forward service/argocd-server -n argocd 8080:443 argocd 8080:443
+
+aws s3 rm s3://s3-temp-bucket-mlsecops-681802563986/postgres_backups --recursive
+export K8S_CLUSTER=kind
+export PG_BACKUPS_S3_BUCKET=s3-temp-bucket-mlsecops-681802563986
+export PG_CLUSTER_ID=cnpg-cluster-kind
+export PG_SERVER_NAME=mlsecops
+make pg-cluster
