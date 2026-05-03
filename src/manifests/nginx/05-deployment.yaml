@@ -7,7 +7,7 @@ metadata:
     app.kubernetes.io/name: frontend-nginx
     app.kubernetes.io/component: frontend
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app.kubernetes.io/name: frontend-nginx
@@ -18,10 +18,13 @@ spec:
         app.kubernetes.io/name: frontend-nginx
         app.kubernetes.io/component: frontend
       annotations:
-        nginx/config-checksum: efce8a7c437935210ad07d632cf050f2f5ed7868aad2b8cf102c201fd04f17ae
+        nginx/config-checksum: 250b7f288387ad2b61349a2c53843173943c80b742224ab707e5c20223662474
     spec:
       serviceAccountName: frontend-nginx
+      automountServiceAccountToken: false
       terminationGracePeriodSeconds: 30
+      securityContext:
+        fsGroup: 101
       volumes:
       - name: nginx-config
         configMap:
@@ -33,7 +36,7 @@ spec:
         emptyDir: {}
       containers:
       - name: nginx
-        image: ghcr.io/athithya-sakthivel/frontend:2026-05-01-19-45--178fb2a@sha256:885d4316886316d1c1fdfbeedd2dfe94efda677eab5e55d90a526861a71c4627
+        image: ghcr.io/athithya-sakthivel/frontend:2026-05-02-07-05--02a4032@sha256:bec20a1a54e6ea49738dcac641a2c757d7f7af489f1f5ad7e00cb20133ac7185
         imagePullPolicy: IfNotPresent
         ports:
         - name: http
@@ -78,5 +81,3 @@ spec:
           capabilities:
             drop:
             - ALL
-      securityContext:
-        fsGroup: 101

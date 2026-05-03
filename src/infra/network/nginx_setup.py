@@ -6,23 +6,31 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
-import yaml
+try:
+    import yaml
+except Exception as exc:  # pragma: no cover
+    print("ERROR: PyYAML is required. Install with: pip install pyyaml", file=sys.stderr)
+    raise SystemExit(2) from exc
 
-ROOT = Path(__file__).resolve().parents[2]
-NGINX_CONF_PATH = Path(__file__).resolve().with_name("nginx.conf")
-OUT_DIR = ROOT / "manifests" / "nginx"
+
+ROOT = Path(__file__).resolve().parents[3]
+NGINX_CONF_PATH = ROOT / "src" / "infra" / "network" / "nginx.conf"
+OUT_DIR = ROOT / "src" / "manifests" / "nginx"
 
 NAMESPACE = os.getenv("NAMESPACE", "inference").strip() or "inference"
-DEFAULT_FRONTEND_IMAGE = "ghcr.io/athithya-sakthivel/frontend:2026-05-01-19-45--178fb2a@sha256:885d4316886316d1c1fdfbeedd2dfe94efda677eab5e55d90a526861a71c4627"
-FRONTEND_IMAGE = os.getenv("FRONTEND_IMAGE", DEFAULT_FRONTEND_IMAGE).strip() or DEFAULT_FRONTEND_IMAGE
+FRONTEND_IMAGE = os.getenv(
+    "FRONTEND_IMAGE",
+    "ghcr.io/athithya-sakthivel/frontend:2026-05-02-07-05--02a4032@sha256:bec20a1a54e6ea49738dcac641a2c757d7f7af489f1f5ad7e00cb20133ac7185",
+).strip()
 SERVICE_NAME = os.getenv("SERVICE_NAME", "frontend-nginx").strip() or "frontend-nginx"
 SERVICE_ACCOUNT = os.getenv("SERVICE_ACCOUNT", "frontend-nginx").strip() or "frontend-nginx"
 CONFIGMAP_NAME = os.getenv("CONFIGMAP_NAME", "frontend-nginx-config").strip() or "frontend-nginx-config"
 
-REPLICAS = int(os.getenv("REPLICAS", "1"))
+REPLICAS = int(os.getenv("REPLICAS", "2"))
 SERVICE_PORT = int(os.getenv("SERVICE_PORT", "8080"))
 CONTAINER_PORT = int(os.getenv("CONTAINER_PORT", "8080"))
 
@@ -31,12 +39,30 @@ APP_HOST = os.getenv("APP_HOST", DOMAIN).strip().rstrip(".") or DOMAIN
 API_HOST = os.getenv("API_HOST", f"api.{DOMAIN}").strip().rstrip(".") or f"api.{DOMAIN}"
 AUTH_HOST = os.getenv("AUTH_HOST", f"auth.{DOMAIN}").strip().rstrip(".") or f"auth.{DOMAIN}"
 
+ZITADEL_NAMESPACE = os.getenv("ZITADEL_NAMESPACE", "zitadel").strip() or "zitadel"
+ZITADEL_SERVICE_NAME = os.getenv("ZITADEL_SERVICE_NAME", "zitadel").strip() or "zitadel"
+ZITADEL_SERVICE_PORT = int(os.getenv("ZITADEL_SERVICE_PORT", "8080"))
+
 STARTUP_FAILURE_THRESHOLD = int(os.getenv("STARTUP_FAILURE_THRESHOLD", "36"))
 STARTUP_PERIOD_SECONDS = int(os.getenv("STARTUP_PERIOD_SECONDS", "5"))
 READINESS_INITIAL_DELAY_SECONDS = int(os.getenv("READINESS_INITIAL_DELAY_SECONDS", "5"))
 READINESS_PERIOD_SECONDS = int(os.getenv("READINESS_PERIOD_SECONDS", "5"))
 LIVENESS_INITIAL_DELAY_SECONDS = int(os.getenv("LIVENESS_INITIAL_DELAY_SECONDS", "15"))
 LIVENESS_PERIOD_SECONDS = int(os.getenv("LIVENESS_PERIOD_SECONDS", "10"))
+
+FORBIDDEN_TOKENS = (
+    "$escaped_request_uri",
+    "$escaped_uri",
+    "escaped_request_uri",
+    "escaped_uri",
+    "auth_request",
+    "outpost.goauthentik.io",
+    "goauthentik",
+    "authentik",
+    "Authentik",
+    "X-authentik-",
+    "x-authentik-",
+)
 
 
 class Dumper(yaml.SafeDumper):
@@ -51,13 +77,14 @@ def _str_representer(dumper: yaml.SafeDumper, data: str):
 Dumper.add_representer(str, _str_representer)
 
 
-def log(*parts: object) -> None:
-    print(*parts, flush=True)
-
-
-def fatal(msg: str, code: int = 2) -> None:
+def fatal(msg: str, code: int = 2) -> NoReturn:
     print(f"ERROR: {msg}", file=sys.stderr)
     raise SystemExit(code)
+
+
+def require(condition: bool, message: str) -> None:
+    if not condition:
+        fatal(message)
 
 
 def to_yaml(obj: Any) -> str:
@@ -79,23 +106,35 @@ def sha256_obj(obj: Any) -> str:
 
 def safe_write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(content, encoding="utf-8")
-    tmp.replace(path)
+    with tempfile.NamedTemporaryFile(
+        "w",
+        encoding="utf-8",
+        delete=False,
+        dir=str(path.parent),
+        prefix=f".{path.name}.",
+    ) as tmp:
+        tmp.write(content)
+        tmp_path = Path(tmp.name)
+    os.replace(tmp_path, path)
 
 
 def run(cmd: list[str], stdin: str | None = None) -> None:
     subprocess.run(cmd, input=stdin, text=True, check=True)
 
 
-def require(condition: bool, message: str) -> None:
-    if not condition:
-        fatal(message)
-
-
 def load_nginx_conf() -> str:
     require(NGINX_CONF_PATH.exists(), f"nginx.conf not found at {NGINX_CONF_PATH}")
     return NGINX_CONF_PATH.read_text(encoding="utf-8")
+
+
+def validate_nginx_conf(nginx_conf: str) -> None:
+    bad = [token for token in FORBIDDEN_TOKENS if token in nginx_conf]
+    require(not bad, f"nginx.conf contains forbidden token(s): {', '.join(bad)}")
+    require("listen 8080;" in nginx_conf, "nginx.conf must listen on 8080")
+    require("server_name athithya.site api.athithya.site;" in nginx_conf, "nginx.conf must serve athithya.site and api.athithya.site")
+    require("location ^~ /api/" in nginx_conf, "nginx.conf must proxy /api/")
+    require("proxy_pass $retriever_origin;" in nginx_conf, "nginx.conf must proxy to retriever_origin")
+    require("try_files $uri $uri/ /index.html;" in nginx_conf, "nginx.conf must serve the SPA index fallback")
 
 
 def render_serviceaccount(namespace: str) -> dict[str, Any]:
@@ -193,15 +232,17 @@ def render_deployment(namespace: str, image: str, replicas: int, checksum: str) 
                 },
                 "spec": {
                     "serviceAccountName": SERVICE_ACCOUNT,
+                    "automountServiceAccountToken": False,
                     "terminationGracePeriodSeconds": 30,
+                    "securityContext": {
+                        "fsGroup": 101,
+                    },
                     "volumes": [
                         {
                             "name": "nginx-config",
                             "configMap": {
                                 "name": CONFIGMAP_NAME,
-                                "items": [
-                                    {"key": "nginx.conf", "path": "nginx.conf"},
-                                ],
+                                "items": [{"key": "nginx.conf", "path": "nginx.conf"}],
                             },
                         },
                         {
@@ -263,9 +304,6 @@ def render_deployment(namespace: str, image: str, replicas: int, checksum: str) 
                             },
                         }
                     ],
-                    "securityContext": {
-                        "fsGroup": 101,
-                    },
                 },
             },
         },
@@ -273,6 +311,9 @@ def render_deployment(namespace: str, image: str, replicas: int, checksum: str) 
 
 
 def render_routes_reference() -> dict[str, Any]:
+    frontend_origin = f"http://{SERVICE_NAME}.{NAMESPACE}.svc.cluster.local:{SERVICE_PORT}"
+    zitadel_origin = f"http://{ZITADEL_SERVICE_NAME}.{ZITADEL_NAMESPACE}.svc.cluster.local:{ZITADEL_SERVICE_PORT}"
+
     return {
         "apiVersion": "v1",
         "kind": "ConfigMap",
@@ -285,22 +326,17 @@ def render_routes_reference() -> dict[str, Any]:
             },
         },
         "data": {
-            "routes.txt": "\n".join(
+            "routes.yaml": "\n".join(
                 [
-                    f"frontend host: https://{APP_HOST}",
-                    f"api host: https://{API_HOST}",
-                    f"auth host: https://{AUTH_HOST}",
-                    "public: /healthz",
-                    "public: /readyz",
-                    "public: /auth/login",
-                    "public: /auth/logout",
-                    "public: /outpost.goauthentik.io/*",
-                    "protected: /",
-                    "protected: /api/*",
-                    "protected: /generate",
-                    "protected: /generate/stream",
-                    "protected: /stream",
-                    "protected: /retrieve",
+                    "tunnel: default-tunnel-1",
+                    "ingress:",
+                    f"  - hostname: {AUTH_HOST}",
+                    f"    service: {zitadel_origin}",
+                    f"  - hostname: {API_HOST}",
+                    f"    service: {frontend_origin}",
+                    f"  - hostname: {APP_HOST}",
+                    f"    service: {frontend_origin}",
+                    "  - service: http_status:404",
                 ]
             )
             + "\n",
@@ -310,29 +346,33 @@ def render_routes_reference() -> dict[str, Any]:
 
 def build() -> tuple[list[dict[str, Any]], str]:
     require(bool(FRONTEND_IMAGE), "FRONTEND_IMAGE is required")
+    require(bool(DOMAIN), "DOMAIN is required")
     require(REPLICAS > 0, "REPLICAS must be greater than 0")
     require(SERVICE_PORT > 0, "SERVICE_PORT must be greater than 0")
     require(CONTAINER_PORT > 0, "CONTAINER_PORT must be greater than 0")
+    require(SERVICE_PORT == CONTAINER_PORT, "SERVICE_PORT and CONTAINER_PORT must match")
 
     nginx_conf = load_nginx_conf()
-    configmap = render_configmap(NAMESPACE, nginx_conf)
+    validate_nginx_conf(nginx_conf)
 
-    checksum_source = {
-        "namespace": NAMESPACE,
-        "image": FRONTEND_IMAGE,
-        "replicas": REPLICAS,
-        "service_port": SERVICE_PORT,
-        "container_port": CONTAINER_PORT,
-        "service_name": SERVICE_NAME,
-        "service_account": SERVICE_ACCOUNT,
-        "configmap_name": CONFIGMAP_NAME,
-        "domain": DOMAIN,
-        "app_host": APP_HOST,
-        "api_host": API_HOST,
-        "auth_host": AUTH_HOST,
-        "nginx_conf": nginx_conf,
-    }
-    checksum = sha256_obj(checksum_source)
+    configmap = render_configmap(NAMESPACE, nginx_conf)
+    checksum = sha256_obj(
+        {
+            "namespace": NAMESPACE,
+            "image": FRONTEND_IMAGE,
+            "replicas": REPLICAS,
+            "service_port": SERVICE_PORT,
+            "container_port": CONTAINER_PORT,
+            "service_name": SERVICE_NAME,
+            "service_account": SERVICE_ACCOUNT,
+            "configmap_name": CONFIGMAP_NAME,
+            "domain": DOMAIN,
+            "app_host": APP_HOST,
+            "api_host": API_HOST,
+            "auth_host": AUTH_HOST,
+            "nginx_conf": nginx_conf,
+        }
+    )
 
     docs = [
         render_serviceaccount(NAMESPACE),
@@ -347,15 +387,15 @@ def build() -> tuple[list[dict[str, Any]], str]:
 
 def write_manifests(docs: list[dict[str, Any]]) -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    safe_write(OUT_DIR / "02-serviceaccount.yaml", to_yaml(docs[0]))
-    safe_write(OUT_DIR / "03-configmap.yaml", to_yaml(docs[1]))
-    safe_write(OUT_DIR / "04-service.yaml", to_yaml(docs[2]))
-    safe_write(OUT_DIR / "05-deployment.yaml", to_yaml(docs[3]))
-    safe_write(OUT_DIR / "06-routes-reference.yaml", to_yaml(docs[4]))
+    safe_write(OUT_DIR / "02-serviceaccount.yaml", to_yaml(docs[0]).rstrip() + "\n")
+    safe_write(OUT_DIR / "03-configmap.yaml", to_yaml(docs[1]).rstrip() + "\n")
+    safe_write(OUT_DIR / "04-service.yaml", to_yaml(docs[2]).rstrip() + "\n")
+    safe_write(OUT_DIR / "05-deployment.yaml", to_yaml(docs[3]).rstrip() + "\n")
+    safe_write(OUT_DIR / "06-routes-reference.yaml", to_yaml(docs[4]).rstrip() + "\n")
 
 
 def apply_rollout(docs: list[dict[str, Any]]) -> None:
-    payload = "\n---\n".join(to_yaml(d).rstrip() for d in docs[:4]) + "\n"
+    payload = "\n---\n".join(to_yaml(d).rstrip() for d in docs) + "\n"
     run(["kubectl", "apply", "-f", "-"], stdin=payload)
 
 
@@ -388,6 +428,7 @@ def main() -> None:
         return
 
     docs, rendered = build()
+
     if not args.rollout:
         sys.stdout.write(rendered)
         return

@@ -20,10 +20,9 @@ The first deploy creates the PostgreSQL cluster and the base databases.
 
 ```bash
 export K8S_CLUSTER=kind
-export PG_BACKUPS_S3_BUCKET=e2e-mlops-data-681802563986
+export PG_BACKUPS_S3_BUCKET=s3-temp-bucket-mlsecops-681802563986
 export PG_CLUSTER_ID=cnpg-cluster-kind
 export PG_SERVER_NAME=mlsecops
-
 make pg-cluster
 
 ```

@@ -1,0 +1,117 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: zitadel
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: zitadel
+    app.kubernetes.io/managed-by: argocd
+  annotations:
+    description: ZITADEL Helm deployment for Cloudflare Tunnel and backend OIDC auth
+spec:
+  project: default
+  source:
+    repoURL: https://charts.zitadel.com
+    chart: zitadel
+    targetRevision: 9.34.0
+    helm:
+      values: |
+        image:
+          repository: ghcr.io/zitadel/zitadel
+          tag: v4.13.0
+          pullPolicy: IfNotPresent
+        login:
+          enabled: false
+        zitadel:
+          masterkeySecretName: zitadel-masterkey
+          configmapConfig:
+            ExternalDomain: auth.athithya.site
+            ExternalPort: 443
+            ExternalSecure: true
+            TLS:
+              Enabled: false
+            FirstInstance:
+              InstanceName: athithya
+              DefaultLanguage: en
+              Org:
+                Name: athithya
+                Human:
+                  UserName: admin
+                  FirstName: admin
+                  LastName: admin
+                  Email:
+                    Address: athithya651@gmail.com
+                    Verified: true
+                  Password: zitadeladmin@144
+                  PasswordChangeRequired: true
+          env:
+          - name: ZITADEL_DATABASE_POSTGRES_DSN
+            valueFrom:
+              secretKeyRef:
+                name: zitadel-config-secret
+                key: dsn
+          - name: ZITADEL_TRACING_TYPE
+            value: otel
+          - name: ZITADEL_TRACING_ENDPOINT
+            value: signoz-otel-collector.signoz.svc.cluster.local:4317
+          - name: ZITADEL_TRACING_SERVICENAME
+            value: zitadel
+        replicaCount: 2
+        ingress:
+          enabled: false
+        podSecurityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          fsGroup: 1000
+          seccompProfile:
+            type: RuntimeDefault
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          readOnlyRootFilesystem: true
+          privileged: false
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+        autoscaling:
+          enabled: false
+        podDisruptionBudget:
+          enabled: true
+          minAvailable: 1
+        affinity:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                  - key: app.kubernetes.io/name
+                    operator: In
+                    values:
+                    - zitadel
+                topologyKey: kubernetes.io/hostname
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: inference
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+    - PrunePropagationPolicy=foreground
+    - PruneLast=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m

@@ -26,8 +26,8 @@ data:
   RERANKER_URL: http://reranker-svc.inference.svc.cluster.local:8202
   PORT: '8001'
   LOG_LEVEL: WARNING
-  ENABLE_OTEL_TRACES: 'true'
-  ENABLE_OTEL_METRICS: 'true'
-  ENABLE_OTEL_LOGS: 'true'
+  ENABLE_OTEL_TRACES: 'false'
+  ENABLE_OTEL_METRICS: 'false'
+  ENABLE_OTEL_LOGS: 'false'
   OTEL_EXPORTER_OTLP_ENDPOINT: signoz-otel-collector.signoz.svc.cluster.local:4317
   QDRANT_ON_DISK_PAYLOAD: 'false'
