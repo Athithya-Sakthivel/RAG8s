@@ -106,7 +106,7 @@ export PG_SERVER_NAME=mlsecops
 make pg-cluster
 bash src/scripts/backups_and_restore.sh restore # restores latest by default
 export SIGNOZ_JWT_SECRET="YourStrongJWTSecretHere"
-bash src/infra/core/signoz_setup.sh --apply-secrets
+kubectl create ns argocd || true && bash src/infra/core/signoz_setup.sh --apply-secrets
 python3 src/infra/rag/retriever_service.py --apply-secrets
 python3 src/infra/rag/retriever_service.py --write
 python3 src/infra/rag/reranker_service.py --write
