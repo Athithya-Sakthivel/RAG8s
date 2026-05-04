@@ -34,7 +34,7 @@ DEFAULTS: dict[str, Any] = {
     "SERVICE_NAME": "retriever",
     "SERVICE_ACCOUNT_NAME": "retriever-sa",
     "SECRET_NAME": "retriever-secrets",
-    "IMAGE": "ghcr.io/athithya-sakthivel/retriever:2026-05-03-19-30--0ae1848@sha256:d667a470ffa3f5ca4f5611efd3e3364019c21cd0b04f50bb1aa684c3c92f52bb",
+    "IMAGE": "ghcr.io/athithya-sakthivel/retriever:2026-05-03-21-22--6f63fcf@sha256:f36d52fa870fd07e226e16b1553216b10f68193b533961519a3a56b5f55f40fa",
     "IMAGE_PULL_POLICY": "IfNotPresent",
     "REPLICAS": 1,
     "CONTAINER_PORT": 8001,

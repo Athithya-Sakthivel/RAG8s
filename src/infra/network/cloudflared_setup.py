@@ -33,7 +33,7 @@ ROOT_HOST = os.getenv("ROOT_HOST", DOMAIN).strip().rstrip(".") or DOMAIN
 API_HOST = os.getenv("API_HOST", f"api.{DOMAIN}").strip().rstrip(".") or f"api.{DOMAIN}"
 AUTH_HOST = os.getenv("AUTH_HOST", f"auth.{DOMAIN}").strip().rstrip(".") or f"auth.{DOMAIN}"
 
-ZITADEL_NAMESPACE = os.getenv("ZITADEL_NAMESPACE", "inference").strip() or "inference"
+ZITADEL_NAMESPACE = os.getenv("ZITADEL_NAMESPACE", "zitadel").strip() or "inference"
 ZITADEL_SERVICE_NAME = os.getenv("ZITADEL_SERVICE_NAME", "zitadel").strip() or "zitadel"
 ZITADEL_SERVICE_PORT = int(os.getenv("ZITADEL_SERVICE_PORT", "8080"))
 

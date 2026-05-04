@@ -11,7 +11,7 @@ data:
     tunnel: default-tunnel-1
     ingress:
     - hostname: auth.athithya.site
-      service: http://zitadel.inference.svc.cluster.local:8080
+      service: http://zitadel.zitadel.svc.cluster.local:8080
       originRequest:
         connectTimeout: 10s
         keepAliveTimeout: 30s

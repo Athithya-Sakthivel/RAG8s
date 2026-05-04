@@ -134,13 +134,34 @@ kubectl delete deployment zitadel-login -n inference --ignore-not-found
 kubectl delete svc zitadel-login -n inference --ignore-not-found
 kubectl delete ingress zitadel-login -n inference --ignore-not-found
 kubectl delete secret login-client -n inference --ignore-not-found
+kubectl delete pods zitadel-7d5c797585-mgk8n zitadel-init-rprjw zitadel-setup-fcfxq -n inference --ignore-not-found
 
+
+
+python3 src/infra/network/zitadel_bootstrap.py --apply
+kubectl apply -f src/argocd/zitadel-application.yaml
+kubectl get pods -n inference
+
+export DOMAIN=athithya.site
+export AUTH_HOST=auth.athithya.site
+export ZITADEL_NAMESPACE=zitadel
 export ZITADEL_MASTERKEY=$ZITADEL_MASTERKEY
 export ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD=$ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD
 export ZITADEL_DATABASE_POSTGRES_DSN="postgresql://$(kubectl -n default get secret postgres-cluster-app -o jsonpath='{.data.username}' | base64 -d):$(kubectl -n default get secret postgres-cluster-app -o jsonpath='{.data.password}' | base64 -d)@postgres-cluster-rw.default.svc.cluster.local:5432/zitadel_db?sslmode=disable"
 
+python3 src/infra/network/zitadel_bootstrap.py --apply
+python3 src/infra/network/zitadel_setup.py --apply
 
-python3 src/infra/network/zitadel_setup.py --write --apply-secrets 
-kubectl apply -f src/argocd/zitadel-application.yaml
-kubectl get pods -n inference
+export GOOGLE_OAUTH_CLIENT_ID='...'
+export GOOGLE_OAUTH_CLIENT_SECRET='...'
+export GOOGLE_REDIRECT_URI='https://auth.athithya.site/idps/callback'
+export RETRIEVER_REDIRECT_URI='https://api.athithya.site/auth/callback'
+python3 src/infra/network/zitadel_google_oidc_login.py --apply
 
+
+
+export GOOGLE_OAUTH_CLIENT_ID=$GOOGLE_OAUTH_CLIENT_ID
+export GOOGLE_OAUTH_CLIENT_SECRET=$GOOGLE_OAUTH_CLIENT_SECRET
+export GOOGLE_REDIRECT_URI='https://auth.athithya.site/idps/callback'
+export RETRIEVER_REDIRECT_URI='https://api.athithya.site/auth/callback'
+python3 src/infra/network/zitadel_google_oidc_login.py --apply

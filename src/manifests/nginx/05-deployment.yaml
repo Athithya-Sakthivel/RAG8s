@@ -18,7 +18,7 @@ spec:
         app.kubernetes.io/name: frontend-nginx
         app.kubernetes.io/component: frontend
       annotations:
-        nginx/config-checksum: 2d4c506c48c57d5b88da0fd1ffc0d658eb84390a9db758237863c015ed376566
+        nginx/config-checksum: 1792a232aeada12254b412ef84c1ada47b51dceef6148754cd44aa773e5550dc
     spec:
       serviceAccountName: frontend-nginx
       automountServiceAccountToken: false
@@ -36,7 +36,7 @@ spec:
         emptyDir: {}
       containers:
       - name: nginx
-        image: ghcr.io/athithya-sakthivel/frontend:2026-05-03-20-44--a39efe0@sha256:f220b3701f2d64f6a7a261db3c0dcfac6059d067b726d87b3a9c1e599464dc12
+        image: ghcr.io/athithya-sakthivel/frontend:2026-05-03-21-22--6f63fcf@sha256:66e58c2ced13fcb362525f8107e723e56aa719515944582d2509d086c547799f
         imagePullPolicy: IfNotPresent
         ports:
         - name: http

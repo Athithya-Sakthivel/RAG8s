@@ -7,7 +7,7 @@ metadata:
     app.kubernetes.io/name: zitadel
     app.kubernetes.io/managed-by: argocd
   annotations:
-    description: ZITADEL Helm deployment for Cloudflare Tunnel and backend OIDC auth
+    description: ZITADEL Helm deployment for hosted login and backend OIDC auth
 spec:
   project: default
   source:
@@ -31,6 +31,34 @@ spec:
             ExternalSecure: true
             TLS:
               Enabled: false
+            FirstInstance:
+              Skip: false
+              Org:
+                Skip: false
+                Name: athithya
+                Human:
+                  UserName: admin
+                  FirstName: admin
+                  LastName: admin
+                  Email:
+                    Address: admin@athithya.site
+                    Verified: true
+                  PasswordChangeRequired: true
+                Machine:
+                  Machine:
+                    Name: Automatically Initialized IAM Admin
+                    Username: iam-admin
+                  MachineKey:
+                    ExpirationDate: '2029-01-01T00:00:00Z'
+                    Type: 1
+                  Pat:
+                    ExpirationDate: '2029-01-01T00:00:00Z'
+                LoginClient:
+                  Machine:
+                    Name: Automatically Initialized IAM Login Client
+                    Username: login-client
+                  Pat:
+                    ExpirationDate: '2029-01-01T00:00:00Z'
         login:
           enabled: false
         ingress:
@@ -76,7 +104,7 @@ spec:
                 topologyKey: kubernetes.io/hostname
   destination:
     server: https://kubernetes.default.svc
-    namespace: inference
+    namespace: zitadel
   syncPolicy:
     automated:
       prune: true
