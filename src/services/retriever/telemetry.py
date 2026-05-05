@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 from datetime import UTC, datetime
 from typing import Any
 
 from settings import (
     DEPLOYMENT_ENVIRONMENT,
-    ENV,
     LOG_LEVEL,
     SERVICE_NAME,
 )
@@ -34,44 +34,27 @@ def _jsonable(obj: Any) -> Any:
 class JsonFormatter(logging.Formatter):
     """Log formatter that writes JSON lines matching the required schema."""
 
+    _STANDARD_ATTRS = frozenset({
+        "name", "msg", "args", "levelname", "levelno", "pathname",
+        "filename", "module", "exc_info", "exc_text", "stack_info",
+        "lineno", "funcName", "created", "msecs", "relativeCreated",
+        "thread", "threadName", "processName", "process", "taskName",
+    })
+
     def format(self, record: logging.LogRecord) -> str:
         payload: dict[str, Any] = {
             "timestamp": _iso_ts(),
             "level": record.levelname.lower(),
             "message": record.getMessage(),
             "service": SERVICE_NAME,
-            "deployment.environment": DEPLOYMENT_ENVIRONMENT,
-            "env": ENV,
+            "environment": DEPLOYMENT_ENVIRONMENT,
+            "instance": os.getenv("POD_NAME", os.getenv("HOSTNAME", "unknown")),
+            "namespace": os.getenv("POD_NAMESPACE", "unknown"),
         }
-        # Collect all extra attributes passed via `extra=` keyword
         extra_fields = {
             key: value
             for key, value in record.__dict__.items()
-            if key
-            not in {
-                "name",
-                "msg",
-                "args",
-                "levelname",
-                "levelno",
-                "pathname",
-                "filename",
-                "module",
-                "exc_info",
-                "exc_text",
-                "stack_info",
-                "lineno",
-                "funcName",
-                "created",
-                "msecs",
-                "relativeCreated",
-                "thread",
-                "threadName",
-                "processName",
-                "process",
-                "taskName",
-            }
-            and not key.startswith("_")
+            if key not in self._STANDARD_ATTRS and not key.startswith("_") and value is not None
         }
         if record.exc_info and record.exc_text is None:
             extra_fields["exception"] = self.formatException(record.exc_info)
@@ -91,6 +74,8 @@ class JsonLogger:
             logging.WARNING: "warn",
             logging.ERROR: "error",
         }
+        self._instance = os.getenv("POD_NAME", os.getenv("HOSTNAME", "unknown"))
+        self._namespace = os.getenv("POD_NAMESPACE", "unknown")
 
     def _emit(self, level_int: int, message: str, **fields: Any) -> None:
         record = {
@@ -98,8 +83,9 @@ class JsonLogger:
             "level": self._level_map.get(level_int, "info"),
             "message": message or "",
             "service": SERVICE_NAME,
-            "deployment.environment": DEPLOYMENT_ENVIRONMENT,
-            "env": ENV,
+            "environment": DEPLOYMENT_ENVIRONMENT,
+            "instance": self._instance,
+            "namespace": self._namespace,
         }
         if fields:
             record["fields"] = _jsonable(fields)
@@ -136,10 +122,6 @@ log = JsonLogger()
 
 
 def setup_logging(level: str | None = None) -> str:
-    """
-    Configure root logger to output JSON lines via a StreamHandler.
-    Returns the applied log level name.
-    """
     configured = (level or LOG_LEVEL or "INFO").strip().upper()
     valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
     aliases = {"WARN": "WARNING"}
@@ -150,8 +132,6 @@ def setup_logging(level: str | None = None) -> str:
 
     root = logging.getLogger()
     root.setLevel(log_level)
-
-    # Remove all previous handlers to avoid duplicate logs
     for h in list(root.handlers):
         root.removeHandler(h)
 
@@ -160,18 +140,9 @@ def setup_logging(level: str | None = None) -> str:
     handler.setFormatter(JsonFormatter())
     root.addHandler(handler)
 
-    # Quiet noisy third-party loggers
     for name in (
-        "asyncio",
-        "httpx",
-        "httpcore",
-        "urllib3",
-        "boto3",
-        "botocore",
-        "qdrant_client",
-        "uvicorn",
-        "uvicorn.error",
-        "uvicorn.access",
+        "asyncio", "httpx", "httpcore", "urllib3", "boto3", "botocore",
+        "qdrant_client", "uvicorn", "uvicorn.error", "uvicorn.access",
     ):
         logging.getLogger(name).setLevel(logging.WARNING)
 
@@ -179,16 +150,13 @@ def setup_logging(level: str | None = None) -> str:
 
 
 def apply_after_uvicorn(level: str | None = None) -> str:
-    """Re‑apply logging configuration after uvicorn has started."""
     return setup_logging(level)
 
 
 def safe_stack(exc: BaseException | None) -> str:
-    """Format exception traceback safely."""
     if exc is None:
         return ""
     import traceback
-
     return "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)).strip()
 
 

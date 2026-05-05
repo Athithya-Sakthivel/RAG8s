@@ -36,7 +36,7 @@ DEFAULTS: dict[str, Any] = {
     "SECRET_NAME": "retriever-secrets",
     
     # Container image
-    "IMAGE": "ghcr.io/athithya-sakthivel/retriever:2026-05-05-19-54--3c70819@sha256:d1d8d6c9d18189902460ab1dc7944fbf708b899ebcb786548eb3812b71284ff3",
+    "IMAGE": "ghcr.io/athithya-sakthivel/retriever:2026-05-05-20-34--7e2c98f@sha256:1521b9b6255a0f4c5a684db8e7b913fe29e5de158346ec05b8f55154a8591b97",
     "IMAGE_PULL_POLICY": "IfNotPresent",
     
     # Scaling
@@ -75,7 +75,7 @@ DEFAULTS: dict[str, Any] = {
     "ROLLOUT_TIMEOUT": 300,
     
     # Prometheus (replaces OTEL)
-    "PROMETHEUS_PORT": 9090,
+    "PROMETHEUS_PORT": 8001,
     "PROMETHEUS_PATH": "/metrics",
     "ENABLE_PROMETHEUS": True,
 }

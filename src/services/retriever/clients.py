@@ -7,6 +7,7 @@ import re
 import threading
 import time
 from collections.abc import AsyncIterator, Callable
+from contextvars import ContextVar
 from typing import Any, TypeVar
 
 import boto3
@@ -32,39 +33,105 @@ from telemetry import log
 logger = logging.getLogger("retrieval.clients")
 T = TypeVar("T")
 
+# Request ID context – set by middleware and propagated to downstream services
+_request_id_ctx: ContextVar[str | None] = ContextVar("request_id", default=None)
+
+
+def set_request_id(request_id: str | None) -> None:
+    _request_id_ctx.set(request_id)
+
+
+def get_request_id() -> str | None:
+    return _request_id_ctx.get()
+
 
 # ---------------------------------------------------------------------------
-# Prometheus metric helpers (replaces OTEL attributes & spans)
+# Prometheus metric helpers
 # ---------------------------------------------------------------------------
 def _metric_labels(**extra: Any) -> dict[str, str]:
-    """Build a label dict for Prometheus metrics."""
+    """Build a label dict for Prometheus metrics. Extra keys are validated."""
+    ALLOWED = {"mode", "result", "cache_kind", "outcome", "attempt", "status_code"}
     base = {
-        "deployment_environment": DEPLOYMENT_ENVIRONMENT,
-        "env": ENV,
-        "service_name": SERVICE_NAME,
+        "environment": DEPLOYMENT_ENVIRONMENT,
+        "service": SERVICE_NAME,
     }
-    base.update({k: str(v) for k, v in extra.items() if v is not None})
+    for k, v in extra.items():
+        if k not in ALLOWED:
+            continue
+        if v is not None:
+            base[k] = str(v)
     return base
 
 
 # ---------------------------------------------------------------------------
-# Prometheus metrics (replaces OTEL spans & counters)
+# Prometheus metrics
 # ---------------------------------------------------------------------------
 circuit_breaker_open_total = Counter(
-    "retrieval_circuit_breaker_open_total",
+    "circuit_breaker_open_total",
     "Circuit breaker open events",
-    ("dependency", "deployment_environment", "env", "service_name"),
+    ("dependency", "environment", "service"),
 )
 
 retry_attempts_total = Counter(
-    "retrieval_retry_attempts_total",
+    "retry_attempts_total",
     "Retry attempts by dependency",
-    ("dependency", "attempt", "deployment_environment", "env", "service_name"),
+    ("dependency", "attempt", "environment", "service"),
 )
 
-# Per-client metrics are defined within each client class below
+dependency_errors_total = Counter(
+    "dependency_errors_total",
+    "Dependency error count",
+    ("dependency", "error_type", "environment", "service"),
+)
+
+dense_embed_requests = Counter(
+    "dense_embed_requests_total",
+    "Dense embedding requests",
+    ("environment", "service"),
+)
+dense_embed_duration = Histogram(
+    "dense_embed_duration_seconds",
+    "Dense embedding latency",
+    ("environment", "service"),
+)
+
+sparse_embed_requests = Counter(
+    "sparse_embed_requests_total",
+    "Sparse embedding requests",
+    ("environment", "service"),
+)
+sparse_embed_duration = Histogram(
+    "sparse_embed_duration_seconds",
+    "Sparse embedding latency",
+    ("environment", "service"),
+)
+
+rerank_requests = Counter(
+    "rerank_requests_total",
+    "Reranker requests",
+    ("environment", "service"),
+)
+rerank_duration = Histogram(
+    "rerank_duration_seconds",
+    "Reranker latency",
+    ("environment", "service"),
+)
+
+llm_requests = Counter(
+    "llm_requests_total",
+    "LLM requests",
+    ("mode", "environment", "service"),
+)
+llm_duration = Histogram(
+    "llm_duration_seconds",
+    "LLM call latency",
+    ("mode", "environment", "service"),
+)
 
 
+# ---------------------------------------------------------------------------
+# Circuit breaker
+# ---------------------------------------------------------------------------
 class OpenCircuitError(RuntimeError):
     """Raised when a circuit breaker is open."""
     pass
@@ -106,12 +173,13 @@ class CircuitBreaker:
             if self.state == "half_open" or self.failures >= self.failure_threshold:
                 self.state = "open"
                 self.opened_at = time.monotonic()
-                circuit_breaker_open_total.labels(**_metric_labels(dependency=self.name)).inc()
+                circuit_breaker_open_total.labels(
+                    dependency=self.name, **_metric_labels()
+                ).inc()
                 log.warn("circuit breaker opened", dependency=self.name, failures=self.failures)
 
 
 def is_retryable_exception(exc: BaseException) -> bool:
-    """Determine whether an exception should trigger a retry."""
     if isinstance(exc, asyncio.CancelledError):
         return False
     if isinstance(exc, OpenCircuitError):
@@ -134,7 +202,6 @@ def is_retryable_exception(exc: BaseException) -> bool:
 
 
 async def call_with_retry(dep: str, breaker: CircuitBreaker, fn: Callable[[], Any]):
-    """Execute `fn` with retry logic and circuit breaker protection."""
     await breaker.allow()
     last_exc: BaseException | None = None
     for attempt in range(1, RETRY_MAX_ATTEMPTS + 1):
@@ -146,6 +213,11 @@ async def call_with_retry(dep: str, breaker: CircuitBreaker, fn: Callable[[], An
             return res
         except BaseException as exc:
             last_exc = exc
+            error_type = type(exc).__name__
+            dependency_errors_total.labels(
+                dependency=dep, error_type=error_type, **_metric_labels()
+            ).inc()
+
             if isinstance(exc, asyncio.CancelledError) or not is_retryable_exception(exc):
                 raise
             if attempt >= RETRY_MAX_ATTEMPTS:
@@ -153,7 +225,9 @@ async def call_with_retry(dep: str, breaker: CircuitBreaker, fn: Callable[[], An
                 raise
             delay = min(RETRY_MAX_DELAY, RETRY_BASE_DELAY * (2 ** (attempt - 1)))
             jitter = random.uniform(0.0, delay * 0.2)
-            retry_attempts_total.labels(**_metric_labels(dependency=dep, attempt=str(attempt))).inc()
+            retry_attempts_total.labels(
+                dependency=dep, attempt=str(attempt), **_metric_labels()
+            ).inc()
             log.debug(
                 "retry attempt",
                 dependency=dep,
@@ -171,13 +245,10 @@ async def call_with_retry(dep: str, breaker: CircuitBreaker, fn: Callable[[], An
 # Base async JSON service client
 # ---------------------------------------------------------------------------
 class AsyncJSONServiceClient:
-    """Base class for async HTTP clients that talk JSON."""
-
     def __init__(self, base_url: str, timeout: float = HTTP_TIMEOUT):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self._client: httpx.AsyncClient | None = None
-        # Subclasses override metrics
 
     async def client(self) -> httpx.AsyncClient:
         if self._client is None:
@@ -190,6 +261,13 @@ class AsyncJSONServiceClient:
             )
         return self._client
 
+    def _request_headers(self) -> dict[str, str]:
+        headers: dict[str, str] = {"accept": "application/json"}
+        req_id = get_request_id()
+        if req_id:
+            headers["x-request-id"] = req_id
+        return headers
+
     async def close(self) -> None:
         if self._client is not None:
             await self._client.aclose()
@@ -199,22 +277,7 @@ class AsyncJSONServiceClient:
 # ---------------------------------------------------------------------------
 # Dense embedding client
 # ---------------------------------------------------------------------------
-dense_embed_requests = Counter(
-    "retrieval_dense_embed_requests_total",
-    "Dense embedding requests",
-    ("dependency", "deployment_environment", "env", "service_name"),
-)
-dense_embed_duration = Histogram(
-    "retrieval_dense_embed_duration_seconds",
-    "Dense embedding latency",
-    ("dependency", "deployment_environment", "env", "service_name"),
-)
-
-
 class AsyncDenseClient(AsyncJSONServiceClient):
-    def __init__(self, base_url: str, timeout: float = HTTP_TIMEOUT):
-        super().__init__(base_url, timeout)
-
     async def health(self) -> bool:
         try:
             c = await self.client()
@@ -227,13 +290,13 @@ class AsyncDenseClient(AsyncJSONServiceClient):
         if not texts:
             return []
 
+        labels = _metric_labels()
         start = time.perf_counter()
-        labels = _metric_labels(dependency="dense")
         dense_embed_requests.labels(**labels).inc()
 
         try:
             c = await self.client()
-            r = await c.post(f"{self.base_url}/embed", json={"texts": texts})
+            r = await c.post(f"{self.base_url}/embed", json={"texts": texts}, headers=self._request_headers())
             if r.status_code != 200:
                 r.raise_for_status()
             j = r.json()
@@ -252,7 +315,10 @@ class AsyncDenseClient(AsyncJSONServiceClient):
                 out.append(arr.astype(float).tolist())
             return out
         except Exception as exc:
-            log.error("dense embed failed", dependency="dense", error_type=type(exc).__name__, error=str(exc))
+            dependency_errors_total.labels(
+                dependency="dense", error_type=type(exc).__name__, **_metric_labels()
+            ).inc()
+            log.error("dense embed failed", dependency="dense", error_type=type(exc).__name__)
             raise
         finally:
             dense_embed_duration.labels(**labels).observe(max(time.perf_counter() - start, 1e-6))
@@ -261,22 +327,7 @@ class AsyncDenseClient(AsyncJSONServiceClient):
 # ---------------------------------------------------------------------------
 # Sparse embedding client
 # ---------------------------------------------------------------------------
-sparse_embed_requests = Counter(
-    "retrieval_sparse_embed_requests_total",
-    "Sparse embedding requests",
-    ("dependency", "deployment_environment", "env", "service_name"),
-)
-sparse_embed_duration = Histogram(
-    "retrieval_sparse_embed_duration_seconds",
-    "Sparse embedding latency",
-    ("dependency", "deployment_environment", "env", "service_name"),
-)
-
-
 class AsyncSparseClient(AsyncJSONServiceClient):
-    def __init__(self, base_url: str, timeout: float = HTTP_TIMEOUT):
-        super().__init__(base_url, timeout)
-
     async def health(self) -> bool:
         try:
             c = await self.client()
@@ -289,13 +340,13 @@ class AsyncSparseClient(AsyncJSONServiceClient):
         if not texts:
             return []
 
+        labels = _metric_labels()
         start = time.perf_counter()
-        labels = _metric_labels(dependency="sparse")
         sparse_embed_requests.labels(**labels).inc()
 
         async def _do(batch: list[str]) -> list[dict[str, Any]]:
             c = await self.client()
-            r = await c.post(f"{self.base_url}/embed", json={"texts": batch})
+            r = await c.post(f"{self.base_url}/embed", json={"texts": batch}, headers=self._request_headers())
             if r.status_code == 200:
                 j = r.json()
                 vecs = j.get("vectors")
@@ -325,14 +376,16 @@ class AsyncSparseClient(AsyncJSONServiceClient):
                 if r.status_code == 422 and len(batch) > 1:
                     mid = max(1, len(batch) // 2)
                     return (await _do(batch[:mid])) + (await _do(batch[mid:]))
-
             r.raise_for_status()
             return []
 
         try:
             return await _do(texts)
         except Exception as exc:
-            log.error("sparse embed failed", dependency="sparse", error_type=type(exc).__name__, error=str(exc))
+            dependency_errors_total.labels(
+                dependency="sparse", error_type=type(exc).__name__, **_metric_labels()
+            ).inc()
+            log.error("sparse embed failed", dependency="sparse", error_type=type(exc).__name__)
             raise
         finally:
             sparse_embed_duration.labels(**labels).observe(max(time.perf_counter() - start, 1e-6))
@@ -341,22 +394,7 @@ class AsyncSparseClient(AsyncJSONServiceClient):
 # ---------------------------------------------------------------------------
 # Reranker client
 # ---------------------------------------------------------------------------
-rerank_requests = Counter(
-    "retrieval_rerank_requests_total",
-    "Reranker requests",
-    ("dependency", "deployment_environment", "env", "service_name"),
-)
-rerank_duration = Histogram(
-    "retrieval_rerank_duration_seconds",
-    "Reranker latency",
-    ("dependency", "deployment_environment", "env", "service_name"),
-)
-
-
 class AsyncRerankerClient(AsyncJSONServiceClient):
-    def __init__(self, base_url: str, timeout: float = HTTP_TIMEOUT):
-        super().__init__(base_url, timeout)
-
     async def health(self) -> bool:
         try:
             c = await self.client()
@@ -369,13 +407,13 @@ class AsyncRerankerClient(AsyncJSONServiceClient):
         if not documents:
             return []
 
+        labels = _metric_labels()
         start = time.perf_counter()
-        labels = _metric_labels(dependency="reranker")
         rerank_requests.labels(**labels).inc()
 
         try:
             c = await self.client()
-            r = await c.post(f"{self.base_url}/rerank", json={"query": query, "documents": documents})
+            r = await c.post(f"{self.base_url}/rerank", json={"query": query, "documents": documents}, headers=self._request_headers())
             if r.status_code != 200:
                 r.raise_for_status()
             j = r.json()
@@ -384,7 +422,10 @@ class AsyncRerankerClient(AsyncJSONServiceClient):
                 raise RuntimeError("reranker invalid response shape")
             return [float(x) for x in scores]
         except Exception as exc:
-            log.error("rerank failed", dependency="reranker", error_type=type(exc).__name__, error=str(exc))
+            dependency_errors_total.labels(
+                dependency="reranker", error_type=type(exc).__name__, **_metric_labels()
+            ).inc()
+            log.error("rerank failed", dependency="reranker", error_type=type(exc).__name__)
             raise
         finally:
             rerank_duration.labels(**labels).observe(max(time.perf_counter() - start, 1e-6))
@@ -393,18 +434,6 @@ class AsyncRerankerClient(AsyncJSONServiceClient):
 # ---------------------------------------------------------------------------
 # Bedrock LLM client
 # ---------------------------------------------------------------------------
-llm_requests = Counter(
-    "retrieval_llm_requests_total",
-    "LLM requests",
-    ("dependency", "mode", "deployment_environment", "env", "service_name"),
-)
-llm_duration = Histogram(
-    "retrieval_llm_duration_seconds",
-    "LLM call latency",
-    ("dependency", "mode", "deployment_environment", "env", "service_name"),
-)
-
-
 class AsyncBedrockClient:
     def __init__(
         self,
@@ -419,7 +448,6 @@ class AsyncBedrockClient:
         self.guardrail_identifier = guardrail_identifier.strip()
         self.guardrail_version = guardrail_version.strip()
         self.timeout = timeout
-
         session = boto3.session.Session(region_name=region)
         self._client = session.client(
             "bedrock-runtime",
@@ -467,8 +495,8 @@ class AsyncBedrockClient:
         return ""
 
     async def generate(self, prompt: str, max_tokens: int, temperature: float) -> str:
+        labels = _metric_labels(mode="generate")
         start = time.perf_counter()
-        labels = _metric_labels(dependency="bedrock", mode="generate")
         llm_requests.labels(**labels).inc()
 
         def _call() -> str:
@@ -490,14 +518,17 @@ class AsyncBedrockClient:
             answer = await asyncio.to_thread(_call)
             return answer
         except Exception as exc:
-            log.error("bedrock generate failed", dependency="bedrock", mode="generate", error_type=type(exc).__name__, error=str(exc))
+            dependency_errors_total.labels(
+                dependency="bedrock", error_type=type(exc).__name__, **_metric_labels()
+            ).inc()
+            log.error("bedrock generate failed", dependency="bedrock", mode="generate", error_type=type(exc).__name__)
             raise
         finally:
             llm_duration.labels(**labels).observe(max(time.perf_counter() - start, 1e-6))
 
     async def stream(self, prompt: str, max_tokens: int, temperature: float) -> AsyncIterator[str]:
+        labels = _metric_labels(mode="stream")
         start = time.perf_counter()
-        labels = _metric_labels(dependency="bedrock", mode="stream")
         llm_requests.labels(**labels).inc()
 
         loop = asyncio.get_running_loop()
@@ -537,7 +568,10 @@ class AsyncBedrockClient:
                 if item is sentinel:
                     break
                 if isinstance(item, Exception):
-                    log.error("bedrock stream failed", dependency="bedrock", mode="stream", error_type=type(item).__name__, error=str(item))
+                    dependency_errors_total.labels(
+                        dependency="bedrock", error_type=type(item).__name__, **_metric_labels()
+                    ).inc()
+                    log.error("bedrock stream failed", dependency="bedrock", mode="stream", error_type=type(item).__name__)
                     raise item
                 yield str(item)
         finally:
@@ -553,5 +587,7 @@ __all__ = [
     "CircuitBreaker",
     "OpenCircuitError",
     "call_with_retry",
+    "get_request_id",
     "is_retryable_exception",
+    "set_request_id",
 ]

@@ -5,17 +5,26 @@ import asyncio
 import json
 import logging
 import os
+import time
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import Any
 
 import uvicorn
-from clients import AsyncBedrockClient, AsyncDenseClient, AsyncRerankerClient, AsyncSparseClient
-from fastapi import FastAPI, HTTPException, Request
+from clients import (
+    AsyncBedrockClient,
+    AsyncDenseClient,
+    AsyncRerankerClient,
+    AsyncSparseClient,
+    set_request_id,
+)
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from helpers import build_prompt_and_ui_chunks, deterministic_summarize, validate_and_filter_citations
-from prometheus_client import make_asgi_app
+from prometheus_client import Counter, Gauge, Histogram, generate_latest, CONTENT_TYPE_LATEST
 from settings import (
     ANSWER_PROMPT_TEMPLATE,
     AWS_REGION,
@@ -27,7 +36,9 @@ from settings import (
     COLLECTION_NAME,
     CORPUS_VERSION,
     DENSE_URL,
+    DEPLOYMENT_ENVIRONMENT,
     ENABLE_PROMETHEUS,
+    ENV,
     FETCH_K,
     HTTP_TIMEOUT,
     LLM_MAX_TOKENS,
@@ -36,11 +47,14 @@ from settings import (
     MAX_CHUNKS_TO_LLM,
     MAX_CONCURRENT_REQUESTS,
     PROMPT_MAX_CONTENT_CHARS,
+    PROMETHEUS_PATH,
     PROMPT_VERSION,
     QDRANT_API_KEY,
     QDRANT_URL,
     RERANKER_URL,
     RETRIEVAL_VERSION,
+    SERVICE_NAME,
+    SHUTDOWN_TIMEOUT,
     SPARSE_URL,
     TENANT_ID,
     GenerateRequest,
@@ -49,6 +63,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from starlette.background import BackgroundTask
+from starlette.responses import Response as StarletteResponse
 from store import QdrantStore, QdrantStoreConfig
 from telemetry import log, safe_stack, setup_logging
 
@@ -60,15 +75,84 @@ _MIN_FETCH_K = 10
 _MAX_FETCH_K = 50
 
 # ---------------------------------------------------------------------------
-# Rate limiting (IP‑based, auth removed)
+# Prometheus HTTP metrics (initialized early)
+# ---------------------------------------------------------------------------
+_HTTP_REQUEST_COUNT = Counter(
+    "http_requests_total",
+    "Total HTTP requests",
+    ("method", "route", "status_code", "environment", "service"),
+)
+_HTTP_DURATION = Histogram(
+    "http_request_duration_seconds",
+    "HTTP request latency",
+    ("method", "route", "status_code", "environment", "service"),
+)
+_HTTP_ACTIVE_REQUESTS = Gauge(
+    "http_active_requests",
+    "In-flight HTTP requests",
+    ("method", "route", "environment", "service"),
+)
+_HTTP_ERROR_COUNT = Counter(
+    "http_errors_total",
+    "Total HTTP errors",
+    ("method", "route", "status_code", "environment", "service"),
+)
+
+
+# ---------------------------------------------------------------------------
+# Rate limiting (IP-based)
 # ---------------------------------------------------------------------------
 def _rate_limit_key(request: Request) -> str:
     return f"ip:{get_remote_address(request)}"
 
 
 limiter = Limiter(key_func=_rate_limit_key, default_limits=[])
+
+
 # ---------------------------------------------------------------------------
-# FastAPI application
+# Request ID middleware
+# ---------------------------------------------------------------------------
+class RequestIdMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        request_id = uuid.uuid4().hex
+        headers = dict(scope.get("headers", []))
+        incoming = headers.get(b"x-request-id")
+        if incoming:
+            request_id = incoming.decode("utf-8", errors="replace").strip() or request_id
+
+        set_request_id(request_id)
+        scope.setdefault("state", {})["request_id"] = request_id
+
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                headers_list = list(message.get("headers", []))
+                headers_list.append((b"x-request-id", request_id.encode("utf-8")))
+                message = dict(message)
+                message["headers"] = headers_list
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
+
+
+# ---------------------------------------------------------------------------
+# Prometheus metrics endpoint
+# ---------------------------------------------------------------------------
+async def metrics_endpoint():
+    return StarletteResponse(
+        generate_latest(),
+        media_type=CONTENT_TYPE_LATEST,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Lifespan (startup/shutdown)
 # ---------------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -138,14 +222,9 @@ async def lifespan(app: FastAPI):
         docs_ready, cache_ready = await state.store.bootstrap()
         state.store.docs_ready = docs_ready
         state.store.cache_ready = cache_ready
-        log.info(
-            "store bootstrap complete",
-            docs_ready=docs_ready,
-            cache_ready=cache_ready,
-        )
+        log.info("store bootstrap complete", docs_ready=docs_ready, cache_ready=cache_ready)
     except asyncio.CancelledError:
         log.info("store bootstrap cancelled during shutdown")
-        # Still yield to allow cleanup
     except Exception as e:
         startup_bootstrap_error = str(e)
         log.warn("bootstrap pending", error=str(e))
@@ -153,93 +232,106 @@ async def lifespan(app: FastAPI):
     bg_health = asyncio.create_task(_health_loop(state))
     bg_cleanup = asyncio.create_task(_cache_cleanup_loop(state))
     app.state.background_tasks = (bg_health, bg_cleanup)
-    
+
     log.info("retriever service started successfully")
 
     try:
         yield
     finally:
-        # Graceful shutdown
         log.info("shutting down retriever service")
-        
-        # Mark as not ready
         try:
             app.state.state.health["ready"] = False
         except Exception:
             pass
-        
-        # Cancel background tasks
+
+        # Cancel background tasks and wait with timeout
         for task in app.state.background_tasks:
             if not task.done():
                 task.cancel()
-        
-        # Wait for tasks to finish (handle cancellation gracefully)
+
         for task in app.state.background_tasks:
             try:
-                await task
-            except asyncio.CancelledError:
-                pass  # Expected during shutdown
+                await asyncio.wait_for(task, timeout=SHUTDOWN_TIMEOUT)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
             except Exception:
                 pass
-        
-        # Close clients
+
         for client, name in [(dense, "dense"), (sparse, "sparse"), (reranker, "reranker")]:
             try:
                 await client.close()
-                log.debug(f"{name} client closed")
             except Exception as e:
-                log.debug(f"{name} client close error: {e}")
-        
-        # Close store
+                logger.debug("%s client close error: %s", name, e)
+
         try:
             await store.close()
-            log.debug("store closed")
         except Exception as e:
-            log.debug(f"store close error: {e}")
-        
+            logger.debug("store close error: %s", e)
+
         log.info("retriever service shutdown complete")
 
+
+# ---------------------------------------------------------------------------
+# FastAPI app
+# ---------------------------------------------------------------------------
 app = FastAPI(lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(RequestIdMiddleware)
+
 
 # ---------------------------------------------------------------------------
-# Prometheus endpoint (replaces /metrics)
+# Metrics endpoint (served on main HTTP port)
 # ---------------------------------------------------------------------------
 if ENABLE_PROMETHEUS:
-    # Mount ASGI app for prometheus_client
-    metrics_app = make_asgi_app()
-    app.mount("/metrics", metrics_app)
+    app.add_route(PROMETHEUS_PATH, metrics_endpoint, methods=["GET"])
 
-# Add instrumentator for automatic HTTP metrics (optional)
-# Instrumentator().instrument(app).expose(app)
+
+# ---------------------------------------------------------------------------
+# HTTP metrics middleware
+# ---------------------------------------------------------------------------
+@app.middleware("http")
+async def http_metrics_middleware(request: Request, call_next):
+    method = request.method
+    route = request.url.path
+    labels = {"method": method, "route": route, "environment": DEPLOYMENT_ENVIRONMENT, "service": SERVICE_NAME}
+
+    _HTTP_ACTIVE_REQUESTS.labels(**labels).inc()
+    _HTTP_REQUEST_COUNT.labels(**{**labels, "status_code": "0"}).inc()
+
+    start = time.perf_counter()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    except Exception:
+        status_code = 500
+        _HTTP_ERROR_COUNT.labels(**{**labels, "status_code": str(status_code)}).inc()
+        raise
+    finally:
+        elapsed = max(time.perf_counter() - start, 1e-6)
+        _HTTP_DURATION.labels(**{**labels, "status_code": str(status_code)}).observe(elapsed)
+        _HTTP_ACTIVE_REQUESTS.labels(**labels).dec()
+
 
 # ---------------------------------------------------------------------------
 # Exception handlers
 # ---------------------------------------------------------------------------
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    log.warn(
-        "request validation failed",
-        error=str(exc),
-        endpoint=str(request.url.path),
-    )
+    log.warn("request validation failed", error=str(exc), endpoint=str(request.url.path))
     return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
-    log.error(
-        "unhandled exception",
-        endpoint=str(request.url.path),
-        error=str(exc),
-        stack=safe_stack(exc),
-    )
+    log.error("unhandled exception", endpoint=str(request.url.path), error=str(exc), stack=safe_stack(exc))
     return JSONResponse(status_code=500, content={"detail": "internal server error"})
 
 
 # ---------------------------------------------------------------------------
-# Helper: resolve state & build prompt
+# Helpers
 # ---------------------------------------------------------------------------
 def _state():
     return app.state.state
@@ -247,10 +339,7 @@ def _state():
 
 def _build_bedrock_prompt(query: str, docs_for_llm: list[dict[str, Any]]) -> tuple[str, list[str], list[dict[str, Any]]]:
     prompt_body, llm_lines, ui_chunks = build_prompt_and_ui_chunks(
-        docs_for_llm,
-        query,
-        max_content_chars=PROMPT_MAX_CONTENT_CHARS,
-        prefer_snippet_len=400,
+        docs_for_llm, query, max_content_chars=PROMPT_MAX_CONTENT_CHARS, prefer_snippet_len=400,
     )
     prompt = ANSWER_PROMPT_TEMPLATE.format(question=query, passages=prompt_body)
     return prompt, llm_lines, ui_chunks
@@ -268,7 +357,7 @@ def _sse(event: str, data: dict[str, Any]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Core streaming endpoint (no auth)
+# Core streaming endpoint
 # ---------------------------------------------------------------------------
 async def _generate_stream_core(request: Request) -> StreamingResponse:
     req = await _load_generate_request(request)
@@ -278,7 +367,7 @@ async def _generate_stream_core(request: Request) -> StreamingResponse:
     if not query:
         raise HTTPException(status_code=400, detail="query required")
 
-    from pipeline import _build_pipeline_result  # local import to avoid circular deps
+    from pipeline import _build_pipeline_result
 
     pipeline = await _build_pipeline_result(
         state,
@@ -307,15 +396,7 @@ async def _generate_stream_core(request: Request) -> StreamingResponse:
         chunks = cache_state.get("chunks") or []
         if answer and answer not in {"no documents retrieved", "llm unavailable"}:
             from pipeline import write_stream_cache
-
-            await write_stream_cache(
-                state,
-                pipeline=pipeline,
-                answer=answer,
-                ui_chunks=chunks,
-                hit_type="llm",
-                cache_score=1.0,
-            )
+            await write_stream_cache(state, pipeline=pipeline, answer=answer, ui_chunks=chunks, hit_type="llm", cache_score=1.0)
 
     async def event_gen() -> AsyncIterator[str]:
         start_event = {
@@ -330,7 +411,6 @@ async def _generate_stream_core(request: Request) -> StreamingResponse:
         }
         yield _sse("start", start_event)
 
-        # Cache hit – answer already available
         if pipeline.cache_hit and pipeline.answer is not None:
             cache_state["answer"] = pipeline.answer
             cache_state["chunks"] = pipeline.chunks if req.return_chunks else []
@@ -386,11 +466,7 @@ async def _generate_stream_core(request: Request) -> StreamingResponse:
             return
 
         try:
-            async for delta in state.bedrock.stream(
-                prompt=prompt,
-                max_tokens=max_tokens,
-                temperature=LLM_TEMPERATURE,
-            ):
+            async for delta in state.bedrock.stream(prompt=prompt, max_tokens=max_tokens, temperature=LLM_TEMPERATURE):
                 if await request.is_disconnected():
                     return
                 if delta:
@@ -400,7 +476,6 @@ async def _generate_stream_core(request: Request) -> StreamingResponse:
             answer = "".join(answer_parts).strip()
             if not answer:
                 answer = deterministic_summarize(llm_lines)
-
             valid_indexes = [c["index"] for c in ui_chunks if isinstance(c, dict) and c.get("index") is not None]
             answer = validate_and_filter_citations(answer, valid_indexes)
             if not answer.strip():
@@ -408,7 +483,6 @@ async def _generate_stream_core(request: Request) -> StreamingResponse:
 
             cache_state["answer"] = answer
             cache_state["chunks"] = pipeline.chunks if req.return_chunks else []
-
             yield _sse("done", {
                 "answer": answer,
                 "chunks": pipeline.chunks if req.return_chunks else None,
@@ -498,10 +572,10 @@ if __name__ == "__main__":
         app,
         host="0.0.0.0",
         port=int(os.getenv("PORT", "8001")),
-        log_level="info",
         loop=os.getenv("UVICORN_LOOP", "uvloop"),
         http=os.getenv("UVICORN_HTTP", "httptools"),
         proxy_headers=True,
         forwarded_allow_ips=os.getenv("FORWARDED_ALLOW_IPS", "*"),
         access_log=False,
+        timeout_graceful_shutdown=SHUTDOWN_TIMEOUT,
     )

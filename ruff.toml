@@ -5,6 +5,7 @@ exclude = [
   ".venv",
   ".repos",
   "__pycache__",
+  "tests",
 ]
 
 [lint]

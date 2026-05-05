@@ -57,19 +57,11 @@ def _validate_log_level(raw: str | None) -> str:
     return level if level in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"} else "WARNING"
 
 
-def _split_csv(raw: str | None, default: tuple[str, ...]) -> tuple[str, ...]:
-    text = (raw or "").strip()
-    if not text:
-        return default
-    values = tuple(part.strip() for part in text.split(",") if part.strip())
-    return values or default
-
-
 # ---------------------------------------------------------------------------
 # Service identity
 # ---------------------------------------------------------------------------
-SERVICE_NAME = _env_first("SERVICE_NAME", "OTEL_SERVICE_NAME", default="retrieval") or "retrieval"
-SERVICE_VERSION = _env_first("SERVICE_VERSION", "OTEL_SERVICE_VERSION", default="unknown") or "unknown"
+SERVICE_NAME = _env_first("SERVICE_NAME", default="retriever") or "retriever"
+SERVICE_VERSION = _env_first("SERVICE_VERSION", default="unknown") or "unknown"
 ENV = (_env_first("ENV", "DEPLOYMENT_ENVIRONMENT", default="PROD") or "PROD").strip().upper() or "PROD"
 DEPLOYMENT_ENVIRONMENT = (_env_str("DEPLOYMENT_ENVIRONMENT", ENV) or ENV).strip().upper() or ENV
 CLUSTER_NAME = _env_first("K8S_CLUSTER_NAME", "CLUSTER_NAME", default="") or ""
@@ -93,7 +85,8 @@ QDRANT_API_KEY = _env_str("QDRANT_API_KEY", "") or None
 COLLECTION_NAME = (_env_str("COLLECTION_NAME", "default_rag_collection1") or "").strip()
 
 # ---------------------------------------------------------------------------
-# Inference services
+# Inference services – defaults follow standard Kubernetes DNS conventions.
+# Override only if your service names or namespace differ.
 # ---------------------------------------------------------------------------
 DENSE_URL = (_env_str("DENSE_URL", "http://dense-svc.inference.svc.cluster.local:8200") or "").strip()
 SPARSE_URL = (_env_str("SPARSE_URL", "http://sparse-svc.inference.svc.cluster.local:8201") or "").strip()
@@ -163,16 +156,22 @@ BREAKER_FAILURE_THRESHOLD = _env_int("BREAKER_FAILURE_THRESHOLD", 3)
 BREAKER_RESET_TIMEOUT = _env_float("BREAKER_RESET_TIMEOUT", 20.0)
 
 # ---------------------------------------------------------------------------
-# Prometheus (replaces OTEL)
+# Shutdown
 # ---------------------------------------------------------------------------
-PROMETHEUS_PORT = _env_int("PROMETHEUS_PORT", 9090)
-PROMETHEUS_PATH = _env_str("PROMETHEUS_PATH", "/metrics")
+SHUTDOWN_TIMEOUT = _env_int("SHUTDOWN_TIMEOUT", 30)
+
+# ---------------------------------------------------------------------------
+# Prometheus – served on the main HTTP port, no separate port needed.
+# PROMETHEUS_PORT is kept for environments that require a dedicated port.
+# ---------------------------------------------------------------------------
 ENABLE_PROMETHEUS = _env_bool("ENABLE_PROMETHEUS", True)
+PROMETHEUS_PATH = _env_str("PROMETHEUS_PATH", "/metrics")
 
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
 LOG_LEVEL = _validate_log_level(_env_str("LOG_LEVEL", "WARNING"))
+
 
 # ---------------------------------------------------------------------------
 # Runtime settings dataclass
@@ -190,16 +189,16 @@ class RuntimeSettings:
 
 
 def make_settings() -> dict[str, Any]:
-    settings = RuntimeSettings()
+    s = RuntimeSettings()
     return {
-        "corpus_version": settings.corpus_version,
-        "prompt_version": settings.prompt_version,
-        "retrieval_version": settings.retrieval_version,
-        "llm_model": settings.llm_model,
-        "cache_ttl_seconds": settings.cache_ttl_seconds,
-        "cache_score_threshold": settings.cache_score_threshold,
-        "max_chunks_to_llm": settings.max_chunks_to_llm,
-        "reranker_model": settings.reranker_model,
+        "corpus_version": s.corpus_version,
+        "prompt_version": s.prompt_version,
+        "retrieval_version": s.retrieval_version,
+        "llm_model": s.llm_model,
+        "cache_ttl_seconds": s.cache_ttl_seconds,
+        "cache_score_threshold": s.cache_score_threshold,
+        "max_chunks_to_llm": s.max_chunks_to_llm,
+        "reranker_model": s.reranker_model,
     }
 
 
@@ -287,7 +286,6 @@ __all__ = [
     "MAX_CONCURRENT_REQUESTS",
     "MAX_PROMPT_CHARS",
     "PROMETHEUS_PATH",
-    "PROMETHEUS_PORT",
     "PROMPT_MAX_CONTENT_CHARS",
     "PROMPT_VERSION",
     "QDRANT_API_KEY",
@@ -307,6 +305,7 @@ __all__ = [
     "RRF_K",
     "SERVICE_NAME",
     "SERVICE_VERSION",
+    "SHUTDOWN_TIMEOUT",
     "SPARSE_URL",
     "TENANT_ID",
     "GenerateRequest",

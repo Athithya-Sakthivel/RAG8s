@@ -290,7 +290,6 @@ def render_routes_reference() -> dict[str, Any]:
         },
     }
 
-
 def render_deployment(namespace: str, checksum: str) -> dict[str, Any]:
     return {
         "apiVersion": "apps/v1",
@@ -319,11 +318,30 @@ def render_deployment(namespace: str, checksum: str) -> dict[str, Any]:
                     },
                     "annotations": {
                         "cloudflared/config-checksum": checksum,
+                        # Optional: Enable prometheus scraping
+                        "prometheus.io/scrape": "true",
+                        "prometheus.io/port": str(METRICS_PORT),
                     },
                 },
                 "spec": {
                     "serviceAccountName": SERVICE_ACCOUNT,
                     "terminationGracePeriodSeconds": 30,
+                    # HPA recommendation: Add topology spread constraints for HA
+                    "topologySpreadConstraints": [
+                        {
+                            "maxSkew": 1,
+                            "topologyKey": "kubernetes.io/hostname",
+                            "whenUnsatisfiable": "DoNotSchedule",
+                            "labelSelector": {
+                                "matchLabels": {
+                                    "app.kubernetes.io/name": DEPLOYMENT_NAME,
+                                    "app.kubernetes.io/component": "tunnel",
+                                }
+                            },
+                        }
+                    ],
+                    # Priority class for production (ensure tunnel stays up)
+                    "priorityClassName": "system-cluster-critical",
                     "volumes": [
                         {
                             "name": "cloudflared-config",
@@ -338,12 +356,23 @@ def render_deployment(namespace: str, checksum: str) -> dict[str, Any]:
                             "name": "cloudflared",
                             "image": IMAGE,
                             "imagePullPolicy": "IfNotPresent",
+                            # Resource limits for 1K QPS RAG workload
+                            "resources": {
+                                "requests": {
+                                    "cpu": "250m",
+                                    "memory": "256Mi",
+                                },
+                                "limits": {
+                                    "cpu": "1000m",      # Burst to 1 core
+                                    "memory": "512Mi",    # Extra for connection buffers
+                                },
+                            },
                             "command": ["cloudflared"],
                             "args": [
                                 "tunnel",
                                 "--no-autoupdate",
                                 "--loglevel",
-                                "info",
+                                "info",                  # Consider "warn" at 5K+ QPS
                                 "--protocol",
                                 TUNNEL_PROTOCOL,
                                 "--metrics",
@@ -361,7 +390,12 @@ def render_deployment(namespace: str, checksum: str) -> dict[str, Any]:
                                             "key": SECRET_KEY,
                                         }
                                     },
-                                }
+                                },
+                                # Optional: Enable detailed metrics
+                                {
+                                    "name": "TUNNEL_METRICS",
+                                    "value": "true",
+                                },
                             ],
                             "ports": [
                                 {"name": "metrics", "containerPort": METRICS_PORT, "protocol": "TCP"}
@@ -373,26 +407,7 @@ def render_deployment(namespace: str, checksum: str) -> dict[str, Any]:
                                     "readOnly": True,
                                 }
                             ],
-                            "startupProbe": {
-                                "httpGet": {"path": "/ready", "port": METRICS_PORT},
-                                "periodSeconds": STARTUP_PERIOD_SECONDS,
-                                "failureThreshold": STARTUP_FAILURE_THRESHOLD,
-                                "timeoutSeconds": 1,
-                            },
-                            "readinessProbe": {
-                                "httpGet": {"path": "/ready", "port": METRICS_PORT},
-                                "initialDelaySeconds": READINESS_INITIAL_DELAY_SECONDS,
-                                "periodSeconds": READINESS_PERIOD_SECONDS,
-                                "failureThreshold": 3,
-                                "timeoutSeconds": 1,
-                            },
-                            "livenessProbe": {
-                                "httpGet": {"path": "/ready", "port": METRICS_PORT},
-                                "initialDelaySeconds": LIVENESS_INITIAL_DELAY_SECONDS,
-                                "periodSeconds": LIVENESS_PERIOD_SECONDS,
-                                "failureThreshold": 3,
-                                "timeoutSeconds": 1,
-                            },
+                            # ENHANCED: Ulimit settings for high QPS
                             "securityContext": {
                                 "allowPrivilegeEscalation": False,
                                 "readOnlyRootFilesystem": True,
@@ -402,14 +417,74 @@ def render_deployment(namespace: str, checksum: str) -> dict[str, Any]:
                                 "capabilities": {
                                     "drop": ["ALL"],
                                 },
+                                # KEY ADDITION: Increase open file limits
+                                "ulimits": [
+                                    {
+                                        "name": "nofile",
+                                        "hard": 70000,
+                                        "soft": 70000,
+                                    },
+                                    # Optional: Increase process limits for high connection churn
+                                    {
+                                        "name": "nproc",
+                                        "hard": 65536,
+                                        "soft": 65536,
+                                    },
+                                ],
+                            },
+                            # ENHANCED: More aggressive startup for 1K QPS
+                            "startupProbe": {
+                                "httpGet": {"path": "/ready", "port": METRICS_PORT},
+                                "periodSeconds": 2,
+                                "failureThreshold": 30,
+                                "timeoutSeconds": 1,
+                            },
+                            "readinessProbe": {
+                                "httpGet": {"path": "/ready", "port": METRICS_PORT},
+                                "initialDelaySeconds": 5,
+                                "periodSeconds": 5,
+                                "failureThreshold": 3,
+                                "timeoutSeconds": 1,
+                            },
+                            "livenessProbe": {
+                                "httpGet": {"path": "/ready", "port": METRICS_PORT},
+                                "initialDelaySeconds": 10,
+                                "periodSeconds": 10,
+                                "failureThreshold": 3,
+                                "timeoutSeconds": 1,
+                            },
+                            # Optional: Pre-stop hook for graceful shutdown
+                            "lifecycle": {
+                                "preStop": {
+                                    "exec": {
+                                        "command": ["/bin/sh", "-c", "sleep 5 && kill -SIGTERM 1"]
+                                    }
+                                }
                             },
                         }
                     ],
+                    # Additional production settings
+                    "restartPolicy": "Always",
+                    "dnsPolicy": "ClusterFirst",
+                    "nodeSelector": {
+                        # Optional: Pin to specific node pool with good network
+                        # "node-group": "cloudflare-tunnel"
+                    },
+                    "tolerations": [
+                        # Optional: Allow running on dedicated nodes
+                        # {
+                        #     "key": "cloudflare-tunnel",
+                        #     "operator": "Equal",
+                        #     "value": "true",
+                        #     "effect": "NoSchedule"
+                        # }
+                    ],
+                    # Ensure graceful shutdown of connections
+                    "terminationGracePeriodSeconds": 30,
                 },
             },
         },
     }
-
 
 def build() -> tuple[list[dict[str, Any]], dict[str, Any]]:
     validate()
