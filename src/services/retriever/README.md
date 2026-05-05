@@ -1,83 +1,275 @@
 # Retriever Service
 
-Retriever is the streaming RAG backend for the stack. It provides a single answer generation endpoint:
+Streaming RAG backend that retrieves documents, reranks them, and generates answers via Bedrock.
 
-* user request enters `/generate/stream`
-* authentication is handled externally (no built-in auth)
-* the retrieval pipeline streams the final answer as SSE
+---
 
-The service does:
+## Quick Reference
 
-* document retrieval from Qdrant
-* dense and sparse embedding calls
-* optional reranking
-* optional Bedrock answer generation
-* semantic cache lookup and writeback
-* Prometheus metrics export
+### Request Flow
 
-## Runtime architecture
+```
+User → /generate/stream → Cache Check → Embed → Retrieve → Rerank → LLM → Stream SSE
+                                ↓                                    ↓
+                           Cache Hit? ←────────────────────────── Write Cache
+```
 
-The service has two main layers.
+### Service Endpoints
 
-1. **HTTP ingress**
-   Handles request validation, streaming responses, health checks, request IDs, and request-level metrics.
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/generate/stream` | RAG answer generation (SSE stream) |
+| `GET` | `/healthz` | Liveness probe |
+| `GET` | `/readyz` | Readiness probe |
+| `GET` | `/metrics` | Prometheus metrics |
 
-2. **Retrieval pipeline**
-   Performs cache lookup, retrieval, reranking, LLM generation, and cache writes.
+### Dependencies
 
-## Authentication model
+| Service | Default URL | Purpose |
+|---------|-------------|---------|
+| Qdrant | `http://qdrant.qdrant.svc.cluster.local:6333` | Vector & sparse retrieval |
+| Dense Embedder | `http://dense-svc.inference.svc.cluster.local:8200` | Dense embeddings |
+| Sparse Embedder | `http://sparse-svc.inference.svc.cluster.local:8201` | Sparse embeddings |
+| Reranker | `http://reranker-svc.inference.svc.cluster.local:8202` | Cross-encoder reranking |
+| AWS Bedrock | External | LLM generation |
 
-Authentication is handled externally (e.g., by a reverse proxy or API gateway). The retriever service does not perform any authentication or authorization. All endpoints are publicly accessible within the cluster.
+---
 
-Rate limiting is IP-based.
+## Architecture
 
-## Observability model
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         RETRIEVER SERVICE                        │
+│                                                                   │
+│  ┌──────────────────────┐      ┌──────────────────────────────┐  │
+│  │     HTTP Layer        │      │     Retrieval Pipeline        │  │
+│  │                        │      │                              │  │
+│  │  • Request validation  │      │  1. Cache Lookup              │  │
+│  │  • Request ID          │ ───► │  2. Embed (dense + sparse)   │  │
+│  │  • Rate limiting (IP)  │      │  3. Qdrant Search (hybrid)   │  │
+│  │  • HTTP metrics        │      │  4. Rerank (auto/always)     │  │
+│  │  • SSE streaming       │      │  5. LLM Generation           │  │
+│  │  • Health probes       │      │  6. Citation validation      │  │
+│  │                        │      │  7. Cache writeback          │  │
+│  └──────────────────────┘      └──────────────────────────────┘  │
+│                                                                   │
+│  ┌──────────────────────────────────────────────────────────────┐ │
+│  │                    Background Loops                           │ │
+│  │  • Health loop (every 10s) → checks all dependencies         │ │
+│  │  • Cache cleanup loop (every 900s) → removes expired entries │ │
+│  └──────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-The service uses Prometheus for metrics and structured JSON logging.
+---
 
-* **Metrics** for request counts, latency, cache activity, retrieval activity, retries, and circuit breaker events
-* **Logs** for structured JSON events
+## Request/Response Specification
 
-Metrics are exposed on the main service port at `/metrics` for Prometheus scraping.
+### `POST /generate/stream`
 
-### Metrics
+#### Request Body
 
-Metrics are low-cardinality only. Typical attributes are:
+```json
+{
+  "query": "how does governance differ from guardrails?",
+  "top_k": 5,
+  "fetch_k": 20,
+  "return_chunks": true,
+  "allow_semantic_cache": true,
+  "max_tokens": 400
+}
+```
 
-* `service_name`
-* `deployment_environment`
-* `env`
-* `route`
-* `method`
-* `status_code`
-* `dependency`
-* `mode`
-* `result`
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `query` | string | required | User question |
+| `top_k` | int (1-50) | `5` | Final results to return |
+| `fetch_k` | int (1-200) | `20` | Candidates to fetch per index |
+| `return_chunks` | bool | `true` | Include document metadata |
+| `allow_semantic_cache` | bool | `true` | Enable cache lookup |
+| `max_tokens` | int (64-4096) | `400` | Max LLM output tokens |
 
-Exported metrics include:
+#### SSE Events
 
-* HTTP request count
-* HTTP request duration
-* HTTP in-flight request count
-* HTTP error count
-* retrieval pipeline duration
-* Qdrant query count and latency
-* cache lookup count and latency
-* cache write count and latency
-* dense embedding count and latency
-* sparse embedding count and latency
-* rerank request count and latency
-* LLM request count and latency
-* circuit breaker open events
-* retry attempts
-* readiness state
-* retrieved document count
+| Event | When | Payload |
+|-------|------|---------|
+| `start` | Pipeline begins | Query, retrieval config, cache info |
+| `delta` | Token generated | `{"text": "token"}` |
+| `done` | Stream complete | Full answer, chunks, metrics |
+| `error` | Error occurred | `{"error": "message"}` |
 
-A Prometheus scrape endpoint is required at `/metrics` on the main service port.
+#### Example Response (done event)
 
-### Logs
+```json
+{
+  "event": "done",
+  "data": {
+    "answer": "Governance defines the rules and policies...",
+    "chunks": [
+      {
+        "chunk_id": "abc123",
+        "source_url": "s3://bucket/doc.pdf",
+        "content": "Governance frameworks establish...",
+        "scores": {
+          "dense": 0.92,
+          "sparse": 0.87,
+          "fusion": 0.895,
+          "rerank": 0.94
+        }
+      }
+    ],
+    "retrieval": {
+      "mode": "hybrid",
+      "candidates": {"dense": 50, "sparse": 50, "fused": 35},
+      "rerank": {"enabled": true, "applied": true, "count": 10}
+    },
+    "cache_hit": false,
+    "retrieval_mode": "hybrid"
+  }
+}
+```
 
-Logs are structured JSON written to stdout with the following schema:
+---
+
+## Retrieval Pipeline (Step by Step)
+
+```
+                    ┌──────────────┐
+                    │  User Query  │
+                    └──────┬───────┘
+                           │
+                    ┌──────▼───────┐
+                    │ Cache Lookup │
+                    │  (Exact ID)  │
+                    └──┬────────┬──┘
+               Hit │         │ Miss
+                   │         │
+      ┌────────────▼─┐   ┌──▼──────────┐
+      │ Return Cached │   │ Embed Query │
+      │   Answer      │   │ (Dense +    │
+      └───────────────┘   │  Sparse)    │
+                          └──┬──────────┘
+                             │
+                    ┌────────▼─────────┐
+                    │ Semantic Cache   │
+                    │ Lookup (Cosine)  │
+                    └──┬──────────┬────┘
+               Hit │         │ Miss
+                   │         │
+      ┌────────────▼─┐   ┌──▼──────────────┐
+      │ Return +      │   │ Qdrant Search   │
+      │ Promote Exact │   │ (Dense/Sparse/  │
+      │ Cache Entry   │   │  Hybrid)        │
+      └───────────────┘   └──┬──────────────┘
+                             │
+                    ┌────────▼─────────┐
+                    │ RRF Fusion       │
+                    │ (Dense + Sparse  │
+                    │  → Fused List)   │
+                    └──┬───────────────┘
+                       │
+              ┌────────▼──────────┐
+              │ Rerank Decision   │
+              │ (Auto/Always/     │
+              │  Disable)         │
+              └──┬────────────┬───┘
+         Rerank │            │ Skip
+                │            │
+     ┌──────────▼──┐    ┌───▼──────────┐
+     │ Cross-Encoder│    │ Keep Fused   │
+     │ Reranking    │    │ Scores       │
+     └──────────┬───┘    └───┬──────────┘
+                │            │
+           ┌────▼────────────▼────┐
+           │ Select Top K Results │
+           └──────────┬───────────┘
+                      │
+           ┌──────────▼───────────┐
+           │ Build Prompt +       │
+           │ Call Bedrock LLM     │
+           └──────────┬───────────┘
+                      │
+           ┌──────────▼───────────┐
+           │ Validate Citations   │
+           │ + Write Cache Entry  │
+           └──────────┬───────────┘
+                      │
+                ┌─────▼─────┐
+                │ SSE Stream │
+                └───────────┘
+```
+
+---
+
+## Caching Strategy
+
+| Cache Type | Lookup Method | Match Criteria | Score Threshold |
+|------------|---------------|----------------|-----------------|
+| **Exact** | SHA256 hash of (query + corpus + model + tenant) | ID match | ≥ 0.72 |
+| **Semantic Strict** | Cosine similarity on query embedding | Same params as query | ≥ 0.84 |
+| **Semantic Relaxed** | Cosine similarity (fallback) | Same params as query | ≥ 0.75 |
+
+**Cache Promotion**: When a semantic cache hit occurs, an exact cache entry is created for faster future lookups.
+
+---
+
+## Reranking Modes
+
+| Mode | Behavior |
+|------|----------|
+| `ALWAYS` | Always rerank fused results |
+| `AUTO` | Rerank if fusion confidence is low (top score < 0.75 or margin < 0.08) |
+| `DISABLE` | Never rerank |
+
+---
+
+## Metrics Reference
+
+### HTTP Metrics
+
+| Metric | Type | Labels |
+|--------|------|--------|
+| `http_requests_total` | Counter | `method`, `route`, `status_code` |
+| `http_request_duration_seconds` | Histogram | `method`, `route`, `status_code` |
+| `http_active_requests` | Gauge | `method`, `route` |
+| `http_errors_total` | Counter | `method`, `route`, `status_code` |
+
+### Pipeline Metrics
+
+| Metric | Type | Labels |
+|--------|------|--------|
+| `pipeline_duration_seconds` | Histogram | `outcome` (`ok`, `cache_hit`, `error`) |
+| `qdrant_query_total` | Counter | `mode` (`dense`, `sparse`, `hybrid`) |
+| `qdrant_query_duration_seconds` | Histogram | `mode` |
+| `cache_lookup_total` | Counter | `result` (`exact_hit`, `semantic_strict`, `miss`) |
+| `cache_write_total` | Counter | `result` (`ok`, `fail`), `cache_kind` (`llm`, `promotion`) |
+| `pipeline_errors_total` | Counter | `error_type` |
+
+### Dependency Metrics
+
+| Metric | Type | Labels |
+|--------|------|--------|
+| `dense_embed_requests_total` | Counter | — |
+| `dense_embed_duration_seconds` | Histogram | — |
+| `sparse_embed_requests_total` | Counter | — |
+| `sparse_embed_duration_seconds` | Histogram | — |
+| `rerank_requests_total` | Counter | — |
+| `rerank_duration_seconds` | Histogram | — |
+| `llm_requests_total` | Counter | `mode` (`generate`, `stream`) |
+| `llm_duration_seconds` | Histogram | `mode` |
+| `circuit_breaker_open_total` | Counter | `dependency` |
+| `retry_attempts_total` | Counter | `dependency`, `attempt` |
+| `dependency_errors_total` | Counter | `dependency`, `error_type` |
+
+### Service Health
+
+| Metric | Type | Values |
+|--------|------|--------|
+| `service_ready` | Gauge | `1` = ready, `0` = not ready |
+
+---
+
+## Log Format
 
 ```json
 {
@@ -85,8 +277,9 @@ Logs are structured JSON written to stdout with the following schema:
   "level": "info",
   "message": "store bootstrap complete",
   "service": "retriever",
-  "deployment.environment": "PROD",
-  "env": "PROD",
+  "environment": "PROD",
+  "instance": "retriever-647dd747c4-6pprj",
+  "namespace": "inference",
   "fields": {
     "docs_ready": true,
     "cache_ready": true
@@ -94,190 +287,79 @@ Logs are structured JSON written to stdout with the following schema:
 }
 ```
 
-## HTTP routes
+| Field | Description |
+|-------|-------------|
+| `timestamp` | ISO 8601 with milliseconds, UTC |
+| `level` | `debug`, `info`, `warn`, `error` |
+| `message` | Human-readable event description |
+| `service` | Always `retriever` |
+| `environment` | Deployment environment |
+| `instance` | Pod name |
+| `namespace` | Kubernetes namespace |
+| `fields` | Dynamic event-specific data |
 
-### `GET /healthz`
+---
 
-Liveness check.
+## Configuration: Required vs Default
 
-Response:
+### Must Be Set (Non-Derivable)
 
-```json
-{"status":"ok"}
-```
+| Variable | Purpose | Example |
+|----------|---------|---------|
+| `AWS_REGION` | Bedrock region | `ap-south-1` |
+| `BEDROCK_MODEL_ID` | LLM model | `meta.llama3-8b-instruct-v1:0` |
+| `COLLECTION_NAME` | Qdrant collection | `default_rag_collection1` |
 
-### `GET /readyz`
+### Use Defaults (Derivable from Kubernetes conventions)
 
-Readiness check.
+| Variable | Default |
+|----------|---------|
+| `DENSE_URL` | `http://dense-svc.inference.svc.cluster.local:8200` |
+| `SPARSE_URL` | `http://sparse-svc.inference.svc.cluster.local:8201` |
+| `RERANKER_URL` | `http://reranker-svc.inference.svc.cluster.local:8202` |
+| `QDRANT_URL` | `http://qdrant.qdrant.svc.cluster.local:6333` |
 
-Returns dependency readiness, cache readiness, retriever readiness, and bootstrap error state.
+### Common Tuning Parameters
 
-### `GET /metrics`
+| Variable | Default | When to Change |
+|----------|---------|----------------|
+| `LOG_LEVEL` | `WARNING` | Set to `DEBUG` for troubleshooting |
+| `LLM_TEMPERATURE` | `0.0` | Increase (0-1) for creative answers |
+| `CACHE_TTL_SECONDS` | `86400` | Lower for faster cache eviction |
+| `RERANKER_MODE` | `AUTO` | `ALWAYS` for stricter reranking |
+| `MAX_CHUNKS_TO_LLM` | `5` | Increase for more context |
 
-Prometheus metrics endpoint. Exposes all service metrics for scraping.
+---
 
-### `POST /generate/stream`
+## Files
 
-Primary public API.
+| File | Purpose |
+|------|---------|
+| `settings.py` | All configuration, env var parsing, request models |
+| `telemetry.py` | JSON structured logger |
+| `clients.py` | Async HTTP clients with retry, circuit breakers, metrics |
+| `pipeline.py` | RAG pipeline: cache, embed, retrieve, rerank, generate |
+| `main.py` | FastAPI app, SSE streaming, health probes, HTTP metrics |
+| `store.py` | Qdrant vector DB and semantic cache operations |
+| `helpers.py` | Text normalization, prompt building, citation filtering |
+| `Dockerfile` | Multi-stage build, runs on port 8001 |
 
-Server-sent event stream for answer generation. Emits:
+---
 
-* `start`
-* `delta`
-* `done`
-* `error`
+## Production Checklist
 
-Request body:
-
-```json
-{
-  "query": "how governance differs from guardrails?",
-  "top_k": 5,
-  "fetch_k": 20,
-  "return_chunks": true
-}
-```
-
-## Retrieval pipeline
-
-The retrieval pipeline is responsible for:
-
-* semantic cache lookup (exact and semantic similarity)
-* dense query embedding
-* sparse query embedding
-* Qdrant retrieval (dense, sparse, or hybrid)
-* reranker scoring (auto/always/disable modes)
-* candidate fusion (RRF + softmax combination)
-* Bedrock answer generation (streaming with fallback)
-* citation validation and filtering
-* cache writeback for streaming results
-
-## Dependencies
-
-The retriever talks to:
-
-* **Qdrant** for vector and sparse retrieval
-* **Dense model server** for dense embeddings
-* **Sparse model server** for sparse embeddings
-* **Reranker service** for reordering candidates
-* **Amazon Bedrock** for LLM generation
-
-## Configuration
-
-Configuration comes from environment variables at startup.
-
-### Core service identity
-
-* `SERVICE_NAME` — default: `retrieval`
-* `SERVICE_VERSION` — default: `unknown`
-* `ENV` — default: `PROD`
-* `DEPLOYMENT_ENVIRONMENT` — default: `PROD`
-* `CLUSTER_NAME` — Kubernetes cluster name
-* `SERVICE_INSTANCE_ID` — pod instance identifier
-
-### Retriever backends
-
-* `QDRANT_URL` — default: `http://qdrant.qdrant.svc.cluster.local:6333`
-* `QDRANT_API_KEY` — Qdrant API key (optional)
-* `COLLECTION_NAME` — default: `default_rag_collection1`
-* `CACHE_COLLECTION_NAME` — default: `{COLLECTION_NAME}__semantic_cache`
-* `DENSE_URL` — default: `http://dense-svc.inference.svc.cluster.local:8200`
-* `SPARSE_URL` — default: `http://sparse-svc.inference.svc.cluster.local:8201`
-* `RERANKER_URL` — default: `http://reranker-svc.inference.svc.cluster.local:8202`
-* `AWS_REGION` — default: `ap-south-1`
-* `BEDROCK_MODEL_ID` — default: `meta.llama3-8b-instruct-v1:0`
-* `BEDROCK_GUARDRAIL_IDENTIFIER` — Bedrock guardrail ID (optional)
-* `BEDROCK_GUARDRAIL_VERSION` — Bedrock guardrail version (optional)
-
-### Retrieval behavior
-
-* `CORPUS_VERSION` — default: `v1`
-* `PROMPT_VERSION` — default: `v1`
-* `RETRIEVAL_VERSION` — default: `retrieval-v1`
-* `TENANT_ID` — tenant identifier (optional)
-* `DENSE_DIM` — default: `384`
-* `MAX_CHUNKS_TO_LLM` — default: `5`
-* `QUERY_TOPK_DENSE` — default: `50`
-* `QUERY_TOPK_SPARSE` — default: `50`
-* `FETCH_K` — default: `20`
-* `RERANK_TOPK` — default: `10`
-* `RERANKER_MODE` — `AUTO`, `ALWAYS`, or `DISABLE` (default: `AUTO`)
-* `RERANK_AUTO_THRESHOLD` — default: `0.75`
-* `RERANK_MARGIN` — default: `0.08`
-* `RERANK_ALPHA` — default: `0.6`
-* `RRF_K` — default: `60`
-* `CACHE_SCORE_THRESHOLD` — default: `0.72`
-* `CACHE_TTL_SECONDS` — default: `86400`
-* `CACHE_CLEANUP_INTERVAL_SECONDS` — default: `900`
-* `PROMPT_MAX_CONTENT_CHARS` — default: `2500`
-* `CHUNK_OUTPUT_MAX_CHARS` — default: `1600`
-* `MAX_PROMPT_CHARS` — default: `40000`
-* `MAX_CONCURRENT_REQUESTS` — default: `64`
-* `HTTP_TIMEOUT` — default: `10.0`
-* `HTTP_MAX_CONNECTIONS` — default: `100`
-* `HTTP_MAX_KEEPALIVE` — default: `20`
-* `RETRY_MAX_ATTEMPTS` — default: `3`
-* `RETRY_BASE_DELAY` — default: `0.08`
-* `RETRY_MAX_DELAY` — default: `0.8`
-* `BREAKER_FAILURE_THRESHOLD` — default: `3`
-* `BREAKER_RESET_TIMEOUT` — default: `20.0`
-* `LLM_MAX_TOKENS` — default: `400`
-* `LLM_TEMPERATURE` — default: `0.0`
-
-### Prometheus
-
-* `ENABLE_PROMETHEUS` — default: `true`
-* `PROMETHEUS_PORT` — default: `9090`
-* `PROMETHEUS_PATH` — default: `/metrics`
-
-### Logging
-
-* `LOG_LEVEL` — default: `WARNING` (options: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`)
-
-## Monitoring setup
-
-Metrics are exposed at `/metrics` on the main service port (default: 8001) for Prometheus scraping.
-
-Recommended defaults:
-
-* Prometheus metrics enabled
-* Log level: `INFO` for production, `DEBUG` for troubleshooting
-* Scrape interval: 15-30 seconds
-
-## Rate limiting model
-
-Rate limiting uses client IP address:
-
-* All requests: IP-based rate limiting
-* Default limit: 60 requests per minute
-
-## Operational cautions
-
-* Keep metric labels low-cardinality.
-* Do not put raw queries, document text, or cache keys into metric labels.
-* Use structured logs for request-specific detail.
-* Validate dependency connectivity early at startup.
-* Cache health states and update asynchronously.
-* Health checks run in background loops with graceful cancellation.
-
-## Files in this service
-
-* `settings.py` — service and retrieval configuration
-* `telemetry.py` — JSON structured logging
-* `clients.py` — outbound dependency clients with retry, metrics, and circuit breakers
-* `pipeline.py` — retrieval pipeline, cache, rerank, LLM, readiness
-* `main.py` — FastAPI app, stream route, startup/shutdown
-* `store.py` — Qdrant access and cache persistence
-* `helpers.py` — prompt shaping, normalization, and citation filtering
-
-## Expected behavior
-
-A healthy request flow should produce:
-
-1. structured JSON logs for startup and health checks
-2. one pipeline execution with Prometheus metrics
-3. several dependency calls with individual metrics
-4. streaming SSE response with citations
-5. cache hit/miss metrics
-6. Prometheus metrics at `/metrics`
-7. all dependencies showing healthy in `/readyz`
+| Item | Status |
+|------|--------|
+| Auth handled externally | ✅ |
+| Prometheus metrics on `/metrics` | ✅ |
+| Structured JSON logs to stdout | ✅ |
+| Request ID propagation to downstream | ✅ |
+| Circuit breakers on all dependencies | ✅ |
+| Retry with exponential backoff | ✅ |
+| Graceful shutdown (30s timeout) | ✅ |
+| Fast health loop shutdown (0.5s intervals) | ✅ |
+| Metric label cardinality validated | ✅ |
+| Cache TTL with background cleanup | ✅ |
+| Streaming SSE with disconnect detection | ✅ |
+| IP-based rate limiting (60 req/min) | ✅ |
+| Startup/liveness/readiness probes | ✅ |
