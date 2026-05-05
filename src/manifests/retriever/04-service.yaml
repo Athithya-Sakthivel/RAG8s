@@ -19,3 +19,7 @@ spec:
     port: 8001
     targetPort: 8001
     protocol: TCP
+  - name: metrics
+    port: 9090
+    targetPort: 9090
+    protocol: TCP

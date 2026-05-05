@@ -67,7 +67,6 @@ def _rate_limit_key(request: Request) -> str:
 
 
 limiter = Limiter(key_func=_rate_limit_key, default_limits=[])
-
 # ---------------------------------------------------------------------------
 # FastAPI application
 # ---------------------------------------------------------------------------
@@ -139,6 +138,14 @@ async def lifespan(app: FastAPI):
         docs_ready, cache_ready = await state.store.bootstrap()
         state.store.docs_ready = docs_ready
         state.store.cache_ready = cache_ready
+        log.info(
+            "store bootstrap complete",
+            docs_ready=docs_ready,
+            cache_ready=cache_ready,
+        )
+    except asyncio.CancelledError:
+        log.info("store bootstrap cancelled during shutdown")
+        # Still yield to allow cleanup
     except Exception as e:
         startup_bootstrap_error = str(e)
         log.warn("bootstrap pending", error=str(e))
@@ -146,31 +153,51 @@ async def lifespan(app: FastAPI):
     bg_health = asyncio.create_task(_health_loop(state))
     bg_cleanup = asyncio.create_task(_cache_cleanup_loop(state))
     app.state.background_tasks = (bg_health, bg_cleanup)
+    
+    log.info("retriever service started successfully")
 
-    yield
-
-    # Graceful shutdown
-    for task in app.state.background_tasks:
-        task.cancel()
-    for task in app.state.background_tasks:
+    try:
+        yield
+    finally:
+        # Graceful shutdown
+        log.info("shutting down retriever service")
+        
+        # Mark as not ready
         try:
-            await task
+            app.state.state.health["ready"] = False
         except Exception:
             pass
-    for c in (dense, sparse, reranker):
+        
+        # Cancel background tasks
+        for task in app.state.background_tasks:
+            if not task.done():
+                task.cancel()
+        
+        # Wait for tasks to finish (handle cancellation gracefully)
+        for task in app.state.background_tasks:
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass  # Expected during shutdown
+            except Exception:
+                pass
+        
+        # Close clients
+        for client, name in [(dense, "dense"), (sparse, "sparse"), (reranker, "reranker")]:
+            try:
+                await client.close()
+                log.debug(f"{name} client closed")
+            except Exception as e:
+                log.debug(f"{name} client close error: {e}")
+        
+        # Close store
         try:
-            await c.close()
-        except Exception:
-            pass
-    try:
-        await store.close()
-    except Exception:
-        pass
-    try:
-        app.state.state.health["ready"] = False
-    except Exception:
-        pass
-
+            await store.close()
+            log.debug("store closed")
+        except Exception as e:
+            log.debug(f"store close error: {e}")
+        
+        log.info("retriever service shutdown complete")
 
 app = FastAPI(lifespan=lifespan)
 app.state.limiter = limiter

@@ -35,11 +35,14 @@ spec:
         emptyDir: {}
       containers:
       - name: retriever
-        image: ghcr.io/athithya-sakthivel/retriever:2026-05-03-21-22--6f63fcf@sha256:f36d52fa870fd07e226e16b1553216b10f68193b533961519a3a56b5f55f40fa
+        image: ghcr.io/athithya-sakthivel/retriever:2026-05-05-19-54--3c70819@sha256:d1d8d6c9d18189902460ab1dc7944fbf708b899ebcb786548eb3812b71284ff3
         imagePullPolicy: IfNotPresent
         ports:
         - name: http
           containerPort: 8001
+          protocol: TCP
+        - name: metrics
+          containerPort: 9090
           protocol: TCP
         env:
         - name: POD_NAME
@@ -50,6 +53,22 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+        - name: SERVICE_NAME
+          value: retriever
+        - name: SERVICE_VERSION
+          value: unknown
+        - name: DEPLOYMENT_ENVIRONMENT
+          value: PROD
+        - name: ENV
+          value: PROD
+        - name: LOG_LEVEL
+          value: INFO
+        - name: ENABLE_PROMETHEUS
+          value: 'true'
+        - name: PROMETHEUS_PORT
+          value: '9090'
+        - name: PROMETHEUS_PATH
+          value: /metrics
         envFrom:
         - secretRef:
             name: retriever-secrets

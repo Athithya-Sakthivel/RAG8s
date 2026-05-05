@@ -1015,10 +1015,10 @@ async def _cache_cleanup_loop(state: ServiceState) -> None:
         except Exception as e:
             logger.debug("cache cleanup failed: %s", e)
         await asyncio.sleep(CACHE_CLEANUP_INTERVAL_SECONDS)
-
-
 async def _health_loop(state: ServiceState) -> None:
+    """Monitor health of all dependencies. Handles cancellation gracefully."""
     last_snapshot: dict[str, bool] | None = None
+    
     while not SHUTDOWN:
         try:
             if not state.store.docs_ready or not state.store.cache_ready:
@@ -1026,6 +1026,8 @@ async def _health_loop(state: ServiceState) -> None:
                     docs_ready, cache_ready = await state.store.bootstrap()
                     state.store.docs_ready = docs_ready
                     state.store.cache_ready = cache_ready
+                except asyncio.CancelledError:
+                    raise  # Propagate cancellation
                 except Exception:
                     pass
 
@@ -1048,11 +1050,14 @@ async def _health_loop(state: ServiceState) -> None:
             }
             state.health = snapshot
             _set_ready(snapshot["ready"])
+            
             if snapshot != last_snapshot:
                 logger.debug("dependency health %s", snapshot)
                 last_snapshot = dict(snapshot)
+                
         except asyncio.CancelledError:
-            raise
+            logger.debug("Health loop cancelled, shutting down gracefully")
+            break  # Exit the loop cleanly on cancellation
         except Exception as e:
             state.health = {
                 "qdrant": False,
@@ -1067,8 +1072,13 @@ async def _health_loop(state: ServiceState) -> None:
             }
             _set_ready(False)
             logger.warning("health loop failed: %s", e)
-        await asyncio.sleep(10)
-
+        
+        # Sleep with cancellation handling
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            logger.debug("Health loop sleep cancelled")
+            break  # Exit cleanly
 
 __all__ = [
     "SHUTDOWN",

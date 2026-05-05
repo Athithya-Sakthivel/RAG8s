@@ -14,65 +14,87 @@ from typing import Any
 
 import yaml
 
-# From original file:
-# LOG_LEVEL = os.environ.get("RETRIEVER_GEN_LOGLEVEL", "INFO").upper()
-# SECRET_KEYS = ("QDRANT_API_KEY", "ZITADEL_CLIENT_ID", "ZITADEL_CLIENT_SECRET", "SESSION_SECRET", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",)
-#
-# The rewritten file below avoids writing AWS_* secrets into YAML files while still allowing them
-# to be applied into the cluster and made available to pods when USE_IAM=false.
-
 LOG_LEVEL = os.environ.get("RETRIEVER_GEN_LOGLEVEL", "INFO").upper()
-logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO), format="%(asctime)s %(levelname)s %(message)s")
+logging.basicConfig(
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
+    format="%(asctime)s %(levelname)s %(message)s"
+)
 log = logging.getLogger("gen_retriever")
 
 MANIFESTS_DIR = Path("src/manifests/retriever")
 STATE_DIRNAME = ".state"
 
+# ---------------------------------------------------------------------------
+# Defaults - aligned with latest settings.py (no auth, prometheus instead of otel)
+# ---------------------------------------------------------------------------
 DEFAULTS: dict[str, Any] = {
+    # Kubernetes metadata
     "NAMESPACE": "inference",
     "DEPLOYMENT_NAME": "retriever",
     "SERVICE_NAME": "retriever",
     "SERVICE_ACCOUNT_NAME": "retriever-sa",
     "SECRET_NAME": "retriever-secrets",
-    "IMAGE": "ghcr.io/athithya-sakthivel/retriever:2026-05-03-21-22--6f63fcf@sha256:f36d52fa870fd07e226e16b1553216b10f68193b533961519a3a56b5f55f40fa",
+    
+    # Container image
+    "IMAGE": "ghcr.io/athithya-sakthivel/retriever:2026-05-05-19-54--3c70819@sha256:d1d8d6c9d18189902460ab1dc7944fbf708b899ebcb786548eb3812b71284ff3",
     "IMAGE_PULL_POLICY": "IfNotPresent",
+    
+    # Scaling
     "REPLICAS": 1,
     "CONTAINER_PORT": 8001,
+    
+    # Resources
     "CPU_REQUEST": "250m",
     "CPU_LIMIT": "1",
     "MEMORY_REQUEST": "512Mi",
     "MEMORY_LIMIT": "1Gi",
+    
+    # Security context
     "RUN_AS_USER": 1000,
     "RUN_AS_GROUP": 1000,
     "FS_GROUP": 1000,
+    "RUN_AS_NONROOT": True,
+    "ALLOW_PRIV_ESC": False,
+    "READONLY_ROOTFS": True,
+    
+    # Service
     "SERVICE_TYPE": "ClusterIP",
+    
+    # AWS / IAM
     "USE_IAM": False,
     "IRSA_ROLE_ARN": "",
+    
+    # Probes
     "READINESS_INITIAL_DELAY": 10,
     "LIVENESS_INITIAL_DELAY": 30,
     "PROBE_PERIOD_SECONDS": 5,
     "PROBE_TIMEOUT_SECONDS": 5,
     "STARTUP_FAILURE_THRESHOLD": 60,
+    
+    # Rollout
     "ROLLOUT_TIMEOUT": 300,
-    "RUN_AS_NONROOT": True,
-    "ALLOW_PRIV_ESC": False,
-    "READONLY_ROOTFS": True,
+    
+    # Prometheus (replaces OTEL)
+    "PROMETHEUS_PORT": 9090,
+    "PROMETHEUS_PATH": "/metrics",
+    "ENABLE_PROMETHEUS": True,
 }
 
-# Keys that are considered sensitive AWS credentials
+# ---------------------------------------------------------------------------
+# Secret keys (auth-related keys removed)
+# ---------------------------------------------------------------------------
 AWS_SECRET_KEYS = ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY")
 
-# All secret keys we consider for collection (keeps parity with original)
 SECRET_KEYS = (
     "QDRANT_API_KEY",
-    "ZITADEL_CLIENT_ID",
-    "ZITADEL_CLIENT_SECRET",
-    "SESSION_SECRET",
     "AWS_ACCESS_KEY_ID",
     "AWS_SECRET_ACCESS_KEY",
+    # Note: No ZITADEL_* or SESSION_SECRET keys - auth is handled externally
 )
 
-
+# ---------------------------------------------------------------------------
+# Environment variable helpers
+# ---------------------------------------------------------------------------
 def _env_str(name: str, default: str) -> str:
     raw = os.getenv(name)
     if raw is None:
@@ -91,6 +113,16 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return float(raw.strip())
+    except Exception:
+        return default
+
+
 def _env_bool(name: str, default: bool) -> bool:
     raw = os.getenv(name)
     if raw is None or raw.strip() == "":
@@ -98,6 +130,9 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
+# ---------------------------------------------------------------------------
+# File utilities
+# ---------------------------------------------------------------------------
 def ensure_dir(p: Path) -> None:
     p.mkdir(parents=True, exist_ok=True)
 
@@ -124,43 +159,65 @@ def canonical_inputs_hash(payload: dict[str, Any]) -> str:
     return hashlib.sha256(j.encode("utf-8")).hexdigest()
 
 
+# ---------------------------------------------------------------------------
+# Configuration loading
+# ---------------------------------------------------------------------------
 def load_config() -> dict[str, Any]:
     cfg: dict[str, Any] = {}
     cfg["MANIFESTS_DIR"] = Path(os.getenv("MANIFESTS_DIR", str(MANIFESTS_DIR)))
     cfg["STATE_DIRNAME"] = os.getenv("STATE_DIRNAME", STATE_DIRNAME)
     cfg["INPUTS_HASH_PATH"] = cfg["MANIFESTS_DIR"] / cfg["STATE_DIRNAME"] / "inputs.sha256"
 
+    # Kubernetes metadata
     cfg["NAMESPACE"] = _env_str("NAMESPACE", DEFAULTS["NAMESPACE"])
     cfg["DEPLOYMENT_NAME"] = _env_str("DEPLOYMENT_NAME", DEFAULTS["DEPLOYMENT_NAME"])
     cfg["SERVICE_NAME"] = _env_str("SERVICE_NAME", DEFAULTS["SERVICE_NAME"])
     cfg["SERVICE_ACCOUNT_NAME"] = _env_str("SERVICE_ACCOUNT_NAME", DEFAULTS["SERVICE_ACCOUNT_NAME"])
     cfg["SECRET_NAME"] = _env_str("SECRET_NAME", DEFAULTS["SECRET_NAME"])
+    
+    # Image
     cfg["IMAGE"] = _env_str("IMAGE", DEFAULTS["IMAGE"])
     cfg["IMAGE_PULL_POLICY"] = _env_str("IMAGE_PULL_POLICY", DEFAULTS["IMAGE_PULL_POLICY"])
+    
+    # Scaling
     cfg["REPLICAS"] = _env_int("REPLICAS", DEFAULTS["REPLICAS"])
     cfg["CONTAINER_PORT"] = _env_int("CONTAINER_PORT", DEFAULTS["CONTAINER_PORT"])
+    
+    # Resources
     cfg["CPU_REQUEST"] = _env_str("CPU_REQUEST", DEFAULTS["CPU_REQUEST"])
     cfg["CPU_LIMIT"] = _env_str("CPU_LIMIT", DEFAULTS["CPU_LIMIT"])
     cfg["MEMORY_REQUEST"] = _env_str("MEMORY_REQUEST", DEFAULTS["MEMORY_REQUEST"])
     cfg["MEMORY_LIMIT"] = _env_str("MEMORY_LIMIT", DEFAULTS["MEMORY_LIMIT"])
+    
+    # Security
     cfg["RUN_AS_USER"] = _env_int("RUN_AS_USER", DEFAULTS["RUN_AS_USER"])
     cfg["RUN_AS_GROUP"] = _env_int("RUN_AS_GROUP", DEFAULTS["RUN_AS_GROUP"])
     cfg["FS_GROUP"] = _env_int("FS_GROUP", DEFAULTS["FS_GROUP"])
+    cfg["RUN_AS_NONROOT"] = _env_bool("RUN_AS_NONROOT", DEFAULTS["RUN_AS_NONROOT"])
+    cfg["ALLOW_PRIV_ESC"] = _env_bool("ALLOW_PRIV_ESC", DEFAULTS["ALLOW_PRIV_ESC"])
+    cfg["READONLY_ROOTFS"] = _env_bool("READONLY_ROOTFS", DEFAULTS["READONLY_ROOTFS"])
+    
+    # Service
     cfg["SERVICE_TYPE"] = _env_str("SERVICE_TYPE", DEFAULTS["SERVICE_TYPE"])
+    
+    # AWS
     cfg["USE_IAM"] = _env_bool("USE_IAM", DEFAULTS["USE_IAM"])
     cfg["IRSA_ROLE_ARN"] = _env_str("IRSA_ROLE_ARN", DEFAULTS["IRSA_ROLE_ARN"])
-
+    
+    # Probes
     cfg["READINESS_INITIAL_DELAY"] = _env_int("READINESS_INITIAL_DELAY", DEFAULTS["READINESS_INITIAL_DELAY"])
     cfg["LIVENESS_INITIAL_DELAY"] = _env_int("LIVENESS_INITIAL_DELAY", DEFAULTS["LIVENESS_INITIAL_DELAY"])
     cfg["PROBE_PERIOD_SECONDS"] = _env_int("PROBE_PERIOD_SECONDS", DEFAULTS["PROBE_PERIOD_SECONDS"])
     cfg["PROBE_TIMEOUT_SECONDS"] = _env_int("PROBE_TIMEOUT_SECONDS", DEFAULTS["PROBE_TIMEOUT_SECONDS"])
     cfg["STARTUP_FAILURE_THRESHOLD"] = _env_int("STARTUP_FAILURE_THRESHOLD", DEFAULTS["STARTUP_FAILURE_THRESHOLD"])
     cfg["ROLLOUT_TIMEOUT"] = _env_int("ROLLOUT_TIMEOUT", DEFAULTS["ROLLOUT_TIMEOUT"])
+    
+    # Prometheus
+    cfg["PROMETHEUS_PORT"] = _env_int("PROMETHEUS_PORT", DEFAULTS["PROMETHEUS_PORT"])
+    cfg["PROMETHEUS_PATH"] = _env_str("PROMETHEUS_PATH", DEFAULTS["PROMETHEUS_PATH"])
+    cfg["ENABLE_PROMETHEUS"] = _env_bool("ENABLE_PROMETHEUS", DEFAULTS["ENABLE_PROMETHEUS"])
 
-    cfg["RUN_AS_NONROOT"] = _env_bool("RUN_AS_NONROOT", DEFAULTS["RUN_AS_NONROOT"])
-    cfg["ALLOW_PRIV_ESC"] = _env_bool("ALLOW_PRIV_ESC", DEFAULTS["ALLOW_PRIV_ESC"])
-    cfg["READONLY_ROOTFS"] = _env_bool("READONLY_ROOTFS", DEFAULTS["READONLY_ROOTFS"])
-
+    # File paths
     cfg["FILES"] = {
         "serviceaccount": cfg["MANIFESTS_DIR"] / "01-serviceaccount.yaml",
         "secret": cfg["MANIFESTS_DIR"] / "02-secret.yaml",
@@ -171,15 +228,19 @@ def load_config() -> dict[str, Any]:
 
     cfg["UUID_SHORT"] = str(uuid.uuid4())[:8]
     log.info(
-        "Loaded config: namespace=%s deployment=%s replicas=%d image=%s",
+        "Loaded config: namespace=%s deployment=%s replicas=%d image=%s prometheus=%s",
         cfg["NAMESPACE"],
         cfg["DEPLOYMENT_NAME"],
         cfg["REPLICAS"],
         cfg["IMAGE"],
+        "enabled" if cfg["ENABLE_PROMETHEUS"] else "disabled",
     )
     return cfg
 
 
+# ---------------------------------------------------------------------------
+# Label helpers
+# ---------------------------------------------------------------------------
 def _base_labels(cfg: dict[str, Any]) -> dict[str, str]:
     return {
         "app.kubernetes.io/name": cfg["SERVICE_NAME"],
@@ -195,7 +256,17 @@ def _pod_labels(cfg: dict[str, Any]) -> dict[str, str]:
     return labels
 
 
-def _probe_http(path: str, port: int, initial_delay: int, period: int, timeout: int, failure_threshold: int) -> dict[str, Any]:
+# ---------------------------------------------------------------------------
+# Probe helper
+# ---------------------------------------------------------------------------
+def _probe_http(
+    path: str,
+    port: int,
+    initial_delay: int,
+    period: int,
+    timeout: int,
+    failure_threshold: int,
+) -> dict[str, Any]:
     return {
         "httpGet": {"path": path, "port": port, "scheme": "HTTP"},
         "initialDelaySeconds": initial_delay,
@@ -206,11 +277,14 @@ def _probe_http(path: str, port: int, initial_delay: int, period: int, timeout: 
     }
 
 
+# ---------------------------------------------------------------------------
+# Secret collection (auth keys removed)
+# ---------------------------------------------------------------------------
 def collect_secret_env() -> dict[str, str]:
     """
-    Collect secret values from environment. This returns all non-empty values for keys in SECRET_KEYS.
-    Note: AWS keys are included here when present; later logic decides whether to write them to YAML
-    or apply them directly to the cluster (to avoid hardcoding them into manifest files).
+    Collect secret values from environment.
+    Only QDRANT_API_KEY and AWS_* keys are considered.
+    ZITADEL_* and SESSION_SECRET have been removed.
     """
     secret_env: dict[str, str] = {}
     for key in SECRET_KEYS:
@@ -220,12 +294,13 @@ def collect_secret_env() -> dict[str, str]:
         v = value.strip()
         if not v:
             continue
-        # If USE_IAM is true, we should not include AWS keys at all (they are ignored).
-        # The caller will check cfg["USE_IAM"] and act accordingly.
         secret_env[key] = v
     return secret_env
 
 
+# ---------------------------------------------------------------------------
+# Manifest builders
+# ---------------------------------------------------------------------------
 def build_service_account_doc(cfg: dict[str, Any]) -> dict[str, Any]:
     metadata: dict[str, Any] = {
         "name": cfg["SERVICE_ACCOUNT_NAME"],
@@ -233,15 +308,20 @@ def build_service_account_doc(cfg: dict[str, Any]) -> dict[str, Any]:
         "labels": _base_labels(cfg),
     }
     if cfg["USE_IAM"] and cfg["IRSA_ROLE_ARN"]:
-        metadata.setdefault("annotations", {})["eks.amazonaws.com/role-arn"] = cfg["IRSA_ROLE_ARN"]
-    return {"apiVersion": "v1", "kind": "ServiceAccount", "metadata": metadata}
+        metadata.setdefault("annotations", {})[
+            "eks.amazonaws.com/role-arn"
+        ] = cfg["IRSA_ROLE_ARN"]
+    return {
+        "apiVersion": "v1",
+        "kind": "ServiceAccount",
+        "metadata": metadata,
+    }
 
 
-def build_secret_doc(cfg: dict[str, Any], secret_env_for_yaml: dict[str, str]) -> dict[str, Any] | None:
-    """
-    Build a Secret manifest only for the keys that are safe to write into YAML.
-    AWS_* keys will be excluded from secret_env_for_yaml when we want to avoid writing them.
-    """
+def build_secret_doc(
+    cfg: dict[str, Any], secret_env_for_yaml: dict[str, str]
+) -> dict[str, Any] | None:
+    """Build a Secret manifest only for non-AWS keys."""
     if not secret_env_for_yaml:
         return None
     return {
@@ -262,15 +342,35 @@ def build_deployment_doc(cfg: dict[str, Any], has_secret: bool) -> dict[str, Any
     if has_secret:
         env_from.append({"secretRef": {"name": cfg["SECRET_NAME"]}})
 
+    # Environment variables aligned with latest settings.py
+    env_vars = [
+        {"name": "POD_NAME", "valueFrom": {"fieldRef": {"fieldPath": "metadata.name"}}},
+        {"name": "POD_NAMESPACE", "valueFrom": {"fieldRef": {"fieldPath": "metadata.namespace"}}},
+        # Service identity (kept for compatibility, though not OTEL-specific)
+        {"name": "SERVICE_NAME", "value": cfg["SERVICE_NAME"]},
+        {"name": "SERVICE_VERSION", "value": "unknown"},
+        {"name": "DEPLOYMENT_ENVIRONMENT", "value": "PROD"},
+        {"name": "ENV", "value": "PROD"},
+        # Logging
+        {"name": "LOG_LEVEL", "value": "INFO"},
+        # Prometheus (replaces OTEL)
+        {"name": "ENABLE_PROMETHEUS", "value": str(cfg["ENABLE_PROMETHEUS"]).lower()},
+        {"name": "PROMETHEUS_PORT", "value": str(cfg["PROMETHEUS_PORT"])},
+        {"name": "PROMETHEUS_PATH", "value": cfg["PROMETHEUS_PATH"]},
+    ]
+
     container = {
         "name": cfg["DEPLOYMENT_NAME"],
         "image": cfg["IMAGE"],
         "imagePullPolicy": cfg["IMAGE_PULL_POLICY"],
-        "ports": [{"name": "http", "containerPort": cfg["CONTAINER_PORT"], "protocol": "TCP"}],
-        "env": [
-            {"name": "POD_NAME", "valueFrom": {"fieldRef": {"fieldPath": "metadata.name"}}},
-            {"name": "POD_NAMESPACE", "valueFrom": {"fieldRef": {"fieldPath": "metadata.namespace"}}},
+        "ports": [
+            {"name": "http", "containerPort": cfg["CONTAINER_PORT"], "protocol": "TCP"},
+            # Prometheus metrics port (if different from main port)
+            *([
+                {"name": "metrics", "containerPort": cfg["PROMETHEUS_PORT"], "protocol": "TCP"}
+            ] if cfg["ENABLE_PROMETHEUS"] and cfg["PROMETHEUS_PORT"] != cfg["CONTAINER_PORT"] else []),
         ],
+        "env": env_vars,
         "envFrom": env_from,
         "volumeMounts": [
             {"name": "tmp", "mountPath": "/tmp"},
@@ -284,8 +384,14 @@ def build_deployment_doc(cfg: dict[str, Any], has_secret: bool) -> dict[str, Any
             "runAsGroup": int(cfg["RUN_AS_GROUP"]),
         },
         "resources": {
-            "requests": {"cpu": cfg["CPU_REQUEST"], "memory": cfg["MEMORY_REQUEST"]},
-            "limits": {"cpu": cfg["CPU_LIMIT"], "memory": cfg["MEMORY_LIMIT"]},
+            "requests": {
+                "cpu": cfg["CPU_REQUEST"],
+                "memory": cfg["MEMORY_REQUEST"],
+            },
+            "limits": {
+                "cpu": cfg["CPU_LIMIT"],
+                "memory": cfg["MEMORY_LIMIT"],
+            },
         },
         "readinessProbe": _probe_http(
             "/readyz",
@@ -349,6 +455,23 @@ def build_deployment_doc(cfg: dict[str, Any], has_secret: bool) -> dict[str, Any
 
 
 def build_service_doc(cfg: dict[str, Any]) -> dict[str, Any]:
+    ports = [
+        {
+            "name": "http",
+            "port": cfg["CONTAINER_PORT"],
+            "targetPort": cfg["CONTAINER_PORT"],
+            "protocol": "TCP",
+        }
+    ]
+    # Add Prometheus metrics port if different
+    if cfg["ENABLE_PROMETHEUS"] and cfg["PROMETHEUS_PORT"] != cfg["CONTAINER_PORT"]:
+        ports.append({
+            "name": "metrics",
+            "port": cfg["PROMETHEUS_PORT"],
+            "targetPort": cfg["PROMETHEUS_PORT"],
+            "protocol": "TCP",
+        })
+
     return {
         "apiVersion": "v1",
         "kind": "Service",
@@ -364,14 +487,7 @@ def build_service_doc(cfg: dict[str, Any]) -> dict[str, Any]:
                 "app.kubernetes.io/instance": cfg["DEPLOYMENT_NAME"],
                 "app.kubernetes.io/component": "retriever",
             },
-            "ports": [
-                {
-                    "name": "http",
-                    "port": cfg["CONTAINER_PORT"],
-                    "targetPort": cfg["CONTAINER_PORT"],
-                    "protocol": "TCP",
-                }
-            ],
+            "ports": ports,
         },
     }
 
@@ -400,17 +516,29 @@ def build_pdb_doc(cfg: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+# ---------------------------------------------------------------------------
+# Hash helpers
+# ---------------------------------------------------------------------------
 def sha256_secret_keys(secret_env: dict[str, str]) -> str:
-    payload = json.dumps(sorted(secret_env.keys()), separators=(",", ":"), ensure_ascii=False)
+    payload = json.dumps(
+        sorted(secret_env.keys()), separators=(",", ":"), ensure_ascii=False
+    )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def compute_config_hash(docs: list[dict[str, Any]], secret_keys_hash: str) -> str:
+def compute_config_hash(
+    docs: list[dict[str, Any]], secret_keys_hash: str
+) -> str:
     payload = {"docs": docs, "secret_keys_hash": secret_keys_hash}
-    text = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    text = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    )
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+# ---------------------------------------------------------------------------
+# File & kubectl helpers
+# ---------------------------------------------------------------------------
 def write_yaml_atomic(path: Path, doc: dict[str, Any]) -> None:
     ensure_dir(path.parent)
     content = yaml.safe_dump(doc, sort_keys=False)
@@ -420,96 +548,118 @@ def write_yaml_atomic(path: Path, doc: dict[str, Any]) -> None:
 
 def apply_yaml(path: Path) -> None:
     log.info("Applying %s", str(path))
-    subprocess.run(["kubectl", "apply", "-f", str(path)], check=True, capture_output=True)
+    subprocess.run(
+        ["kubectl", "apply", "-f", str(path)], check=True, capture_output=True
+    )
 
 
 def delete_yaml(path: Path) -> None:
     log.info("Deleting %s", str(path))
-    subprocess.run(["kubectl", "delete", "-f", str(path), "--ignore-not-found"], check=True, capture_output=True)
+    subprocess.run(
+        ["kubectl", "delete", "-f", str(path), "--ignore-not-found"],
+        check=True,
+        capture_output=True,
+    )
 
 
 def create_namespace_if_missing(namespace: str) -> None:
     rc = subprocess.run(["kubectl", "get", "ns", namespace], capture_output=True)
     if rc.returncode != 0:
         log.info("Namespace %s not found; creating", namespace)
-        subprocess.run(["kubectl", "create", "ns", namespace], check=True, capture_output=True)
+        subprocess.run(
+            ["kubectl", "create", "ns", namespace], check=True, capture_output=True
+        )
 
 
 def apply_secret_direct(cfg: dict[str, Any], secret_env: dict[str, str]) -> None:
-    """
-    Apply secrets directly into the cluster using kubectl create secret generic --from-literal ...
-    This avoids writing sensitive values into YAML files on disk.
-    """
+    """Apply secrets directly via kubectl (avoids writing to YAML)."""
     if not secret_env:
-        log.info("No secret values provided for direct apply; skipping secret apply.")
+        log.info("No secret values provided for direct apply; skipping.")
         return
-    cmd = ["kubectl", "create", "secret", "generic", cfg["SECRET_NAME"], "-n", cfg["NAMESPACE"]]
+    cmd = [
+        "kubectl", "create", "secret", "generic",
+        cfg["SECRET_NAME"], "-n", cfg["NAMESPACE"],
+    ]
     for key, value in sorted(secret_env.items()):
         cmd.extend(["--from-literal", f"{key}={value}"])
     cmd.extend(["--dry-run=client", "-o", "yaml"])
     proc = subprocess.run(cmd, check=True, capture_output=True, text=True)
-    subprocess.run(["kubectl", "apply", "-f", "-"], input=proc.stdout, text=True, check=True, capture_output=True)
+    subprocess.run(
+        ["kubectl", "apply", "-f", "-"],
+        input=proc.stdout,
+        text=True,
+        check=True,
+        capture_output=True,
+    )
     log.info("Applied secrets directly to cluster (not written to YAML).")
 
 
 def delete_secret_direct(cfg: dict[str, Any]) -> None:
     subprocess.run(
-        ["kubectl", "delete", "secret", cfg["SECRET_NAME"], "-n", cfg["NAMESPACE"], "--ignore-not-found"],
+        [
+            "kubectl", "delete", "secret",
+            cfg["SECRET_NAME"], "-n", cfg["NAMESPACE"], "--ignore-not-found",
+        ],
         check=False,
         capture_output=True,
     )
     log.info("Deleted secret if it existed")
 
 
-def generate_manifests(cfg: dict[str, Any], secret_env: dict[str, str], dry_run: bool = False, verbose: bool = False) -> str | None:
+# ---------------------------------------------------------------------------
+# Core logic
+# ---------------------------------------------------------------------------
+def generate_manifests(
+    cfg: dict[str, Any],
+    secret_env: dict[str, str],
+    dry_run: bool = False,
+    verbose: bool = False,
+) -> str | None:
     """
-    Generate manifests on disk. To avoid hardcoding AWS credentials into YAML files,
-    this function splits secret_env into two buckets:
-      - secret_env_for_yaml: keys that will be written into 02-secret.yaml
-      - secret_env_for_direct_apply: keys that will be applied directly to the cluster (not written)
-    Behavior:
-      - If USE_IAM is True, AWS keys are ignored entirely (they won't be written nor applied).
-      - If USE_IAM is False, AWS keys (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY) will be applied directly
-        to the cluster and will NOT be written into 02-secret.yaml.
-      - The Deployment will reference the secret name via envFrom secretRef if any secrets are present,
-        so pods will receive the values from the in-cluster Secret regardless of whether it was written to disk.
+    Generate manifests on disk.
+    - AWS keys are never written to YAML (applied directly if USE_IAM=false).
+    - Non-AWS keys (QDRANT_API_KEY) are written to 02-secret.yaml.
     """
     manifests_dir: Path = cfg["MANIFESTS_DIR"]
     ensure_dir(manifests_dir)
 
-    # Decide which secrets to write to YAML and which to apply directly
     secret_env_for_yaml: dict[str, str] = {}
     secret_env_for_direct_apply: dict[str, str] = {}
-
-    # If USE_IAM is true, we should not include AWS keys at all.
     use_iam = bool(cfg.get("USE_IAM", False))
 
     for k, v in secret_env.items():
         if k in AWS_SECRET_KEYS:
             if use_iam:
-                # When using IAM, do not include AWS keys anywhere.
                 log.debug("USE_IAM=true; ignoring AWS key %s", k)
                 continue
-            # USE_IAM is False: apply AWS keys directly to cluster, but do not write them to YAML.
             secret_env_for_direct_apply[k] = v
         else:
-            # Non-AWS keys: safe to write to YAML (these are still sensitive; writing them is optional)
-            # We will write non-AWS keys to YAML so they can be managed as manifests, but AWS keys are kept out.
             secret_env_for_yaml[k] = v
 
-    # Determine whether the deployment should reference the secret
     has_secret = bool(secret_env_for_yaml) or bool(secret_env_for_direct_apply)
+    secret_keys_hash = sha256_secret_keys(
+        {**secret_env_for_yaml, **secret_env_for_direct_apply}
+    )
 
-    secret_keys_hash = sha256_secret_keys({**secret_env_for_yaml, **secret_env_for_direct_apply})
     docs_for_hash = [
-        {"serviceaccount": cfg["SERVICE_ACCOUNT_NAME"], "namespace": cfg["NAMESPACE"]},
-        {"deployment": cfg["DEPLOYMENT_NAME"], "image": cfg["IMAGE"], "replicas": cfg["REPLICAS"], "secret_keys_hash": secret_keys_hash},
+        {
+            "serviceaccount": cfg["SERVICE_ACCOUNT_NAME"],
+            "namespace": cfg["NAMESPACE"],
+        },
+        {
+            "deployment": cfg["DEPLOYMENT_NAME"],
+            "image": cfg["IMAGE"],
+            "replicas": cfg["REPLICAS"],
+            "secret_keys_hash": secret_keys_hash,
+        },
         {"service": cfg["SERVICE_NAME"], "port": cfg["CONTAINER_PORT"]},
     ]
-    inputs_hash = canonical_inputs_hash({"docs": docs_for_hash, "secret_keys_hash": secret_keys_hash, "cfg": cfg})
+    inputs_hash = canonical_inputs_hash(
+        {"docs": docs_for_hash, "secret_keys_hash": secret_keys_hash, "cfg": cfg}
+    )
+
     state_dir = manifests_dir / cfg["STATE_DIRNAME"]
     ensure_dir(state_dir)
-
     inputs_path = state_dir / "inputs.sha256"
     existing = ""
     if inputs_path.exists():
@@ -522,6 +672,7 @@ def generate_manifests(cfg: dict[str, Any], secret_env: dict[str, str], dry_run:
         log.info("No changes detected; skipping manifest generation.")
         return None
 
+    # Build manifests
     sa_doc = build_service_account_doc(cfg)
     sec_doc = build_secret_doc(cfg, secret_env_for_yaml)
     dep_doc = build_deployment_doc(cfg, has_secret=has_secret)
@@ -530,17 +681,13 @@ def generate_manifests(cfg: dict[str, Any], secret_env: dict[str, str], dry_run:
 
     write_yaml_atomic(cfg["FILES"]["serviceaccount"], sa_doc)
 
-    # Only write a secret manifest if there are non-AWS keys to write.
     if sec_doc is not None:
         write_yaml_atomic(cfg["FILES"]["secret"], sec_doc)
-    else:
-        # If a secret manifest exists on disk but we intentionally don't want to write AWS keys to it,
-        # remove the stale file to avoid committing secrets to the repo.
-        if cfg["FILES"]["secret"].exists():
-            try:
-                cfg["FILES"]["secret"].unlink()
-            except Exception:
-                log.debug("Could not remove stale secret manifest", exc_info=True)
+    elif cfg["FILES"]["secret"].exists():
+        try:
+            cfg["FILES"]["secret"].unlink()
+        except Exception:
+            log.debug("Could not remove stale secret manifest", exc_info=True)
 
     write_yaml_atomic(cfg["FILES"]["deployment"], dep_doc)
     write_yaml_atomic(cfg["FILES"]["service"], svc_doc)
@@ -556,23 +703,20 @@ def generate_manifests(cfg: dict[str, Any], secret_env: dict[str, str], dry_run:
     inputs_path.write_text(inputs_hash + "\n", encoding="utf-8")
     log.info("Manifests written to %s (inputs_hash=%s)", str(manifests_dir), inputs_hash)
 
-    if verbose:
-        log.debug("Secret keys written to YAML")
-        log.debug("Secret keys applied directly")
-        log.debug("Deployment image: %s", cfg["IMAGE"])
-
-    # Return a tuple-like string to indicate inputs_hash and whether there are direct secrets to apply.
-    # The caller (apply_to_cluster) will inspect secret_env and apply direct secrets as needed.
-    # For backward compatibility we return inputs_hash (string).
     return inputs_hash
 
 
-def apply_to_cluster(cfg: dict[str, Any], secret_env: dict[str, str], dry_run: bool = False, verbose: bool = False) -> None:
+def apply_to_cluster(
+    cfg: dict[str, Any],
+    secret_env: dict[str, str],
+    dry_run: bool = False,
+    verbose: bool = False,
+) -> None:
     if not shutil.which("kubectl"):
         log.error("kubectl not found; aborting apply.")
         raise SystemExit(2)
 
-    # Recompute the split so we know which secrets were written to YAML and which must be applied directly.
+    # Recompute split
     secret_env_for_yaml: dict[str, str] = {}
     secret_env_for_direct_apply: dict[str, str] = {}
     use_iam = bool(cfg.get("USE_IAM", False))
@@ -590,7 +734,6 @@ def apply_to_cluster(cfg: dict[str, Any], secret_env: dict[str, str], dry_run: b
         log.info("Dry-run requested; skipping apply actions.")
         return
 
-    # If there are direct secrets to apply (e.g., AWS keys), apply them directly to the cluster now.
     if secret_env_for_direct_apply:
         try:
             create_namespace_if_missing(cfg["NAMESPACE"])
@@ -599,10 +742,8 @@ def apply_to_cluster(cfg: dict[str, Any], secret_env: dict[str, str], dry_run: b
             log.error("Failed to apply direct secrets")
             raise SystemExit(2) from None
 
-    # If there is a secret manifest on disk (non-AWS keys), apply it.
     try:
         create_namespace_if_missing(cfg["NAMESPACE"])
-
         apply_yaml(cfg["FILES"]["serviceaccount"])
         if cfg["FILES"]["secret"].exists():
             apply_yaml(cfg["FILES"]["secret"])
@@ -655,16 +796,47 @@ def delete_manifests(cfg: dict[str, Any]) -> None:
         log.debug("Manifest cleanup had errors", exc_info=True)
 
 
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
 def parse_args(argv: list[str] | None = None) -> Any:
-    p = argparse.ArgumentParser(description="Generate and manage Retriever manifests and secrets.")
+    p = argparse.ArgumentParser(
+        description="Generate and manage Retriever manifests and secrets."
+    )
     group = p.add_mutually_exclusive_group(required=True)
-    group.add_argument("--apply-secrets", action="store_true", help="Create/update secrets in-cluster (no secret files written).")
-    group.add_argument("--write", action="store_true", help="Write manifests to disk (no cluster apply).")
-    group.add_argument("--apply", action="store_true", help="Write manifests and apply them to cluster.")
-    group.add_argument("--delete", action="store_true", help="Delete manifests from disk and cluster files.")
-    p.add_argument("--delete-secret", action="store_true", help="When used with --delete, also delete the in-cluster secret.")
-    p.add_argument("--dry-run", action="store_true", help="Do not apply anything to cluster; only generate files when used with --write or --apply.")
-    p.add_argument("--verbose", action="store_true", help="Enable verbose debug output.")
+    group.add_argument(
+        "--apply-secrets",
+        action="store_true",
+        help="Create/update secrets in-cluster (no secret files written).",
+    )
+    group.add_argument(
+        "--write",
+        action="store_true",
+        help="Write manifests to disk (no cluster apply).",
+    )
+    group.add_argument(
+        "--apply",
+        action="store_true",
+        help="Write manifests and apply them to cluster.",
+    )
+    group.add_argument(
+        "--delete",
+        action="store_true",
+        help="Delete manifests from disk and cluster files.",
+    )
+    p.add_argument(
+        "--delete-secret",
+        action="store_true",
+        help="When used with --delete, also delete the in-cluster secret.",
+    )
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Do not apply anything to cluster; only generate files.",
+    )
+    p.add_argument(
+        "--verbose", action="store_true", help="Enable verbose debug output."
+    )
     return p.parse_args(argv or sys.argv[1:])
 
 
@@ -696,7 +868,6 @@ def main(argv: list[str] | None = None) -> int:
                 log.info("Dry-run requested; not applying secrets.")
                 return 0
             create_namespace_if_missing(cfg["NAMESPACE"])
-            # Apply all secrets directly (this will include AWS keys when USE_IAM=false).
             apply_secret_direct(cfg, secret_env)
             return 0
 
