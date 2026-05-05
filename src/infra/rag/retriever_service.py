@@ -342,34 +342,32 @@ def build_deployment_doc(cfg: dict[str, Any], has_secret: bool) -> dict[str, Any
     if has_secret:
         env_from.append({"secretRef": {"name": cfg["SECRET_NAME"]}})
 
-    # Environment variables aligned with latest settings.py
+    # Only non-derivable or environment-specific env vars.
+    # DENSE_URL, SPARSE_URL, RERANKER_URL use built-in defaults in settings.py.
     env_vars = [
         {"name": "POD_NAME", "valueFrom": {"fieldRef": {"fieldPath": "metadata.name"}}},
         {"name": "POD_NAMESPACE", "valueFrom": {"fieldRef": {"fieldPath": "metadata.namespace"}}},
-        # Service identity (kept for compatibility, though not OTEL-specific)
         {"name": "SERVICE_NAME", "value": cfg["SERVICE_NAME"]},
-        {"name": "SERVICE_VERSION", "value": "unknown"},
         {"name": "DEPLOYMENT_ENVIRONMENT", "value": "PROD"},
         {"name": "ENV", "value": "PROD"},
-        # Logging
         {"name": "LOG_LEVEL", "value": "INFO"},
-        # Prometheus (replaces OTEL)
         {"name": "ENABLE_PROMETHEUS", "value": str(cfg["ENABLE_PROMETHEUS"]).lower()},
-        {"name": "PROMETHEUS_PORT", "value": str(cfg["PROMETHEUS_PORT"])},
         {"name": "PROMETHEUS_PATH", "value": cfg["PROMETHEUS_PATH"]},
+        {"name": "AWS_REGION", "value": cfg.get("AWS_REGION", "ap-south-1")},
+        {"name": "BEDROCK_MODEL_ID", "value": cfg.get("BEDROCK_MODEL_ID", "meta.llama3-8b-instruct-v1:0")},
+        {"name": "COLLECTION_NAME", "value": cfg.get("COLLECTION_NAME", "default_rag_collection1")},
     ]
+
+    # QDRANT_URL only if it differs from the default in settings.py
+    qdrant_url = cfg.get("QDRANT_URL", "")
+    if qdrant_url and qdrant_url != "http://qdrant.qdrant.svc.cluster.local:6333":
+        env_vars.append({"name": "QDRANT_URL", "value": qdrant_url})
 
     container = {
         "name": cfg["DEPLOYMENT_NAME"],
         "image": cfg["IMAGE"],
         "imagePullPolicy": cfg["IMAGE_PULL_POLICY"],
-        "ports": [
-            {"name": "http", "containerPort": cfg["CONTAINER_PORT"], "protocol": "TCP"},
-            # Prometheus metrics port (if different from main port)
-            *([
-                {"name": "metrics", "containerPort": cfg["PROMETHEUS_PORT"], "protocol": "TCP"}
-            ] if cfg["ENABLE_PROMETHEUS"] and cfg["PROMETHEUS_PORT"] != cfg["CONTAINER_PORT"] else []),
-        ],
+        "ports": [{"name": "http", "containerPort": cfg["CONTAINER_PORT"], "protocol": "TCP"}],
         "env": env_vars,
         "envFrom": env_from,
         "volumeMounts": [
@@ -384,38 +382,23 @@ def build_deployment_doc(cfg: dict[str, Any], has_secret: bool) -> dict[str, Any
             "runAsGroup": int(cfg["RUN_AS_GROUP"]),
         },
         "resources": {
-            "requests": {
-                "cpu": cfg["CPU_REQUEST"],
-                "memory": cfg["MEMORY_REQUEST"],
-            },
-            "limits": {
-                "cpu": cfg["CPU_LIMIT"],
-                "memory": cfg["MEMORY_LIMIT"],
-            },
+            "requests": {"cpu": cfg["CPU_REQUEST"], "memory": cfg["MEMORY_REQUEST"]},
+            "limits": {"cpu": cfg["CPU_LIMIT"], "memory": cfg["MEMORY_LIMIT"]},
         },
         "readinessProbe": _probe_http(
-            "/readyz",
-            cfg["CONTAINER_PORT"],
-            cfg["READINESS_INITIAL_DELAY"],
-            cfg["PROBE_PERIOD_SECONDS"],
-            cfg["PROBE_TIMEOUT_SECONDS"],
-            3,
+            "/readyz", cfg["CONTAINER_PORT"],
+            cfg["READINESS_INITIAL_DELAY"], cfg["PROBE_PERIOD_SECONDS"],
+            cfg["PROBE_TIMEOUT_SECONDS"], 3,
         ),
         "livenessProbe": _probe_http(
-            "/healthz",
-            cfg["CONTAINER_PORT"],
-            cfg["LIVENESS_INITIAL_DELAY"],
-            cfg["PROBE_PERIOD_SECONDS"],
-            cfg["PROBE_TIMEOUT_SECONDS"],
-            6,
+            "/healthz", cfg["CONTAINER_PORT"],
+            cfg["LIVENESS_INITIAL_DELAY"], cfg["PROBE_PERIOD_SECONDS"],
+            cfg["PROBE_TIMEOUT_SECONDS"], 6,
         ),
         "startupProbe": _probe_http(
-            "/healthz",
-            cfg["CONTAINER_PORT"],
-            cfg["LIVENESS_INITIAL_DELAY"],
-            cfg["PROBE_PERIOD_SECONDS"],
-            cfg["PROBE_TIMEOUT_SECONDS"],
-            cfg["STARTUP_FAILURE_THRESHOLD"],
+            "/healthz", cfg["CONTAINER_PORT"],
+            cfg["LIVENESS_INITIAL_DELAY"], cfg["PROBE_PERIOD_SECONDS"],
+            cfg["PROBE_TIMEOUT_SECONDS"], cfg["STARTUP_FAILURE_THRESHOLD"],
         ),
     }
 
@@ -443,16 +426,13 @@ def build_deployment_doc(cfg: dict[str, Any], has_secret: bool) -> dict[str, Any
                     "serviceAccountName": cfg["SERVICE_ACCOUNT_NAME"],
                     "automountServiceAccountToken": True,
                     "terminationGracePeriodSeconds": 30,
-                    "securityContext": {
-                        "fsGroup": cfg["FS_GROUP"],
-                    },
+                    "securityContext": {"fsGroup": cfg["FS_GROUP"]},
                     "volumes": [{"name": "tmp", "emptyDir": {}}],
                     "containers": [container],
                 },
             },
         },
     }
-
 
 def build_service_doc(cfg: dict[str, Any]) -> dict[str, Any]:
     ports = [
