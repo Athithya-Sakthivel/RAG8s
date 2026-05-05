@@ -35,9 +35,9 @@ export RERANKER_MODEL_NAME=Xenova/ms-marco-MiniLM-L-6-v2
 export RERANKER_MAX_DOCS=20 # upper bound
 python3 src/infra/rag/reranker_service.py --rollout
 
-kubectl port-forward -n models svc/dense-svc 8200:8200 &
-kubectl port-forward -n models svc/sparse-svc 8201:8201 &
-kubectl port-forward -n models svc/reranker-svc 8202:8202 &
+kubectl port-forward -n inference svc/dense-svc 8200:8200 &
+kubectl port-forward -n inference svc/sparse-svc 8201:8201 &
+kubectl port-forward -n inference svc/reranker-svc 8202:8202 &
 kubectl port-forward -n qdrant svc/qdrant 6333:6333 &
 
 kubectl create ns inference && python3 src/infra/rag/retriever_service.py --rollout

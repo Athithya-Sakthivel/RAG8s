@@ -39,7 +39,7 @@ spec:
         - name: SPARSE_MODEL_NAME
           value: Qdrant/minicoil-v1
         - name: SPARSE_BATCH_SIZE
-          value: '8'
+          value: '64'
         - name: SPARSE_CUDA
           value: '0'
         - name: PRELOAD_MODEL

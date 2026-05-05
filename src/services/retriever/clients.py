@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import random
 import re
 import threading
@@ -13,9 +14,7 @@ import httpx
 import numpy as np
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError, EndpointConnectionError, ReadTimeoutError
-from opentelemetry import metrics, trace
-from opentelemetry.propagate import inject
-from opentelemetry.trace import Status, StatusCode
+from prometheus_client import Counter, Histogram
 from settings import (
     DENSE_DIM,
     DEPLOYMENT_ENVIRONMENT,
@@ -28,51 +27,52 @@ from settings import (
     RETRY_MAX_DELAY,
     SERVICE_NAME,
 )
+from telemetry import log
 
+logger = logging.getLogger("retrieval.clients")
 T = TypeVar("T")
 
 
-def _base_attrs(**extra: Any) -> dict[str, Any]:
-    return {
-        "service.name": SERVICE_NAME,
-        "deployment.environment": DEPLOYMENT_ENVIRONMENT,
+# ---------------------------------------------------------------------------
+# Prometheus metric helpers (replaces OTEL attributes & spans)
+# ---------------------------------------------------------------------------
+def _metric_labels(**extra: Any) -> dict[str, str]:
+    """Build a label dict for Prometheus metrics."""
+    base = {
+        "deployment_environment": DEPLOYMENT_ENVIRONMENT,
         "env": ENV,
-        **{k: v for k, v in extra.items() if v is not None},
+        "service_name": SERVICE_NAME,
     }
+    base.update({k: str(v) for k, v in extra.items() if v is not None})
+    return base
 
 
-def _current_span() -> trace.Span | None:
-    try:
-        span = trace.get_current_span()
-        ctx = span.get_span_context()
-        if ctx is None or not ctx.is_valid:
-            return None
-        return span
-    except Exception:
-        return None
+# ---------------------------------------------------------------------------
+# Prometheus metrics (replaces OTEL spans & counters)
+# ---------------------------------------------------------------------------
+circuit_breaker_open_total = Counter(
+    "retrieval_circuit_breaker_open_total",
+    "Circuit breaker open events",
+    ("dependency", "deployment_environment", "env", "service_name"),
+)
 
+retry_attempts_total = Counter(
+    "retrieval_retry_attempts_total",
+    "Retry attempts by dependency",
+    ("dependency", "attempt", "deployment_environment", "env", "service_name"),
+)
 
-def _span_event(event: str, **attrs: Any) -> None:
-    span = _current_span()
-    if span is not None:
-        span.add_event(event, attributes={k: v for k, v in attrs.items() if v is not None})
-
-
-def _span_error(exc: BaseException, **attrs: Any) -> None:
-    span = _current_span()
-    if span is not None:
-        for key, value in attrs.items():
-            if value is not None:
-                span.set_attribute(key, value)
-        span.record_exception(exc)
-        span.set_status(Status(StatusCode.ERROR))
+# Per-client metrics are defined within each client class below
 
 
 class OpenCircuitError(RuntimeError):
+    """Raised when a circuit breaker is open."""
     pass
 
 
 class CircuitBreaker:
+    """Simple async circuit breaker with half-open probing."""
+
     def __init__(self, name: str, failure_threshold: int, reset_timeout: float):
         self.name = name
         self.failure_threshold = failure_threshold
@@ -81,12 +81,6 @@ class CircuitBreaker:
         self.state = "closed"
         self.opened_at = 0.0
         self._lock = asyncio.Lock()
-        meter = metrics.get_meter("retriever.breakers")
-        self._open_counter = meter.create_counter(
-            name="retrieval.circuit_breaker.open",
-            description="Circuit breaker open events",
-            unit="1",
-        )
 
     async def allow(self) -> None:
         async with self._lock:
@@ -95,9 +89,9 @@ class CircuitBreaker:
             now = time.monotonic()
             if (now - self.opened_at) >= self.reset_timeout:
                 self.state = "half_open"
-                _span_event("circuit_breaker.half_open", dependency=self.name)
+                log.info("circuit breaker half-open", dependency=self.name)
                 return
-            _span_event("circuit_breaker.open", dependency=self.name)
+            log.warn("circuit breaker open", dependency=self.name)
             raise OpenCircuitError(f"{self.name} breaker is open")
 
     async def record_success(self) -> None:
@@ -112,11 +106,12 @@ class CircuitBreaker:
             if self.state == "half_open" or self.failures >= self.failure_threshold:
                 self.state = "open"
                 self.opened_at = time.monotonic()
-                self._open_counter.add(1, attributes=_base_attrs(dependency=self.name))
-                _span_event("circuit_breaker.opened", dependency=self.name, failures=self.failures)
+                circuit_breaker_open_total.labels(**_metric_labels(dependency=self.name)).inc()
+                log.warn("circuit breaker opened", dependency=self.name, failures=self.failures)
 
 
 def is_retryable_exception(exc: BaseException) -> bool:
+    """Determine whether an exception should trigger a retry."""
     if isinstance(exc, asyncio.CancelledError):
         return False
     if isinstance(exc, OpenCircuitError):
@@ -139,6 +134,7 @@ def is_retryable_exception(exc: BaseException) -> bool:
 
 
 async def call_with_retry(dep: str, breaker: CircuitBreaker, fn: Callable[[], Any]):
+    """Execute `fn` with retry logic and circuit breaker protection."""
     await breaker.allow()
     last_exc: BaseException | None = None
     for attempt in range(1, RETRY_MAX_ATTEMPTS + 1):
@@ -157,9 +153,9 @@ async def call_with_retry(dep: str, breaker: CircuitBreaker, fn: Callable[[], An
                 raise
             delay = min(RETRY_MAX_DELAY, RETRY_BASE_DELAY * (2 ** (attempt - 1)))
             jitter = random.uniform(0.0, delay * 0.2)
-            retry_counter.add(1, attributes=_base_attrs(dependency=dep, attempt=attempt))
-            _span_event(
-                "retry_attempt",
+            retry_attempts_total.labels(**_metric_labels(dependency=dep, attempt=str(attempt))).inc()
+            log.debug(
+                "retry attempt",
                 dependency=dep,
                 attempt=attempt,
                 max_attempts=RETRY_MAX_ATTEMPTS,
@@ -171,21 +167,17 @@ async def call_with_retry(dep: str, breaker: CircuitBreaker, fn: Callable[[], An
     raise RuntimeError(f"{dep} failed without exception")
 
 
-_retry_meter = metrics.get_meter("retriever.retry")
-retry_counter = _retry_meter.create_counter(
-    name="retrieval.retry.attempts",
-    description="Retry attempts by dependency",
-    unit="1",
-)
-
-
+# ---------------------------------------------------------------------------
+# Base async JSON service client
+# ---------------------------------------------------------------------------
 class AsyncJSONServiceClient:
+    """Base class for async HTTP clients that talk JSON."""
+
     def __init__(self, base_url: str, timeout: float = HTTP_TIMEOUT):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self._client: httpx.AsyncClient | None = None
-        self._meter = metrics.get_meter("retriever.clients")
-        self._tracer = trace.get_tracer("retriever.clients")
+        # Subclasses override metrics
 
     async def client(self) -> httpx.AsyncClient:
         if self._client is None:
@@ -198,35 +190,35 @@ class AsyncJSONServiceClient:
             )
         return self._client
 
-    def _request_headers(self) -> dict[str, str]:
-        headers: dict[str, str] = {"accept": "application/json"}
-        inject(headers)
-        return headers
-
     async def close(self) -> None:
         if self._client is not None:
             await self._client.aclose()
             self._client = None
 
 
+# ---------------------------------------------------------------------------
+# Dense embedding client
+# ---------------------------------------------------------------------------
+dense_embed_requests = Counter(
+    "retrieval_dense_embed_requests_total",
+    "Dense embedding requests",
+    ("dependency", "deployment_environment", "env", "service_name"),
+)
+dense_embed_duration = Histogram(
+    "retrieval_dense_embed_duration_seconds",
+    "Dense embedding latency",
+    ("dependency", "deployment_environment", "env", "service_name"),
+)
+
+
 class AsyncDenseClient(AsyncJSONServiceClient):
     def __init__(self, base_url: str, timeout: float = HTTP_TIMEOUT):
         super().__init__(base_url, timeout)
-        self._count = self._meter.create_counter(
-            name="retrieval.dense.embed.requests",
-            description="Dense embedding requests",
-            unit="1",
-        )
-        self._latency = self._meter.create_histogram(
-            name="retrieval.dense.embed.duration",
-            description="Dense embedding latency",
-            unit="s",
-        )
 
     async def health(self) -> bool:
         try:
             c = await self.client()
-            r = await c.get(f"{self.base_url}/health", headers=self._request_headers())
+            r = await c.get(f"{self.base_url}/health")
             return r.status_code == 200
         except Exception:
             return False
@@ -235,58 +227,60 @@ class AsyncDenseClient(AsyncJSONServiceClient):
         if not texts:
             return []
 
-        with self._tracer.start_as_current_span("dense.embed") as span:
-            span.set_attribute("dependency", "dense")
-            span.set_attribute("request.count", len(texts))
-            start = time.perf_counter()
-            self._count.add(1, attributes=_base_attrs(dependency="dense"))
+        start = time.perf_counter()
+        labels = _metric_labels(dependency="dense")
+        dense_embed_requests.labels(**labels).inc()
 
-            try:
-                c = await self.client()
-                r = await c.post(f"{self.base_url}/embed", json={"texts": texts}, headers=self._request_headers())
-                if r.status_code != 200:
-                    r.raise_for_status()
-                j = r.json()
-                vecs = j.get("vectors")
-                if not isinstance(vecs, list) or len(vecs) != len(texts):
-                    raise RuntimeError("dense embed invalid response shape")
-                out = []
-                for v in vecs:
-                    vv = [float(x) for x in v]
-                    if len(vv) != DENSE_DIM:
-                        raise RuntimeError(f"dense dim mismatch expected={DENSE_DIM} got={len(vv)}")
-                    arr = np.asarray(vv, dtype=np.float32)
-                    n = float(np.linalg.norm(arr))
-                    if n > 0:
-                        arr = arr / n
-                    out.append(arr.astype(float).tolist())
-                span.set_status(Status(StatusCode.OK))
-                return out
-            except Exception as exc:
-                _span_error(exc, dependency="dense", error_type=exc.__class__.__name__)
-                raise
-            finally:
-                self._latency.record(max(time.perf_counter() - start, 1e-6), attributes=_base_attrs(dependency="dense"))
+        try:
+            c = await self.client()
+            r = await c.post(f"{self.base_url}/embed", json={"texts": texts})
+            if r.status_code != 200:
+                r.raise_for_status()
+            j = r.json()
+            vecs = j.get("vectors")
+            if not isinstance(vecs, list) or len(vecs) != len(texts):
+                raise RuntimeError("dense embed invalid response shape")
+            out = []
+            for v in vecs:
+                vv = [float(x) for x in v]
+                if len(vv) != DENSE_DIM:
+                    raise RuntimeError(f"dense dim mismatch expected={DENSE_DIM} got={len(vv)}")
+                arr = np.asarray(vv, dtype=np.float32)
+                n = float(np.linalg.norm(arr))
+                if n > 0:
+                    arr = arr / n
+                out.append(arr.astype(float).tolist())
+            return out
+        except Exception as exc:
+            log.error("dense embed failed", dependency="dense", error_type=type(exc).__name__, error=str(exc))
+            raise
+        finally:
+            dense_embed_duration.labels(**labels).observe(max(time.perf_counter() - start, 1e-6))
+
+
+# ---------------------------------------------------------------------------
+# Sparse embedding client
+# ---------------------------------------------------------------------------
+sparse_embed_requests = Counter(
+    "retrieval_sparse_embed_requests_total",
+    "Sparse embedding requests",
+    ("dependency", "deployment_environment", "env", "service_name"),
+)
+sparse_embed_duration = Histogram(
+    "retrieval_sparse_embed_duration_seconds",
+    "Sparse embedding latency",
+    ("dependency", "deployment_environment", "env", "service_name"),
+)
 
 
 class AsyncSparseClient(AsyncJSONServiceClient):
     def __init__(self, base_url: str, timeout: float = HTTP_TIMEOUT):
         super().__init__(base_url, timeout)
-        self._count = self._meter.create_counter(
-            name="retrieval.sparse.embed.requests",
-            description="Sparse embedding requests",
-            unit="1",
-        )
-        self._latency = self._meter.create_histogram(
-            name="retrieval.sparse.embed.duration",
-            description="Sparse embedding latency",
-            unit="s",
-        )
 
     async def health(self) -> bool:
         try:
             c = await self.client()
-            r = await c.get(f"{self.base_url}/health", headers=self._request_headers())
+            r = await c.get(f"{self.base_url}/health")
             return r.status_code == 200
         except Exception:
             return False
@@ -295,75 +289,78 @@ class AsyncSparseClient(AsyncJSONServiceClient):
         if not texts:
             return []
 
-        with self._tracer.start_as_current_span("sparse.embed") as span:
-            span.set_attribute("dependency", "sparse")
-            span.set_attribute("request.count", len(texts))
-            start = time.perf_counter()
-            self._count.add(1, attributes=_base_attrs(dependency="sparse"))
+        start = time.perf_counter()
+        labels = _metric_labels(dependency="sparse")
+        sparse_embed_requests.labels(**labels).inc()
 
-            async def _do(batch: list[str]) -> list[dict[str, Any]]:
-                c = await self.client()
-                r = await c.post(f"{self.base_url}/embed", json={"texts": batch}, headers=self._request_headers())
-                if r.status_code == 200:
-                    j = r.json()
-                    vecs = j.get("vectors")
-                    if not isinstance(vecs, list) or len(vecs) != len(batch):
-                        raise RuntimeError("sparse embed invalid response shape")
-                    out = []
-                    for s in vecs:
-                        if not isinstance(s, dict) or "indices" not in s or "values" not in s:
-                            raise RuntimeError("sparse embed invalid item")
-                        out.append({"indices": [int(x) for x in s["indices"]], "values": [float(x) for x in s["values"]]})
-                    return out
+        async def _do(batch: list[str]) -> list[dict[str, Any]]:
+            c = await self.client()
+            r = await c.post(f"{self.base_url}/embed", json={"texts": batch})
+            if r.status_code == 200:
+                j = r.json()
+                vecs = j.get("vectors")
+                if not isinstance(vecs, list) or len(vecs) != len(batch):
+                    raise RuntimeError("sparse embed invalid response shape")
+                out = []
+                for s in vecs:
+                    if not isinstance(s, dict) or "indices" not in s or "values" not in s:
+                        raise RuntimeError("sparse embed invalid item")
+                    out.append({"indices": [int(x) for x in s["indices"]], "values": [float(x) for x in s["values"]]})
+                return out
 
-                if r.status_code in (400, 422):
-                    detail = ""
-                    try:
-                        detail = str(r.json().get("detail", ""))
-                    except Exception:
-                        detail = r.text or ""
-                    m = re.search(r"max=(\d+)", detail)
-                    if m:
-                        max_batch = max(1, int(m.group(1)))
-                        if len(batch) > max_batch:
-                            out: list[dict[str, Any]] = []
-                            for i in range(0, len(batch), max_batch):
-                                out.extend(await _do(batch[i : i + max_batch]))
-                            return out
-                    if r.status_code == 422 and len(batch) > 1:
-                        mid = max(1, len(batch) // 2)
-                        return (await _do(batch[:mid])) + (await _do(batch[mid:]))
+            if r.status_code in (400, 422):
+                detail = ""
+                try:
+                    detail = str(r.json().get("detail", ""))
+                except Exception:
+                    detail = r.text or ""
+                m = re.search(r"max=(\d+)", detail)
+                if m:
+                    max_batch = max(1, int(m.group(1)))
+                    if len(batch) > max_batch:
+                        out: list[dict[str, Any]] = []
+                        for i in range(0, len(batch), max_batch):
+                            out.extend(await _do(batch[i : i + max_batch]))
+                        return out
+                if r.status_code == 422 and len(batch) > 1:
+                    mid = max(1, len(batch) // 2)
+                    return (await _do(batch[:mid])) + (await _do(batch[mid:]))
 
-                r.raise_for_status()
-                return []
+            r.raise_for_status()
+            return []
 
-            try:
-                return await _do(texts)
-            except Exception as exc:
-                _span_error(exc, dependency="sparse", error_type=exc.__class__.__name__)
-                raise
-            finally:
-                self._latency.record(max(time.perf_counter() - start, 1e-6), attributes=_base_attrs(dependency="sparse"))
+        try:
+            return await _do(texts)
+        except Exception as exc:
+            log.error("sparse embed failed", dependency="sparse", error_type=type(exc).__name__, error=str(exc))
+            raise
+        finally:
+            sparse_embed_duration.labels(**labels).observe(max(time.perf_counter() - start, 1e-6))
+
+
+# ---------------------------------------------------------------------------
+# Reranker client
+# ---------------------------------------------------------------------------
+rerank_requests = Counter(
+    "retrieval_rerank_requests_total",
+    "Reranker requests",
+    ("dependency", "deployment_environment", "env", "service_name"),
+)
+rerank_duration = Histogram(
+    "retrieval_rerank_duration_seconds",
+    "Reranker latency",
+    ("dependency", "deployment_environment", "env", "service_name"),
+)
 
 
 class AsyncRerankerClient(AsyncJSONServiceClient):
     def __init__(self, base_url: str, timeout: float = HTTP_TIMEOUT):
         super().__init__(base_url, timeout)
-        self._count = self._meter.create_counter(
-            name="retrieval.rerank.requests",
-            description="Reranker requests",
-            unit="1",
-        )
-        self._latency = self._meter.create_histogram(
-            name="retrieval.rerank.duration",
-            description="Reranker latency",
-            unit="s",
-        )
 
     async def health(self) -> bool:
         try:
             c = await self.client()
-            r = await c.get(f"{self.base_url}/health", headers=self._request_headers())
+            r = await c.get(f"{self.base_url}/health")
             return r.status_code == 200
         except Exception:
             return False
@@ -372,28 +369,40 @@ class AsyncRerankerClient(AsyncJSONServiceClient):
         if not documents:
             return []
 
-        with self._tracer.start_as_current_span("rerank") as span:
-            span.set_attribute("dependency", "reranker")
-            span.set_attribute("request.count", len(documents))
-            start = time.perf_counter()
-            self._count.add(1, attributes=_base_attrs(dependency="reranker"))
+        start = time.perf_counter()
+        labels = _metric_labels(dependency="reranker")
+        rerank_requests.labels(**labels).inc()
 
-            try:
-                c = await self.client()
-                r = await c.post(f"{self.base_url}/rerank", json={"query": query, "documents": documents}, headers=self._request_headers())
-                if r.status_code != 200:
-                    r.raise_for_status()
-                j = r.json()
-                scores = j.get("scores")
-                if not isinstance(scores, list) or len(scores) != len(documents):
-                    raise RuntimeError("reranker invalid response shape")
-                span.set_status(Status(StatusCode.OK))
-                return [float(x) for x in scores]
-            except Exception as exc:
-                _span_error(exc, dependency="reranker", error_type=exc.__class__.__name__)
-                raise
-            finally:
-                self._latency.record(max(time.perf_counter() - start, 1e-6), attributes=_base_attrs(dependency="reranker"))
+        try:
+            c = await self.client()
+            r = await c.post(f"{self.base_url}/rerank", json={"query": query, "documents": documents})
+            if r.status_code != 200:
+                r.raise_for_status()
+            j = r.json()
+            scores = j.get("scores")
+            if not isinstance(scores, list) or len(scores) != len(documents):
+                raise RuntimeError("reranker invalid response shape")
+            return [float(x) for x in scores]
+        except Exception as exc:
+            log.error("rerank failed", dependency="reranker", error_type=type(exc).__name__, error=str(exc))
+            raise
+        finally:
+            rerank_duration.labels(**labels).observe(max(time.perf_counter() - start, 1e-6))
+
+
+# ---------------------------------------------------------------------------
+# Bedrock LLM client
+# ---------------------------------------------------------------------------
+llm_requests = Counter(
+    "retrieval_llm_requests_total",
+    "LLM requests",
+    ("dependency", "mode", "deployment_environment", "env", "service_name"),
+)
+llm_duration = Histogram(
+    "retrieval_llm_duration_seconds",
+    "LLM call latency",
+    ("dependency", "mode", "deployment_environment", "env", "service_name"),
+)
 
 
 class AsyncBedrockClient:
@@ -410,18 +419,7 @@ class AsyncBedrockClient:
         self.guardrail_identifier = guardrail_identifier.strip()
         self.guardrail_version = guardrail_version.strip()
         self.timeout = timeout
-        self._meter = metrics.get_meter("retriever.clients")
-        self._tracer = trace.get_tracer("retriever.clients")
-        self._count = self._meter.create_counter(
-            name="retrieval.llm.requests",
-            description="LLM requests",
-            unit="1",
-        )
-        self._latency = self._meter.create_histogram(
-            name="retrieval.llm.duration",
-            description="LLM call latency",
-            unit="s",
-        )
+
         session = boto3.session.Session(region_name=region)
         self._client = session.client(
             "bedrock-runtime",
@@ -469,14 +467,45 @@ class AsyncBedrockClient:
         return ""
 
     async def generate(self, prompt: str, max_tokens: int, temperature: float) -> str:
-        with self._tracer.start_as_current_span("llm.generate") as span:
-            span.set_attribute("dependency", "bedrock")
-            span.set_attribute("mode", "generate")
-            span.set_attribute("model_id", self.model_id)
-            start = time.perf_counter()
-            self._count.add(1, attributes=_base_attrs(dependency="bedrock", mode="generate"))
+        start = time.perf_counter()
+        labels = _metric_labels(dependency="bedrock", mode="generate")
+        llm_requests.labels(**labels).inc()
 
-            def _call() -> str:
+        def _call() -> str:
+            payload: dict[str, Any] = {
+                "modelId": self.model_id,
+                "messages": [{"role": "user", "content": [{"text": prompt}]}],
+                "inferenceConfig": {"maxTokens": int(max_tokens), "temperature": float(temperature)},
+            }
+            guardrail_cfg = self._guardrail_config()
+            if guardrail_cfg:
+                payload["guardrailConfig"] = guardrail_cfg
+            resp = self._client.converse(**payload)
+            text = self._extract_text(resp if isinstance(resp, dict) else {})
+            if not text:
+                raise RuntimeError("bedrock returned empty content")
+            return text
+
+        try:
+            answer = await asyncio.to_thread(_call)
+            return answer
+        except Exception as exc:
+            log.error("bedrock generate failed", dependency="bedrock", mode="generate", error_type=type(exc).__name__, error=str(exc))
+            raise
+        finally:
+            llm_duration.labels(**labels).observe(max(time.perf_counter() - start, 1e-6))
+
+    async def stream(self, prompt: str, max_tokens: int, temperature: float) -> AsyncIterator[str]:
+        start = time.perf_counter()
+        labels = _metric_labels(dependency="bedrock", mode="stream")
+        llm_requests.labels(**labels).inc()
+
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[Any] = asyncio.Queue()
+        sentinel = object()
+
+        def _worker() -> None:
+            try:
                 payload: dict[str, Any] = {
                     "modelId": self.model_id,
                     "messages": [{"role": "user", "content": [{"text": prompt}]}],
@@ -485,72 +514,34 @@ class AsyncBedrockClient:
                 guardrail_cfg = self._guardrail_config()
                 if guardrail_cfg:
                     payload["guardrailConfig"] = guardrail_cfg
-                resp = self._client.converse(**payload)
-                text = self._extract_text(resp if isinstance(resp, dict) else {})
-                if not text:
-                    raise RuntimeError("bedrock returned empty content")
-                return text
-
-            try:
-                answer = await asyncio.to_thread(_call)
-                span.set_status(Status(StatusCode.OK))
-                return answer
+                resp = self._client.converse_stream(**payload)
+                stream = resp.get("stream") if isinstance(resp, dict) else None
+                if stream is None:
+                    raise RuntimeError("bedrock stream missing stream field")
+                for event in stream:
+                    block = event.get("contentBlockDelta") if isinstance(event, dict) else None
+                    if block:
+                        delta = block.get("delta") or {}
+                        text = delta.get("text")
+                        if text:
+                            loop.call_soon_threadsafe(queue.put_nowait, str(text))
+                loop.call_soon_threadsafe(queue.put_nowait, sentinel)
             except Exception as exc:
-                _span_error(exc, dependency="bedrock", mode="generate", error_type=exc.__class__.__name__)
-                raise
-            finally:
-                self._latency.record(max(time.perf_counter() - start, 1e-6), attributes=_base_attrs(dependency="bedrock", mode="generate"))
+                loop.call_soon_threadsafe(queue.put_nowait, exc)
+                loop.call_soon_threadsafe(queue.put_nowait, sentinel)
 
-    async def stream(self, prompt: str, max_tokens: int, temperature: float) -> AsyncIterator[str]:
-        with self._tracer.start_as_current_span("llm.stream") as span:
-            span.set_attribute("dependency", "bedrock")
-            span.set_attribute("mode", "stream")
-            span.set_attribute("model_id", self.model_id)
-            start = time.perf_counter()
-            self._count.add(1, attributes=_base_attrs(dependency="bedrock", mode="stream"))
-            loop = asyncio.get_running_loop()
-            queue: asyncio.Queue[Any] = asyncio.Queue()
-            sentinel = object()
-
-            def _worker() -> None:
-                try:
-                    payload: dict[str, Any] = {
-                        "modelId": self.model_id,
-                        "messages": [{"role": "user", "content": [{"text": prompt}]}],
-                        "inferenceConfig": {"maxTokens": int(max_tokens), "temperature": float(temperature)},
-                    }
-                    guardrail_cfg = self._guardrail_config()
-                    if guardrail_cfg:
-                        payload["guardrailConfig"] = guardrail_cfg
-                    resp = self._client.converse_stream(**payload)
-                    stream = resp.get("stream") if isinstance(resp, dict) else None
-                    if stream is None:
-                        raise RuntimeError("bedrock stream missing stream field")
-                    for event in stream:
-                        block = event.get("contentBlockDelta") if isinstance(event, dict) else None
-                        if block:
-                            delta = block.get("delta") or {}
-                            text = delta.get("text")
-                            if text:
-                                loop.call_soon_threadsafe(queue.put_nowait, str(text))
-                    loop.call_soon_threadsafe(queue.put_nowait, sentinel)
-                except Exception as exc:
-                    loop.call_soon_threadsafe(queue.put_nowait, exc)
-                    loop.call_soon_threadsafe(queue.put_nowait, sentinel)
-
-            threading.Thread(target=_worker, daemon=True).start()
-            try:
-                while True:
-                    item = await queue.get()
-                    if item is sentinel:
-                        break
-                    if isinstance(item, Exception):
-                        _span_error(item, dependency="bedrock", mode="stream", error_type=item.__class__.__name__)
-                        raise item
-                    yield str(item)
-                span.set_status(Status(StatusCode.OK))
-            finally:
-                self._latency.record(max(time.perf_counter() - start, 1e-6), attributes=_base_attrs(dependency="bedrock", mode="stream"))
+        threading.Thread(target=_worker, daemon=True).start()
+        try:
+            while True:
+                item = await queue.get()
+                if item is sentinel:
+                    break
+                if isinstance(item, Exception):
+                    log.error("bedrock stream failed", dependency="bedrock", mode="stream", error_type=type(item).__name__, error=str(item))
+                    raise item
+                yield str(item)
+        finally:
+            llm_duration.labels(**labels).observe(max(time.perf_counter() - start, 1e-6))
 
 
 __all__ = [
