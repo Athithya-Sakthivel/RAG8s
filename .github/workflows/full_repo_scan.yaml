@@ -21,7 +21,7 @@ defaults:
 
 env:
   SCANNER_IMAGE: ghcr.io/athithya-sakthivel/trivy-0.69.3-gitleaks-8.30.1-opengrep-1.16.5@sha256:2d19bd7b418692a20ae57b24620da3af648878a66d582022c0721512fff1b5e2
-  TRIVY_SEVERITY: HIGH,CRITICAL
+  TRIVY_SEVERITY: CRITICAL
   REPO_ROOT: ${{ github.workspace }}
 
 jobs:

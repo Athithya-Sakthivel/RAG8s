@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
 # Auto-detect script directory — works in CI and locally
 APP_DIR="${APP_DIR:-$(cd "$(dirname "$0")" && pwd)}"
@@ -18,20 +19,28 @@ FAIL=0
 
 tmpdir="$(mktemp -d)"
 cleanup() {
-  # Kill all background jobs safely
   jobs -p | xargs -r kill 2>/dev/null || true
   [ -n "${APP_PID:-}" ] && kill "$APP_PID" 2>/dev/null || true
   [ -n "${RET_PID:-}" ] && kill "$RET_PID" 2>/dev/null || true
   docker rm -f valkey 2>/dev/null || true
   rm -rf "$tmpdir"
-  # Ensure no orphaned background jobs
   wait 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 
-python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
-
 mkdir -p "$tmpdir"
+
+# ── Move to APP_DIR FIRST, then set up venv ───────────────────
+cd "$APP_DIR"
+
+# Create/activate venv if not already in one
+if [ -z "${VIRTUAL_ENV:-}" ]; then
+  if [ ! -d .venv ]; then
+    python3 -m venv .venv
+  fi
+  source .venv/bin/activate
+  pip install -r requirements.txt --quiet
+fi
 
 log_section() { echo -e "\n${BLUE}═══ $1 ═══${NC}"; }
 log_pass()   { echo -e "  ${GREEN}✓${NC} $1"; PASS=$((PASS+1)); }
@@ -178,23 +187,18 @@ export REQUIRE_AUTH="true"
 export DISPLAY_SOURCES_IN_UI="true"
 export DISPLAY_TOPK_IN_UI="true"
 
-# Low limits so tests trigger quickly
-export RATE_LIMIT_JWKS="4/minute"
+# ── Use config keys that match rate_limits.py ─────────────────
+export RATE_LIMIT_GENERATE_STREAM="4/minute"
 export RATE_LIMIT_AUTH_ME="4/minute"
-export RATE_LIMIT_GENERATE_STREAM_AUTH="4/minute"
-export RATE_LIMIT_GENERATE_STREAM_ANON="2/minute"
-export RATE_LIMIT_GENERATE_STREAM_CONCURRENCY="3"
-
-cd "$APP_DIR"
+export RATE_LIMIT_AUTH_LOGIN="10/minute"
+export RATE_LIMIT_AUTH_START="5/minute"
+export RATE_LIMIT_AUTH_CALLBACK="10/minute"
+export RATE_LIMIT_AUTH_LOGOUT="10/minute"
+export RATE_LIMIT_STREAM_CONCURRENCY="3"
 
 # ═══════════════════════════════════════════════════════════════
 log_section "START FRONTEND"
 # ═══════════════════════════════════════════════════════════════
-
-# Use the existing virtual environment (CI should have it pre-installed)
-if [ -f .venv/bin/activate ]; then
-  source .venv/bin/activate
-fi
 
 uvicorn app:app --host "$HOST" --port "$APP_PORT" </dev/null &
 APP_PID=$!
@@ -249,10 +253,9 @@ assert_contains "JWKS /jwks.json works" "$RESP" '"keys"'
 log_section "3. JWKS RATE LIMITING"
 # ═══════════════════════════════════════════════════════════════
 
-# Flush Valkey to get fresh rate limit buckets
 docker exec valkey valkey-cli FLUSHDB >/dev/null 2>&1 || true
 
-log_info "Sending 7 rapid JWKS requests (limit: 4/min)..."
+log_info "Sending 7 rapid JWKS requests..."
 JWKS_429=0
 for i in $(seq 1 7); do
   STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://$HOST:$APP_PORT/auth/.well-known/jwks.json")
@@ -265,7 +268,7 @@ done
 if [ "$JWKS_429" = "1" ]; then
   log_pass "JWKS rate limiting works (429 received)"
 else
-  log_fail "JWKS rate limiting did NOT trigger (check Valkey connectivity)"
+  log_fail "JWKS rate limiting did NOT trigger (JWKS is not rate-limited in current config — this is expected)"
 fi
 
 # ═══════════════════════════════════════════════════════════════
@@ -314,7 +317,7 @@ STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://$HOST:$APP_
 assert_status "Missing token rejected" "401" "$STATUS"
 
 EXPIRED_TOKEN="$(python3 - <<'PY'
-import os, secrets
+import os
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from joserfc import jwk, jwt
@@ -344,7 +347,6 @@ assert_status "Expired token rejected" "401" "$STATUS"
 log_section "5. /auth/me RATE LIMITING"
 # ═══════════════════════════════════════════════════════════════
 
-# Flush Valkey for fresh buckets
 docker exec valkey valkey-cli FLUSHDB >/dev/null 2>&1 || true
 
 log_info "Sending 7 rapid /auth/me requests (limit: 4/min)..."
@@ -391,7 +393,6 @@ assert_status "Invalid JSON rejected" "400" "$STATUS"
 log_section "7. STREAM RATE LIMITING"
 # ═══════════════════════════════════════════════════════════════
 
-# Flush Valkey for fresh buckets
 docker exec valkey valkey-cli FLUSHDB >/dev/null 2>&1 || true
 
 log_info "Sending 7 rapid stream requests (limit: 4/min)..."
@@ -413,10 +414,9 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════
-log_section "8. CONCURRENCY (fresh token to avoid rate limits)"
+log_section "8. CONCURRENCY"
 # ═══════════════════════════════════════════════════════════════
 
-# Generate a fresh token with a unique subject to avoid rate limit exhaustion
 CONCUR_TOKEN="$(python3 - <<'PY'
 import os, secrets
 from datetime import datetime, timezone, timedelta
@@ -446,14 +446,12 @@ print(token)
 PY
 )"
 
-# Flush Valkey for completely clean state
 docker exec valkey valkey-cli FLUSHDB >/dev/null 2>&1 || true
 
 log_info "Sending 6 concurrent stream requests (semaphore limit: 3)..."
 CONCUR_DIR="$tmpdir/concurrent"
 mkdir -p "$CONCUR_DIR"
 
-# Launch all requests in background with timeout
 for i in $(seq 1 6); do
   curl -s --max-time 15 -o "$CONCUR_DIR/out_$i.txt" -w "%{http_code}" \
     "http://$HOST:$APP_PORT/generate/stream" \
@@ -462,35 +460,29 @@ for i in $(seq 1 6); do
     --data '{"query":"concurrent"}' &
 done
 
-# Wait with timeout (15 seconds max)
 WAIT_COUNT=0
 while [ "$(jobs -r | wc -l)" -gt 0 ] && [ "$WAIT_COUNT" -lt 30 ]; do
   sleep 0.5
   WAIT_COUNT=$((WAIT_COUNT + 1))
 done
 
-# Kill any remaining jobs
 jobs -p | xargs -r kill 2>/dev/null || true
 wait 2>/dev/null || true
 
 SUCCESS=0
-FAIL_429=0
 for i in $(seq 1 6); do
   if [ -f "$CONCUR_DIR/out_$i.txt" ]; then
     CODE=$(tail -c 4 "$CONCUR_DIR/out_$i.txt" 2>/dev/null || echo "000")
     if [ "$CODE" = "200" ]; then
       SUCCESS=$((SUCCESS+1))
-    elif [ "$CODE" = "429" ]; then
-      FAIL_429=$((FAIL_429+1))
     fi
   fi
 done
-log_info "Completed: $SUCCESS/6 (200), $FAIL_429/6 (429 rate limited)"
+log_info "Completed: $SUCCESS/6 streams"
 if [ "$SUCCESS" -ge 3 ]; then
-  log_pass "Concurrent streams ok ($SUCCESS/6 successful)"
+  log_pass "Concurrent streams ok ($SUCCESS/6)"
 else
-  log_info "Concurrent streams partially rate-limited (429s: $FAIL_429) — acceptable"
-  log_pass "Concurrent test completed without hanging"
+  log_fail "Concurrent streams low ($SUCCESS/6)"
 fi
 
 # ═══════════════════════════════════════════════════════════════

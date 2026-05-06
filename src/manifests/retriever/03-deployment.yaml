@@ -35,7 +35,7 @@ spec:
         emptyDir: {}
       containers:
       - name: retriever
-        image: ghcr.io/athithya-sakthivel/retriever:2026-05-05-20-34--7e2c98f@sha256:1521b9b6255a0f4c5a684db8e7b913fe29e5de158346ec05b8f55154a8591b97
+        image: ghcr.io/athithya-sakthivel/frontend:2026-05-03-21-22--6f63fcf@sha256:66e58c2ced13fcb362525f8107e723e56aa719515944582d2509d086c547799f
         imagePullPolicy: IfNotPresent
         ports:
         - name: http
