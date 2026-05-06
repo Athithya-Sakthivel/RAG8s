@@ -32,7 +32,7 @@ logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s %(levelname)s %(name)s 
 log = logging.getLogger("host_sparse")
 
 # Configuration
-SPARSE_MODEL_NAME = os.getenv("SPARSE_MODEL_NAME", "Qdrant/minicoil-v1")
+SPARSE_MODEL_NAME = os.getenv("SPARSE_MODEL_NAME", "prithivida/Splade_PP_en_v1")
 LOCAL_SPARSE_MODEL_PATH = os.getenv("LOCAL_SPARSE_MODEL_PATH") or (
     Path("/app/.resolved_model_path").read_text().strip()
     if Path("/app/.resolved_model_path").exists()

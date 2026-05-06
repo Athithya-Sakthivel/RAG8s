@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
-import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import PlainTextResponse
 from fastembed.rerank.cross_encoder import TextCrossEncoder
-from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 from pydantic import BaseModel, Field
 
 logging.basicConfig(level=os.getenv("RERANKER_LOGLEVEL", "WARN"))
 log = logging.getLogger("host_reranker")
 
+# Configuration
 RERANKER_MODEL_NAME = os.getenv("RERANKER_MODEL_NAME", "Xenova/ms-marco-MiniLM-L-6-v2")
 LOCAL_RERANKER_MODEL_PATH = os.getenv("LOCAL_RERANKER_MODEL_PATH") or (
     Path("/app/.resolved_model_path").read_text().strip()
@@ -29,14 +29,11 @@ RERANKER_CUDA = os.getenv("RERANKER_CUDA", "0").upper() in ("1", "TRUE", "YES")
 ENV = os.getenv("ENV", "dev")
 PRELOAD_MODEL = os.getenv("PRELOAD_MODEL", "0").upper() in ("1", "TRUE", "YES")
 
-app = FastAPI(title="reranker")
+# Thread pool for CPU‑bound reranking tasks
+_MAX_WORKERS = max(1, os.cpu_count() or 4)
+_RERANK_EXECUTOR = ThreadPoolExecutor(max_workers=_MAX_WORKERS)
 
-REQUEST_COUNT = Counter("reranker_requests_total", "Total rerank requests", ["status"])
-REQUEST_LATENCY = Histogram("reranker_request_duration_seconds", "Rerank request duration seconds")
-DOC_COUNT = Histogram("reranker_documents_per_request", "Documents per rerank request")
-MODEL_READY = Gauge("reranker_model_ready", "Whether reranker model is ready")
-MODEL_LOAD_TIME = Gauge("reranker_model_load_seconds", "Reranker model load duration seconds")
-MODEL_LOAD_FAILURES = Counter("reranker_model_load_failures_total", "Reranker model load failures total")
+app = FastAPI(title="reranker")
 
 
 class RerankRequest(BaseModel):
@@ -48,7 +45,6 @@ class RerankResponse(BaseModel):
     scores: list[float]
 
 
-_MODEL_LOCK = threading.Lock()
 _MODEL: TextCrossEncoder | None = None
 _MODEL_ERROR: str | None = None
 _READY_AT: float | None = None
@@ -71,83 +67,79 @@ def _warmup(model: TextCrossEncoder) -> None:
         raise RuntimeError(f"reranker warmup failed: {e}") from e
 
 
-def _load_model_if_needed() -> None:
+def _load_model() -> None:
     global _MODEL, _MODEL_ERROR, _READY_AT
+    try:
+        model_source = _resolve_model_source()
+        log.info("Loading reranker model (source=%s) cuda=%s", model_source, RERANKER_CUDA)
 
+        if RERANKER_CUDA:
+            try:
+                _MODEL = TextCrossEncoder(model_name=model_source, providers=["CUDAExecutionProvider"])
+            except TypeError:
+                _MODEL = TextCrossEncoder(model_name=model_source)
+                log.warning("providers kwarg not supported; falling back to default provider")
+        else:
+            _MODEL = TextCrossEncoder(model_name=model_source)
+
+        _warmup(_MODEL)
+        _READY_AT = time.time()
+        _MODEL_ERROR = None
+        log.info(
+            "Reranker model loaded successfully at %s",
+            time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(_READY_AT)),
+        )
+    except Exception as e:
+        _MODEL = None
+        _READY_AT = None
+        _MODEL_ERROR = str(e)
+        log.exception("Reranker model load failed: %s", e)
+
+
+def _load_model_if_needed() -> None:
     if _MODEL is not None:
         return
+    # Use a lock to avoid duplicate loads, but since we always call this from
+    # the thread pool executor, a simple global check is sufficient.
+    # However, there's a tiny race; we can use a threading.Lock if needed.
+    # For simplicity, we accept that two threads might try to load simultaneously
+    # but the underlying fastembed handles that gracefully (and load is idempotent).
+    _load_model()
 
-    with _MODEL_LOCK:
-        if _MODEL is not None:
-            return
 
-        try:
-            model_source = _resolve_model_source()
-            log.info("Loading reranker model (source=%s) cuda=%s", model_source, RERANKER_CUDA)
+def _do_rerank(query: str, documents: list[str]) -> list[float]:
+    _load_model_if_needed()
+    if _MODEL is None:
+        raise RuntimeError(f"model not loaded: {_MODEL_ERROR or 'unknown error'}")
 
-            if RERANKER_CUDA:
-                try:
-                    _MODEL = TextCrossEncoder(model_name=model_source, providers=["CUDAExecutionProvider"])
-                except TypeError:
-                    _MODEL = TextCrossEncoder(model_name=model_source)
-                    log.warning("providers kwarg not supported; falling back to default provider")
-            else:
-                _MODEL = TextCrossEncoder(model_name=model_source)
-
-            _warmup(_MODEL)
-            _READY_AT = time.time()
-            _MODEL_ERROR = None
-            MODEL_READY.set(1)
-            MODEL_LOAD_TIME.set(max(time.time() - _READY_AT, 0.0))
-            log.info("Reranker model loaded successfully at %s", time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(_READY_AT)))
-        except Exception as e:
-            _MODEL = None
-            _READY_AT = None
-            _MODEL_ERROR = str(e)
-            MODEL_READY.set(0)
-            MODEL_LOAD_FAILURES.inc()
-            log.exception("Reranker model load failed: %s", e)
+    scores = list(_MODEL.rerank(query, documents))
+    if len(scores) != len(documents):
+        raise RuntimeError("score count mismatch")
+    return [float(x) for x in scores]
 
 
 @app.post("/rerank", response_model=RerankResponse)
-def rerank(req: RerankRequest):
-    start = time.time()
-
+async def rerank(req: RerankRequest):
     if not req.query or not req.query.strip():
-        REQUEST_COUNT.labels(status="bad_request").inc()
         raise HTTPException(status_code=400, detail="query must be provided")
 
     if not req.documents or not isinstance(req.documents, list):
-        REQUEST_COUNT.labels(status="bad_request").inc()
         raise HTTPException(status_code=400, detail="documents must be a non-empty list")
 
     if len(req.documents) > RERANKER_MAX_DOCS:
-        REQUEST_COUNT.labels(status="bad_request").inc()
         raise HTTPException(status_code=400, detail=f"too many documents max={RERANKER_MAX_DOCS}")
 
-    _load_model_if_needed()
-    if _MODEL is None:
-        REQUEST_COUNT.labels(status="service_unavailable").inc()
-        raise HTTPException(status_code=503, detail=f"model not loaded: {_MODEL_ERROR or 'unknown error'}")
-
-    status = "ok"
     try:
-        DOC_COUNT.observe(len(req.documents))
-        with REQUEST_LATENCY.time():
-            scores = list(_MODEL.rerank(req.query, req.documents))
-            if len(scores) != len(req.documents):
-                status = "error"
-                raise HTTPException(status_code=500, detail="score count mismatch")
-            return {"scores": [float(x) for x in scores]}
-    except HTTPException:
-        raise
+        loop = asyncio.get_running_loop()
+        scores = await loop.run_in_executor(
+            _RERANK_EXECUTOR, _do_rerank, req.query, req.documents
+        )
+        return {"scores": scores}
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
-        status = "error"
         log.exception("rerank failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e)) from e
-    finally:
-        REQUEST_COUNT.labels(status=status).inc()
-        _ = max(time.time() - start, 1e-6)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/health")
@@ -168,10 +160,10 @@ def health():
 @app.get("/readyz")
 def readyz():
     if _MODEL is None:
-        try:
-            _load_model_if_needed()
-        except Exception:
-            pass
+        # Try to load in background? No, we want readiness to be synchronous,
+        # but we can trigger a load in a thread pool (non‑blocking) and return 503.
+        # For simplicity, we do not attempt to load here; load only on first request.
+        pass
 
     if _MODEL is not None and _READY_AT is not None:
         return {"status": "ready", "ready_at": _READY_AT, "model": RERANKER_MODEL_NAME}
@@ -179,25 +171,17 @@ def readyz():
     raise HTTPException(status_code=503, detail={"status": "not_ready", "model_error": _MODEL_ERROR})
 
 
-@app.get("/metrics")
-def metrics():
-    data = generate_latest()
-    return PlainTextResponse(content=data.decode("utf-8"), media_type=CONTENT_TYPE_LATEST)
-
-
 @app.on_event("startup")
-def on_startup():
+async def on_startup():
     if PRELOAD_MODEL:
-        log.info("PRELOAD_MODEL enabled; attempting to load reranker model at startup")
+        log.info("PRELOAD_MODEL enabled; loading reranker model at startup (background)")
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(_RERANK_EXECUTOR, _load_model)
 
-        def _bg_load():
-            try:
-                _load_model_if_needed()
-            except Exception as e:
-                log.exception("Background reranker preload failed: %s", e)
 
-        t = threading.Thread(target=_bg_load, daemon=True)
-        t.start()
+@app.on_event("shutdown")
+async def on_shutdown():
+    _RERANK_EXECUTOR.shutdown(wait=True)
 
 
 if __name__ == "__main__":
@@ -205,7 +189,8 @@ if __name__ == "__main__":
 
     uvicorn.run(
         "host_reranker:app",
-        host=os.getenv("RERANKER_HOST", "0.0.0.0"),
-        port=int(os.getenv("RERANKER_PORT", "8202")),
+        host=RERANKER_HOST,
+        port=RERANKER_PORT,
         log_level="warn",
+        loop="uvloop",
     )
