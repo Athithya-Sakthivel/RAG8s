@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 set -eu -o pipefail
 
-APP_DIR="${APP_DIR:-/workspace/src/services/frontend}"
+# Auto-detect script directory — works in CI and locally
+APP_DIR="${APP_DIR:-$(cd "$(dirname "$0")" && pwd)}"
 HOST="127.0.0.1"
 APP_PORT="8000"
 RETRIEVER_PORT="8001"
 VALKEY_PORT="6379"
+
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
