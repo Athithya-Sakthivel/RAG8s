@@ -236,7 +236,6 @@ Structured JSON to stdout. One log line per event.
   }
 }
 ```
-
 ---
 
 ## Running tests
