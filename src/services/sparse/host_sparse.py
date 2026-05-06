@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import PlainTextResponse
 from fastembed import SparseTextEmbedding
-from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 from pydantic import BaseModel
 
 
@@ -31,7 +31,8 @@ LOG_LEVEL = getattr(logging, os.getenv("SPARSE_LOGLEVEL", "WARN").upper(), loggi
 logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("host_sparse")
 
-SPARSE_MODEL_NAME = os.getenv("SPARSE_MODEL_NAME", "prithivida/Splade_PP_en_v1")
+# Configuration
+SPARSE_MODEL_NAME = os.getenv("SPARSE_MODEL_NAME", "Qdrant/minicoil-v1")
 LOCAL_SPARSE_MODEL_PATH = os.getenv("LOCAL_SPARSE_MODEL_PATH") or (
     Path("/app/.resolved_model_path").read_text().strip()
     if Path("/app/.resolved_model_path").exists()
@@ -44,10 +45,11 @@ SPARSE_CUDA = _env_bool("SPARSE_CUDA", "0")
 ENV = os.getenv("ENV", "dev")
 PRELOAD_MODEL = _env_bool("PRELOAD_MODEL", "0")
 
-app = FastAPI(title="sparse-embedder")
+# Thread pool for CPU‑bound embedding tasks
+_MAX_WORKERS = max(1, os.cpu_count() or 4)
+_EMBED_EXECUTOR = ThreadPoolExecutor(max_workers=_MAX_WORKERS)
 
-REQUEST_COUNTER = Counter("sparse_requests_total", "Total sparse embed requests", ["status"])
-REQUEST_DURATION = Histogram("sparse_request_duration_seconds", "Sparse embed request duration seconds")
+app = FastAPI(title="sparse-embedder")
 
 
 class SparseOut(BaseModel):
@@ -165,45 +167,43 @@ def _load_model_if_needed() -> None:
             log.exception("Sparse model load failed: %s", e)
 
 
+def _do_embed(texts: list[str]) -> list[dict[str, Any]]:
+    """Synchronous embedding work to be run in thread pool."""
+    _load_model_if_needed()
+    if _MODEL is None:
+        raise RuntimeError(f"model not loaded: {_MODEL_ERROR or 'unknown error'}")
+
+    try:
+        gens = _MODEL.embed(texts, batch_size=min(len(texts), SPARSE_BATCH_SIZE))
+    except TypeError:
+        gens = _MODEL.embed(texts)
+
+    vecs: list[dict[str, Any]] = []
+    for s in gens:
+        vecs.append(to_sparse(s))
+
+    if len(vecs) != len(texts):
+        raise RuntimeError("embedding count mismatch")
+    return vecs
+
+
 @app.post("/embed", response_model=SparseResponse)
-def embed(req: SparseRequest):
+async def embed(req: SparseRequest):
     if not req.texts or not isinstance(req.texts, list):
-        REQUEST_COUNTER.labels(status="bad_request").inc()
         raise HTTPException(status_code=400, detail="texts must be a non-empty list")
 
     if len(req.texts) > SPARSE_BATCH_SIZE:
-        REQUEST_COUNTER.labels(status="bad_request").inc()
         raise HTTPException(status_code=400, detail=f"batch too large max={SPARSE_BATCH_SIZE}")
 
-    _load_model_if_needed()
-    if _MODEL is None:
-        REQUEST_COUNTER.labels(status="service_unavailable").inc()
-        raise HTTPException(status_code=503, detail=f"model not loaded: {_MODEL_ERROR or 'unknown error'}")
-
     try:
-        with REQUEST_DURATION.time():
-            try:
-                gens = _MODEL.embed(req.texts, batch_size=min(len(req.texts), SPARSE_BATCH_SIZE))
-            except TypeError:
-                gens = _MODEL.embed(req.texts)
-
-            vecs: list[dict[str, Any]] = []
-            for s in gens:
-                vecs.append(to_sparse(s))
-
-            if len(vecs) != len(req.texts):
-                REQUEST_COUNTER.labels(status="error").inc()
-                raise HTTPException(status_code=500, detail="embedding count mismatch")
-
-        REQUEST_COUNTER.labels(status="ok").inc()
+        loop = asyncio.get_running_loop()
+        vecs = await loop.run_in_executor(_EMBED_EXECUTOR, _do_embed, req.texts)
         return {"vectors": vecs}
-
-    except HTTPException:
-        raise
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         log.exception("sparse embed failed: %s", e)
-        REQUEST_COUNTER.labels(status="error").inc()
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/health")
@@ -235,25 +235,17 @@ def readyz():
     raise HTTPException(status_code=503, detail={"status": "not_ready", "model_error": _MODEL_ERROR})
 
 
-@app.get("/metrics")
-def metrics():
-    data = generate_latest()
-    return PlainTextResponse(content=data.decode("utf-8"), media_type=CONTENT_TYPE_LATEST)
-
-
 @app.on_event("startup")
-def on_startup():
+async def on_startup():
     if PRELOAD_MODEL:
-        log.info("PRELOAD_MODEL enabled; attempting to load sparse model at startup")
+        log.info("PRELOAD_MODEL enabled; attempting to load sparse model at startup (background)")
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(_EMBED_EXECUTOR, _load_model_if_needed)
 
-        def _bg_load():
-            try:
-                _load_model_if_needed()
-            except Exception as e:
-                log.exception("Background sparse model preload failed: %s", e)
 
-        t = threading.Thread(target=_bg_load, daemon=True)
-        t.start()
+@app.on_event("shutdown")
+async def on_shutdown():
+    _EMBED_EXECUTOR.shutdown(wait=True)
 
 
 if __name__ == "__main__":
@@ -264,4 +256,5 @@ if __name__ == "__main__":
         host=SPARSE_HOST,
         port=SPARSE_PORT,
         log_level="warn",
+        loop="uvloop",
     )

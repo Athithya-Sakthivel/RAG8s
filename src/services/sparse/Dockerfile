@@ -3,7 +3,7 @@ FROM python:3.13.12-slim@sha256:f1927c75e81efd1e091dbd64b6c0ecaa5630b38635a3d1c0
 
 # Build-time toggles for GPU and sparse model config
 ARG FASTEMBED_GPU=0
-ARG SPARSE_MODEL_NAME=prithivida/Splade_PP_en_v1
+ARG SPARSE_MODEL_NAME=Qdrant/minicoil-v1
 ARG SPARSE_BATCH_SIZE=8
 
 # Centralize cache paths and runtime env
@@ -43,8 +43,8 @@ RUN if [ "$FASTEMBED_GPU" = "1" ]; then \
       python -m pip install --no-cache-dir fastembed==0.8.0 numpy==2.4.4 onnxruntime==1.25.0 huggingface-hub==1.11.0; \
     fi
 
-# Install API + metrics deps
-RUN python -m pip install --no-cache-dir fastapi==0.136.1 "uvicorn[standard]==0.46.0" prometheus-client==0.25.0
+# Install API deps + uvloop (removed prometheus-client)
+RUN python -m pip install --no-cache-dir fastapi==0.136.1 "uvicorn[standard]==0.46.0" uvloop==0.21.0
 
 # Copy app and entrypoint
 WORKDIR /app

@@ -43,67 +43,46 @@ def _state_value(request: Request, *names: str) -> Any:
 def _claim_subject(value: Any) -> str | None:
     if value is None:
         return None
-
     if isinstance(value, dict):
         for key in ("sub", "user_id", "uid", "id"):
             candidate = value.get(key)
             if candidate is not None and str(candidate).strip():
                 return str(candidate).strip()
         return None
-
     for key in ("sub", "user_id", "uid", "id"):
         candidate = getattr(value, key, None)
         if candidate is not None and str(candidate).strip():
             return str(candidate).strip()
-
     if isinstance(value, str) and value.strip():
         return value.strip()
-
     return None
 
 
 def verified_subject(request: Request) -> str | None:
     return _claim_subject(
-        _state_value(
-            request,
-            "auth_claims",
-            "jwt_claims",
-            "user_claims",
-            "claims",
-            "user",
-        )
+        _state_value(request, "auth_claims", "jwt_claims", "user_claims", "claims", "user")
     )
 
 
-def _limit_namespace(request: Request) -> str:
+def _global_key_func(request: Request) -> str:
     path = _path(request)
-    if path.startswith("/auth"):
-        return "auth"
     if path.startswith("/generate/stream") or path.startswith("/api/generate/stream"):
-        return "stream"
-    return "default"
+        sub = verified_subject(request)
+        if sub:
+            return f"stream:sub:{sub}"
+        return f"stream:ip:{get_ipaddr(request)}"
 
+    if path.startswith("/auth") or path.startswith("/.well-known"):
+        return f"auth:ip:{get_ipaddr(request)}"
 
-def rate_limit_key_func(request: Request) -> str:
-    namespace = _limit_namespace(request)
-    ip = get_ipaddr(request)
-
-    if namespace == "auth":
-        return f"auth:ip:{ip}"
-
-    if namespace == "stream":
-        subject = verified_subject(request)
-        if subject:
-            return f"stream:sub:{subject}"
-        return f"stream:ip:{ip}"
-
-    return f"default:ip:{ip}"
+    return f"default:ip:{get_ipaddr(request)}"
 
 
 limiter = Limiter(
-    key_func=rate_limit_key_func,
+    key_func=_global_key_func,
     storage_uri=VALKEY_URL,
     headers_enabled=True,
+    in_memory_fallback_enabled=True,
 )
 
 
@@ -112,58 +91,16 @@ def install_rate_limits(app: FastAPI) -> None:
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
-def auth_login_limit():
-    return limiter.limit(
-        RATE_LIMIT_AUTH_LOGIN,
-        key_func=lambda request: f"auth:ip:{get_ipaddr(request)}",
-    )
-
-
-def auth_start_limit():
-    return limiter.limit(
-        RATE_LIMIT_AUTH_START,
-        key_func=lambda request: f"auth:ip:{get_ipaddr(request)}",
-    )
-
-
-def auth_callback_limit():
-    return limiter.limit(
-        RATE_LIMIT_AUTH_CALLBACK,
-        key_func=lambda request: f"auth:ip:{get_ipaddr(request)}",
-    )
-
-
-def auth_me_limit():
-    return limiter.limit(
-        RATE_LIMIT_AUTH_ME,
-        key_func=lambda request: f"auth:ip:{get_ipaddr(request)}",
-    )
-
-
-def auth_logout_limit():
-    return limiter.limit(
-        RATE_LIMIT_AUTH_LOGOUT,
-        key_func=lambda request: f"auth:ip:{get_ipaddr(request)}",
-    )
-
-
-def jwks_limit():
-    return limiter.limit(
-        RATE_LIMIT_JWKS,
-        key_func=lambda request: f"auth:ip:{get_ipaddr(request)}",
-    )
-
-
-def generate_stream_limit(authenticated: bool = True):
-    limit_value = RATE_LIMIT_GENERATE_STREAM_AUTH if authenticated else RATE_LIMIT_GENERATE_STREAM_ANON
-    return limiter.limit(
-        limit_value,
-        key_func=lambda request: (
-            f"stream:sub:{verified_subject(request)}"
-            if verified_subject(request)
-            else f"stream:ip:{get_ipaddr(request)}"
-        ),
-    )
+class limits:
+    auth_login   = RATE_LIMIT_AUTH_LOGIN
+    auth_start   = RATE_LIMIT_AUTH_START
+    auth_callback = RATE_LIMIT_AUTH_CALLBACK
+    auth_me      = RATE_LIMIT_AUTH_ME
+    auth_logout  = RATE_LIMIT_AUTH_LOGOUT
+    jwks         = RATE_LIMIT_JWKS
+    stream_auth  = RATE_LIMIT_GENERATE_STREAM_AUTH
+    stream_anon  = RATE_LIMIT_GENERATE_STREAM_ANON
+    stream_concurrency = RATE_LIMIT_GENERATE_STREAM_CONCURRENCY
 
 
 def generate_stream_concurrency_limit() -> int:

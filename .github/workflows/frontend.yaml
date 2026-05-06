@@ -22,7 +22,7 @@ env:
 
 jobs:
   build-test-scan-push:
-    name: Build, scan, publish frontend image
+    name: Build, test, scan, publish frontend image
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     environment: staging
@@ -91,6 +91,14 @@ jobs:
             ${{ steps.image-meta.outputs.image_staging }}
           cache-from: type=gha
           cache-to: type=gha,mode=min
+
+      - name: Run e2e smoke tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::group::Running frontend e2e smoke tests"
+          bash src/frontend/test.sh
+          echo "::endgroup::"
 
       - name: Scan built image with Trivy (CI-level scan)
         shell: bash

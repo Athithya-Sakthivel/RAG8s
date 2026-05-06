@@ -1,4 +1,3 @@
-# stateless_openid_auth.py
 from __future__ import annotations
 
 import html
@@ -11,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import uvicorn
 from authlib.integrations.starlette_client import OAuth, OAuthError
 from config import (
     COOKIE_NAME,
@@ -43,6 +43,7 @@ from config import (
     enabled_providers_effective,
     get_redirect,
     has_jwt_signing_material,
+    USE_UVLOOP,
 )
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -318,9 +319,12 @@ async def login_start(request: Request, provider: str):
     sess = _session(request)
     sess["oauth_provider"] = provider
     sess["oauth_started_at"] = int(_jwt_now().timestamp())
+    # Generate and store a random state to prevent CSRF
+    state = secrets.token_urlsafe(32)
+    sess["oauth_state"] = state
 
     try:
-        return await client.authorize_redirect(request, redirect_uri)
+        return await client.authorize_redirect(request, redirect_uri, state=state)
     except OAuthError as exc:
         logger.warning("oauth redirect failed for %s: %s", provider, exc)
         raise HTTPException(status_code=502, detail="OAuth redirect initiation failed")
@@ -405,6 +409,14 @@ async def callback(request: Request, provider: str):
         raise HTTPException(status_code=404, detail="Provider not enabled")
 
     client = _provider_client(provider)
+
+    # Validate state to prevent CSRF
+    sess = _session(request)
+    stored_state = sess.pop("oauth_state", None)
+    request_state = request.query_params.get("state")
+    if not stored_state or stored_state != request_state:
+        logger.warning("oauth state mismatch for provider=%s", provider)
+        raise HTTPException(status_code=400, detail="Invalid state parameter")
 
     try:
         token = await client.authorize_access_token(request)
@@ -527,8 +539,16 @@ def _decode_access_token(token_text: str) -> dict[str, Any]:
 
 
 if __name__ == "__main__":
-    import uvicorn
-
     host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", "8000"))
-    uvicorn.run("stateless_openid_auth:app", host=host, port=port)
+    loop = "uvloop" if USE_UVLOOP else "auto"
+    uvicorn.run(
+        "stateless_openid_auth:app",
+        host=host,
+        port=port,
+        loop=loop,
+        http="httptools",
+        proxy_headers=True,
+        forwarded_allow_ips="*",
+        access_log=False,
+    )

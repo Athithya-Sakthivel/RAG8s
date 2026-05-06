@@ -1,4 +1,3 @@
-# config.py
 from __future__ import annotations
 
 import os
@@ -57,6 +56,7 @@ def norm_path(value, default: str) -> str:
 
 SERVICE_NAME = (os.getenv("SERVICE_NAME") or "frontend").strip()
 ENV = (os.getenv("ENV") or "STAGING").strip().upper()
+DEPLOYMENT_ENVIRONMENT = ENV  # aligned with retriever
 
 FRONTEND_HOSTNAME = (os.getenv("FRONTEND_HOSTNAME") or "").strip()
 DEFAULT_LOCAL = "http://127.0.0.1:8000"
@@ -68,11 +68,12 @@ else:
         DEFAULT_LOCAL,
     )
 
+# Default retriever URL matches Kubernetes service name "retriever" in inference namespace
 QUERY_URL = norm_url(
     os.getenv("QUERY_URL")
     or os.getenv("RETRIEVER_URL")
-    or "http://retrieval-svc.inference.svc.cluster.local:8001",
-    "http://retrieval-svc.inference.svc.cluster.local:8001",
+    or "http://retriever.inference.svc.cluster.local:8001",
+    "http://retriever.inference.svc.cluster.local:8001",
 )
 
 GENERATE_STREAM_PATH = norm_path(os.getenv("GENERATE_STREAM_PATH"), "/generate/stream")
@@ -160,6 +161,9 @@ RATE_LIMIT_GENERATE_STREAM_CONCURRENCY = parse_int_env(
 
 UPSTREAM_TIMEOUT_SECONDS = parse_int_env(os.getenv("UPSTREAM_TIMEOUT_SECONDS"), 60)
 UPSTREAM_PRESIGN_TIMEOUT_SECONDS = parse_int_env(os.getenv("UPSTREAM_PRESIGN_TIMEOUT_SECONDS"), 20)
+
+# Use uvloop if available (recommended for production)
+USE_UVLOOP = parse_bool_env(os.getenv("USE_UVLOOP"), True)
 
 if JWT_TTL_SECONDS <= 0:
     raise RuntimeError("JWT_TTL_SECONDS must be positive")

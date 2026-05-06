@@ -1,0 +1,207 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: valkey-prod
+  labels:
+    app.kubernetes.io/name: valkey
+    app.kubernetes.io/managed-by: valkey-platform-script
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: valkey-sa
+  namespace: valkey-prod
+automountServiceAccountToken: false
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: valkey-headless
+  namespace: valkey-prod
+  labels:
+    app: valkey
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app: valkey
+  ports:
+    - name: client
+      port: 6379
+      targetPort: 6379
+      protocol: TCP
+    - name: cluster-bus
+      port: 16379
+      targetPort: 16379
+      protocol: TCP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: valkey
+  namespace: valkey-prod
+  labels:
+    app: valkey
+spec:
+  type: ClusterIP
+  selector:
+    app: valkey
+  ports:
+    - name: client
+      port: 6379
+      targetPort: 6379
+      protocol: TCP
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: valkey-allow-same-namespace
+  namespace: valkey-prod
+spec:
+  podSelector:
+    matchLabels:
+      app: valkey
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 6379
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 16379
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: valkey-pdb
+  namespace: valkey-prod
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: valkey
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: valkey
+  namespace: valkey-prod
+  labels:
+    app: valkey
+spec:
+  serviceName: "valkey-headless"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: valkey
+  template:
+    metadata:
+      labels:
+        app: valkey
+    spec:
+      serviceAccountName: valkey-sa
+      automountServiceAccountToken: false
+      securityContext:
+        fsGroup: 1000
+        runAsUser: 1000
+        runAsGroup: 1000
+      terminationGracePeriodSeconds: 120
+      containers:
+        - name: valkey
+          image: "valkey/valkey:9.0.3-alpine3.23@sha256:e1095c6c76ee982cb2d1e07edbb7fb2a53606630a1d810d5a47c9f646b708bf5"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: client
+              containerPort: 6379
+              protocol: TCP
+            - name: cluster-bus
+              containerPort: 16379
+              protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            runAsNonRoot: true
+            runAsUser: 1000
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: VALKEY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: valkey-auth
+                  key: VALKEY_PASSWORD
+            - name: VALKEY_PORT
+              value: "6379"
+            - name: VALKEY_BUS_PORT
+              value: "16379"
+          startupProbe:
+            tcpSocket:
+              port: 6379
+            failureThreshold: 60
+            periodSeconds: 5
+            timeoutSeconds: 3
+          readinessProbe:
+            tcpSocket:
+              port: 6379
+            initialDelaySeconds: 8
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: 6379
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    if command -v valkey-cli >/dev/null 2>&1; then
+                      valkey-cli -a "${VALKEY_PASSWORD}" --no-auth-warning shutdown || true
+                    else
+                      echo "valkey-cli not found; continuing shutdown"
+                    fi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: run
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: "default-storage-class"
+        resources:
+          requests:
+            storage: 10Gi

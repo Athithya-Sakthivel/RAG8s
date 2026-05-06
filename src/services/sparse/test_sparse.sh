@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Minimal end-to-end test: build image, run container, verify ready/health, embed endpoint, metrics, and run Trivy scan.
+# Minimal end-to-end test: build image, run container, verify ready/health, embed endpoint, and run Trivy scan.
 # Usage (from repo root):
 #   cd src/infra/services/sparse
 #   TEST_MODE=cpu SPARSE_MODEL_NAME="prithivida/Splade_PP_en_v1" SPARSE_BATCH_SIZE=8 ./test_sparse.sh
@@ -56,7 +56,7 @@ if [ ! -f Dockerfile ] || [ ! -f host_sparse.py ]; then
   fi
 fi
 
-echo "[1/5] Building image ${IMAGE_LOCAL} (model=${SPARSE_MODEL_NAME}, batch=${SPARSE_BATCH_SIZE}, gpu=${FASTEMBED_GPU_ARG})"
+echo "[1/4] Building image ${IMAGE_LOCAL} (model=${SPARSE_MODEL_NAME}, batch=${SPARSE_BATCH_SIZE}, gpu=${FASTEMBED_GPU_ARG})"
 docker build \
   --platform "${LOCAL_PLATFORM}" \
   --build-arg FASTEMBED_GPU="${FASTEMBED_GPU_ARG}" \
@@ -64,7 +64,7 @@ docker build \
   --build-arg SPARSE_BATCH_SIZE="${SPARSE_BATCH_SIZE}" \
   -t "${IMAGE_LOCAL}" . || { echo "[ERROR] docker build failed" >&2; exit 3; }
 
-echo "[2/5] Starting container ${CONTAINER_NAME}"
+echo "[2/4] Starting container ${CONTAINER_NAME}"
 cleanup
 docker run --name "${CONTAINER_NAME}" -d -p "${HOST_PORT}:${CONTAINER_PORT}" --shm-size=1.8g "${IMAGE_LOCAL}" >/dev/null
 
@@ -94,7 +94,7 @@ wait_for_ready() {
   done
 }
 
-echo "[3/5] Waiting for readiness/health (timeout ${WAIT_TIMEOUT}s)"
+echo "[3/4] Waiting for readiness/health (timeout ${WAIT_TIMEOUT}s)"
 if ! wait_for_ready "${HOST_PORT}" "${WAIT_TIMEOUT}"; then
   echo "[ERROR] Readiness/health check failed; container logs:" >&2
   docker logs --tail 200 "${CONTAINER_NAME}" || true
@@ -102,7 +102,7 @@ if ! wait_for_ready "${HOST_PORT}" "${WAIT_TIMEOUT}"; then
 fi
 
 EMBED_PAYLOAD='{"texts":["hello from sparse test script"]}'
-echo "[4/5] POST /embed"
+echo "[4/4] POST /embed"
 resp=$(curl -fsS -X POST "http://127.0.0.1:${HOST_PORT}/embed" -H "Content-Type: application/json" -d "${EMBED_PAYLOAD}") || {
   echo "[ERROR] Embed POST failed" >&2
   docker logs --tail 200 "${CONTAINER_NAME}" || true
@@ -155,22 +155,10 @@ if [ "${INDICES_LEN}" -ne "${VALUES_LEN}" ]; then
   exit 9
 fi
 
-metrics=$(curl -fsS "http://127.0.0.1:${HOST_PORT}/metrics" 2>/dev/null || true)
-if [ -z "${metrics}" ]; then
-  echo "[WARN] /metrics returned empty or failed"
-else
-  if printf '%s' "${metrics}" | grep -Eq '(^|[[:space:]])sparse_requests_total|sparse_request_duration_seconds'; then
-    echo "[OK] Prometheus metrics present (sample):"
-    printf '%s\n' "${metrics}" | sed -n '1,120p'
-  else
-    echo "[WARN] /metrics returned but expected metrics not found; sample:"
-    printf '%s\n' "${metrics}" | sed -n '1,120p'
-  fi
-fi
-
+# Optional Trivy scan
 TRIVY_IMAGE="${TRIVY_IMAGE:-ghcr.io/athithya-sakthivel/trivy:0.69.3-safe}"
 TRIVY_CACHE_DIR="${TRIVY_CACHE_DIR:-$PWD/.trivy-cache}"
-echo "[5/5] Scanning image ${IMAGE_LOCAL} with Trivy (CRITICAL severity will fail)"
+echo "[Optional] Scanning image ${IMAGE_LOCAL} with Trivy (CRITICAL severity will fail)"
 mkdir -p "${TRIVY_CACHE_DIR}"
 docker run --rm \
   -v /var/run/docker.sock:/var/run/docker.sock \
