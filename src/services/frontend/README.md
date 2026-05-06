@@ -270,3 +270,4 @@ Starts Valkey, starts a mock retriever, generates a signing key, and validates:
 | Rate limiting | Distributed via Valkey; per-subject for authenticated users |
 | Session cookies | SameSite=Lax, Secure in production, HttpOnly |
 | Secrets in browser | JWT only; no refresh tokens or secrets stored |
+---
