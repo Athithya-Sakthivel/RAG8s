@@ -4,8 +4,7 @@ terraform {
   required_providers {
     cloudflare = {
       source  = "cloudflare/cloudflare"
-      # Use 4.x series – last stable version that correctly fetches tunnel tokens
-      version = "~> 4.0"
+      version = ">= 5.19.0, < 6.0.0"
     }
   }
 }
@@ -83,10 +82,9 @@ data "cloudflare_zero_trust_tunnel_cloudflared" "default" {
   }
 }
 
-# NOTE: This data source works correctly only with provider version ~> 4.0
 data "cloudflare_zero_trust_tunnel_cloudflared_token" "default" {
   account_id = var.account_id
-  tunnel_id  = data.cloudflare_zero_trust_tunnel_cloudflared.default.id
+  tunnel_id   = data.cloudflare_zero_trust_tunnel_cloudflared.default.id
 }
 
 resource "cloudflare_dns_record" "root_cname" {

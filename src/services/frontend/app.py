@@ -138,10 +138,18 @@ async def metrics_middleware(request: Request, call_next):
         untrack_active(route, method)
 
 
+# app.py (only the relevant middleware section changed)
+
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     path = request.url.path.rstrip("/") or "/"
-    if path.startswith("/generate/stream") or path.startswith("/api/generate/stream"):
+    # Set auth_claims for any path that uses Bearer token authentication,
+    # so rate limiting can use the user's sub.
+    if (
+        path.startswith("/generate/stream")
+        or path.startswith("/api/generate/stream")
+        or path == "/auth/me"          # ← added
+    ):
         auth = request.headers.get("authorization", "")
         if auth.lower().startswith("bearer "):
             token = auth.split(" ", 1)[1].strip()
@@ -149,14 +157,15 @@ async def auth_middleware(request: Request, call_next):
                 try:
                     request.state.auth_claims = auth_mod.verify_access_token(token)
                 except Exception:
-                    return JSONResponse({"detail": "Invalid token"}, status_code=401)
+                    # For /auth/me we let the endpoint handle the error;
+                    # here we just don't set claims so the key stays empty
+                    request.state.auth_claims = None
             else:
                 request.state.auth_claims = None
         else:
             request.state.auth_claims = None
     return await call_next(request)
-
-
+    
 def _request_id(request: Request) -> str | None:
     rid = request.headers.get("x-request-id")
     return rid or None

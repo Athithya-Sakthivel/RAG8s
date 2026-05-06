@@ -52,7 +52,7 @@ from joserfc import jwk, jwt
 from joserfc.errors import ClaimError, ExpiredTokenError, InvalidClaimError, JoseError
 from joserfc.jwk import ECKey
 from joserfc.jwt import JWTClaimsRegistry
-from rate_limits import limiter, limits, _auth_ip_key   # ← CORRECT IMPORT
+from rate_limits import limiter, limits, _auth_ip_key   # ← CORRECT
 from starlette.middleware.sessions import SessionMiddleware
 
 logger = logging.getLogger(__name__)
@@ -309,7 +309,7 @@ async def redirects_page():
 
 @app.get("/login", response_class=HTMLResponse)
 @limiter.limit(limits.auth_login, key_func=_auth_ip_key)
-async def login_page():
+async def login_page(request: Request):          # ← added request parameter
     return _render_index()
 
 
@@ -505,7 +505,6 @@ window.location.replace({json.dumps(_frontend_base())});
 </html>"""
     return HTMLResponse(body)
 
-
 @app.get("/me")
 @limiter.limit(limits.auth_me)   # uses global user key
 async def me(request: Request):
@@ -520,7 +519,8 @@ async def me(request: Request):
         logger.error("token verification failed: %s", exc)
         raise HTTPException(status_code=401, detail="Invalid token")
 
-    return {"authenticated": True, "user": claims}
+    # Return a proper Response so slowapi can add rate‑limit headers
+    return JSONResponse({"authenticated": True, "user": claims})
 
 
 @app.get("/health")

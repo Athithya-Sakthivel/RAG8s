@@ -194,12 +194,6 @@ cleanup_tunnel() {
   fi
 }
 
-# Ensure we remove old provider lock file to force re-download of correct version
-if [[ ! -f "${STACK_DIR}/.terraform.lock.hcl" ]] || grep -q "5.19.1" "${STACK_DIR}/.terraform.lock.hcl" 2>/dev/null; then
-  echo "[INFO] removing old provider lock file to force correct provider version" >&2
-  rm -f "${STACK_DIR}/.terraform.lock.hcl"
-fi
-
 resolve_zone_id
 
 if [[ "${MODE}" != "--destroy" ]]; then
@@ -226,22 +220,6 @@ case "${MODE}" in
     ;;
   --apply)
     "$TF_BIN" -chdir="${STACK_DIR}" apply -input=false -auto-approve
-
-    # After successful apply, fetch the real tunnel token via cloudflared CLI
-    # and export it as an output (overrides the provider’s broken data source)
-    if command -v cloudflared >/dev/null 2>&1; then
-      echo "[INFO] fetching actual tunnel token via cloudflared CLI" >&2
-      REAL_TOKEN="$(cloudflared tunnel token "${TF_VAR_tunnel_name}" 2>/dev/null || true)"
-      if [[ -n "${REAL_TOKEN}" ]]; then
-        # Override the output value for the token (for downstream scripts)
-        "$TF_BIN" -chdir="${STACK_DIR}" output -json | jq --arg tok "${REAL_TOKEN}" '.cloudflare_tunnel_token.value = $tok' > "${STACK_DIR}/output_override.json" || true
-        echo "${REAL_TOKEN}" > "${STACK_DIR}/.real_tunnel_token"
-        echo "[INFO] real tunnel token saved to ${STACK_DIR}/.real_tunnel_token" >&2
-      else
-        echo "[WARN] could not fetch tunnel token via cloudflared; using provider output (may be empty)" >&2
-      fi
-    fi
-
     "$TF_BIN" -chdir="${STACK_DIR}" output
     ;;
   --destroy)
