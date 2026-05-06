@@ -1,3 +1,4 @@
+# stateless_openid_auth.py
 from __future__ import annotations
 
 import html
@@ -51,7 +52,7 @@ from joserfc import jwk, jwt
 from joserfc.errors import ClaimError, ExpiredTokenError, InvalidClaimError, JoseError
 from joserfc.jwk import ECKey
 from joserfc.jwt import JWTClaimsRegistry
-from rate_limits import limiter, _auth_ip_key
+from rate_limits import limiter, limits, _auth_ip_key   # ← CORRECT IMPORT
 from starlette.middleware.sessions import SessionMiddleware
 
 logger = logging.getLogger(__name__)
@@ -516,7 +517,7 @@ async def me(request: Request):
     except (ClaimError, JoseError):
         raise HTTPException(status_code=401, detail="Invalid token")
     except Exception as exc:
-        logger.error("token verification failed")
+        logger.error("token verification failed: %s", exc)
         raise HTTPException(status_code=401, detail="Invalid token")
 
     return {"authenticated": True, "user": claims}
