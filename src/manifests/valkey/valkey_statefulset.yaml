@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: valkey-prod
+  name: valkey
   labels:
     app.kubernetes.io/name: valkey
     app.kubernetes.io/managed-by: valkey-platform-script
@@ -11,7 +11,7 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: valkey-sa
-  namespace: valkey-prod
+  namespace: valkey
 automountServiceAccountToken: false
 
 ---
@@ -19,7 +19,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: valkey-headless
-  namespace: valkey-prod
+  namespace: valkey
   labels:
     app: valkey
 spec:
@@ -42,7 +42,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: valkey
-  namespace: valkey-prod
+  namespace: valkey
   labels:
     app: valkey
 spec:
@@ -60,7 +60,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: valkey-allow-same-namespace
-  namespace: valkey-prod
+  namespace: valkey
 spec:
   podSelector:
     matchLabels:
@@ -84,7 +84,7 @@ apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: valkey-pdb
-  namespace: valkey-prod
+  namespace: valkey
 spec:
   minAvailable: 1
   selector:
@@ -96,7 +96,7 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: valkey
-  namespace: valkey-prod
+  namespace: valkey
   labels:
     app: valkey
 spec:
@@ -130,7 +130,7 @@ spec:
               protocol: TCP
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false
+            readOnlyRootFilesystem: true
             runAsNonRoot: true
             runAsUser: 1000
           resources:
@@ -139,7 +139,7 @@ spec:
               memory: "1Gi"
             limits:
               cpu: "2"
-              memory: "4Gi"
+              memory: "2Gi"
           env:
             - name: POD_IP
               valueFrom:
@@ -191,17 +191,10 @@ spec:
                       echo "valkey-cli not found; continuing shutdown"
                     fi
           volumeMounts:
-            - name: data
-              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
       volumes:
-        - name: run
-          emptyDir: {}
-  volumeClaimTemplates:
-    - metadata:
-        name: data
-      spec:
-        accessModes: ["ReadWriteOnce"]
-        storageClassName: "default-storage-class"
-        resources:
-          requests:
-            storage: 10Gi
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 128Mi

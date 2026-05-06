@@ -145,7 +145,14 @@ JWT_KID = (os.getenv("JWT_KID") or "").strip()
 JWT_PRIVATE_KEY_PEM = (os.getenv("JWT_PRIVATE_KEY_PEM") or "").strip()
 JWT_PRIVATE_KEY_PATH = (os.getenv("JWT_PRIVATE_KEY_PATH") or "").strip()
 
-VALKEY_URL = (os.getenv("VALKEY_URL") or os.getenv("REDIS_URL") or "").strip()
+# Fixed - derive from password only
+VALKEY_PASSWORD = os.getenv("VALKEY_PASSWORD", "").strip()
+if VALKEY_PASSWORD:
+    VALKEY_URL = f"redis://:{VALKEY_PASSWORD}@valkey.valkey.svc.cluster.local:6379/0"
+else:
+    VALKEY_URL = os.getenv("VALKEY_URL") or os.getenv("REDIS_URL") or "redis://localhost:6379/0"
+VALKEY_URL = VALKEY_URL.strip()
+
 
 RATE_LIMIT_AUTH_LOGIN = (os.getenv("RATE_LIMIT_AUTH_LOGIN") or "5/minute").strip()
 RATE_LIMIT_AUTH_START = (os.getenv("RATE_LIMIT_AUTH_START") or "5/minute").strip()
