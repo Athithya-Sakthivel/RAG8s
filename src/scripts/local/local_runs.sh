@@ -106,13 +106,18 @@ export PG_SERVER_NAME=mlsecops
 make pg-cluster
 bash src/scripts/backups_and_restore.sh restore # restores latest by default
 export SIGNOZ_JWT_SECRET="YourStrongJWTSecretHere"
-python3 src/infra/rag/retriever_service.py --apply-secrets
-python3 src/infra/rag/retriever_service.py --write
+
 python3 src/infra/rag/reranker_service.py --write
 python3 src/infra/rag/sparse_service.py --generate
 python3 src/infra/rag/dense_service.py --dry-run
 sleep 5
 python3 src/infra/network/zitadel_setup.py --write --apply-secrets
+
+
+
+python3 src/infra/rag/retriever_service.py --apply-secrets
+python3 src/infra/rag/retriever_service.py --write
+kubectl apply -f src/manifests/retriever
 
 export CLOUDFLARE_TUNNEL_TOKEN="$(tofu -chdir=src/infra/terraform/cloudflare output -raw cloudflare_tunnel_token)"
 export CLOUDFLARE_TUNNEL_NAME="$(tofu -chdir=src/infra/terraform/cloudflare output -raw cloudflare_tunnel_name)"

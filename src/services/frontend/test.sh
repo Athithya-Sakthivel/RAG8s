@@ -29,6 +29,8 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
+
 mkdir -p "$tmpdir"
 
 log_section() { echo -e "\n${BLUE}═══ $1 ═══${NC}"; }

@@ -1,0 +1,121 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: retriever
+  namespace: inference
+  labels:
+    app.kubernetes.io/name: retriever
+    app.kubernetes.io/instance: retriever
+    app.kubernetes.io/managed-by: retriever-manifest-generator
+    app.kubernetes.io/component: retriever
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: retriever
+      app.kubernetes.io/instance: retriever
+      app.kubernetes.io/component: retriever
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: retriever
+        app.kubernetes.io/instance: retriever
+        app.kubernetes.io/managed-by: retriever-manifest-generator
+        app.kubernetes.io/component: retriever
+        app.kubernetes.io/part-of: retriever
+    spec:
+      serviceAccountName: retriever-sa
+      automountServiceAccountToken: true
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        fsGroup: 1000
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      containers:
+      - name: retriever
+        image: ghcr.io/athithya-sakthivel/retriever:2026-05-05-20-34--7e2c98f@sha256:1521b9b6255a0f4c5a684db8e7b913fe29e5de158346ec05b8f55154a8591b97
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8001
+          protocol: TCP
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: SERVICE_NAME
+          value: retriever
+        - name: DEPLOYMENT_ENVIRONMENT
+          value: PROD
+        - name: ENV
+          value: PROD
+        - name: LOG_LEVEL
+          value: INFO
+        - name: ENABLE_PROMETHEUS
+          value: 'true'
+        - name: PROMETHEUS_PATH
+          value: /metrics
+        - name: AWS_REGION
+          value: ap-south-1
+        - name: BEDROCK_MODEL_ID
+          value: meta.llama3-8b-instruct-v1:0
+        - name: COLLECTION_NAME
+          value: default_rag_collection1
+        envFrom:
+        - secretRef:
+            name: retriever-secrets
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: tmp
+          mountPath: /var/tmp
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+          runAsGroup: 1000
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: '1'
+            memory: 1Gi
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8001
+            scheme: HTTP
+          initialDelaySeconds: 10
+          timeoutSeconds: 5
+          periodSeconds: 5
+          failureThreshold: 3
+          successThreshold: 1
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8001
+            scheme: HTTP
+          initialDelaySeconds: 30
+          timeoutSeconds: 5
+          periodSeconds: 5
+          failureThreshold: 6
+          successThreshold: 1
+        startupProbe:
+          httpGet:
+            path: /healthz
+            port: 8001
+            scheme: HTTP
+          initialDelaySeconds: 30
+          timeoutSeconds: 5
+          periodSeconds: 5
+          failureThreshold: 60
+          successThreshold: 1
