@@ -28,7 +28,7 @@ DEFAULT_STATE_DIRNAME = ".state"
 
 DEFAULTS: dict[str, Any] = {
     "DEPLOY_ENV": "NONPROD",
-    "IMAGE": "ghcr.io/athithya-sakthivel/reranker:2026-05-06-06-15--70eca4b@sha256:fec0048434f5b78c7624dada5909fe14318fd65d6de9d73837f3b8a2226c7c28",
+    "IMAGE": "ghcr.io/athithya-sakthivel/reranker:2026-05-06-06-26--13b7433@sha256:c2fe5136f124758462112bf7bec9f08f485ed2e53c918c4bdb6add5a777f344b",
     "NAMESPACE": "inference",
     "SERVICE_NAME": "reranker",
     "CONTAINER_PORT": 8202,

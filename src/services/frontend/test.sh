@@ -180,6 +180,7 @@ cd "$APP_DIR"
 # ═══════════════════════════════════════════════════════════════
 log_section "START FRONTEND"
 # ═══════════════════════════════════════════════════════════════
+python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
 
 uvicorn app:app --host "$HOST" --port "$APP_PORT" </dev/null &
 APP_PID=$!
@@ -198,6 +199,7 @@ if [ "$APP_READY" = "0" ]; then
   log_fail "Frontend failed to start"
   exit 1
 fi
+
 
 # ═══════════════════════════════════════════════════════════════
 log_section "1. HEALTH ENDPOINTS"
