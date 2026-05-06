@@ -108,7 +108,7 @@ jobs:
 
           ignore_args=()
           if [[ -f src/services/frontend/.trivyignore ]]; then
-            ignore_args+=(--ignorefile src/frontend/.trivyignore)
+            ignore_args+=(--ignorefile src/services/frontend/.trivyignore)
           elif [[ -f .trivyignore ]]; then
             ignore_args+=(--ignorefile .trivyignore)
           fi
