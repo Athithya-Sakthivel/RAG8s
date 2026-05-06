@@ -4,12 +4,8 @@ from __future__ import annotations
 from typing import Any
 
 from config import (
-    RATE_LIMIT_AUTH_CALLBACK,
-    RATE_LIMIT_AUTH_LOGIN,
-    RATE_LIMIT_AUTH_LOGOUT,
-    RATE_LIMIT_AUTH_ME,
-    RATE_LIMIT_AUTH_START,
     RATE_LIMIT_GENERATE_STREAM,
+    RATE_LIMIT_AUTH_ME,
     RATE_LIMIT_STREAM_CONCURRENCY,
     VALKEY_URL,
 )
@@ -62,25 +58,24 @@ def verified_subject(request: Request) -> str | None:
     )
 
 
-# ── Key functions for different route categories ─────────────
+# ── Key functions ──────────────────────────────────────────────
 
 def _user_key_func(request: Request) -> str:
-    """Global default key function: authenticated user sub, else empty -> no limit.
-    This ensures that only authenticated routes get rate limited via user identity."""
+    """Global key: authenticated user sub, else empty → no limit."""
     sub = verified_subject(request)
     if sub:
         return f"user:{sub}"
-    return ""   # anonymous requests are not rate limited by default
+    return ""
 
 
 def _auth_ip_key(request: Request) -> str:
-    """IP‑based key for unauthenticated auth routes (login, start, callback, logout)."""
+    """IP‑based key for unauthenticated auth routes."""
     return f"auth:ip:{get_ipaddr(request)}"
 
 
-# ── Limiter singleton ────────────────────────────────────────
+# ── Limiter singleton ──────────────────────────────────────────
 limiter = Limiter(
-    key_func=_user_key_func,          # safe default for authenticated routes
+    key_func=_user_key_func,
     storage_uri=VALKEY_URL,
     headers_enabled=True,
     in_memory_fallback_enabled=True,
@@ -92,15 +87,18 @@ def install_rate_limits(app: FastAPI) -> None:
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
-# ── Rate limit strings ───────────────────────────────────────
+# ── Rate limit strings ─────────────────────────────────────────
 class limits:
-    generate_stream = RATE_LIMIT_GENERATE_STREAM
-    auth_me         = RATE_LIMIT_AUTH_ME
-    auth_login      = RATE_LIMIT_AUTH_LOGIN
-    auth_start      = RATE_LIMIT_AUTH_START
-    auth_callback   = RATE_LIMIT_AUTH_CALLBACK
-    auth_logout     = RATE_LIMIT_AUTH_LOGOUT
+    # From config.py
+    generate_stream   = RATE_LIMIT_GENERATE_STREAM
+    auth_me           = RATE_LIMIT_AUTH_ME
     stream_concurrency = RATE_LIMIT_STREAM_CONCURRENCY
+
+    # Hardcoded defaults for auth flow (not in config.py)
+    auth_login    = "10/minute"
+    auth_start    = "5/minute"
+    auth_callback = "10/minute"
+    auth_logout   = "10/minute"
 
 
 def generate_stream_concurrency_limit() -> int:
