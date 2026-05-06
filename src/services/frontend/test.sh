@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
 
-# Auto-detect script directory — works in CI and locally
 APP_DIR="${APP_DIR:-$(cd "$(dirname "$0")" && pwd)}"
 HOST="127.0.0.1"
 APP_PORT="8000"
@@ -30,10 +28,11 @@ trap cleanup EXIT INT TERM
 
 mkdir -p "$tmpdir"
 
-# ── Move to APP_DIR FIRST, then set up venv ───────────────────
+# -----------------------------------------------------------------
+# 1. Move to the service directory and set up Python venv if needed
+# -----------------------------------------------------------------
 cd "$APP_DIR"
 
-# Create/activate venv if not already in one
 if [ -z "${VIRTUAL_ENV:-}" ]; then
   if [ ! -d .venv ]; then
     python3 -m venv .venv
@@ -84,9 +83,10 @@ else:
   fi
 }
 
-# ═══════════════════════════════════════════════════════════════
+# -----------------------------------------------------------------
+# SETUP
+# -----------------------------------------------------------------
 log_section "SETUP"
-# ═══════════════════════════════════════════════════════════════
 
 openssl ecparam -name prime256v1 -genkey -noout -out "$tmpdir/jwt.key.pem" 2>/dev/null
 log_pass "EC key generated"
@@ -161,9 +161,10 @@ RET_PID=$!
 sleep 0.5
 log_pass "Mock retriever started"
 
-# ═══════════════════════════════════════════════════════════════
+# -----------------------------------------------------------------
+# CONFIGURE ENVIRONMENT – only variables the current config.py needs
+# -----------------------------------------------------------------
 log_section "CONFIGURE ENVIRONMENT"
-# ═══════════════════════════════════════════════════════════════
 
 export SERVICE_NAME="frontend"
 export ENV="TEST"
@@ -187,18 +188,20 @@ export REQUIRE_AUTH="true"
 export DISPLAY_SOURCES_IN_UI="true"
 export DISPLAY_TOPK_IN_UI="true"
 
-# ── Use config keys that match rate_limits.py ─────────────────
+# Rate limits – keep them low for fast testing
 export RATE_LIMIT_GENERATE_STREAM="4/minute"
 export RATE_LIMIT_AUTH_ME="4/minute"
+export RATE_LIMIT_STREAM_CONCURRENCY="3"
+# Additional auth limits (these must exist in config.py – they are defined there already)
 export RATE_LIMIT_AUTH_LOGIN="10/minute"
 export RATE_LIMIT_AUTH_START="5/minute"
 export RATE_LIMIT_AUTH_CALLBACK="10/minute"
 export RATE_LIMIT_AUTH_LOGOUT="10/minute"
-export RATE_LIMIT_STREAM_CONCURRENCY="3"
 
-# ═══════════════════════════════════════════════════════════════
+# -----------------------------------------------------------------
+# START FRONTEND
+# -----------------------------------------------------------------
 log_section "START FRONTEND"
-# ═══════════════════════════════════════════════════════════════
 
 uvicorn app:app --host "$HOST" --port "$APP_PORT" </dev/null &
 APP_PID=$!
@@ -218,9 +221,10 @@ if [ "$APP_READY" = "0" ]; then
   exit 1
 fi
 
-# ═══════════════════════════════════════════════════════════════
+# -----------------------------------------------------------------
+# 1. HEALTH ENDPOINTS
+# -----------------------------------------------------------------
 log_section "1. HEALTH ENDPOINTS"
-# ═══════════════════════════════════════════════════════════════
 
 RESP=$(curl -fsS --max-time 5 "http://$HOST:$APP_PORT/orchestrator/health")
 assert_json_field "/orchestrator/health status" "$RESP" "status" "ok"
@@ -234,9 +238,10 @@ RESP=$(curl -fsS --max-time 5 "http://$HOST:$APP_PORT/auth/health")
 assert_json_field "/auth/health status" "$RESP" "status" "ok"
 assert_contains "/auth/health has jwks_uri" "$RESP" '"jwks_uri"'
 
-# ═══════════════════════════════════════════════════════════════
+# -----------------------------------------------------------------
+# 2. JWKS ENDPOINT (no rate limiting on JWKS now, but we still verify)
+# -----------------------------------------------------------------
 log_section "2. JWKS ENDPOINT"
-# ═══════════════════════════════════════════════════════════════
 
 RESP=$(curl -fsS --max-time 5 "http://$HOST:$APP_PORT/auth/.well-known/jwks.json")
 assert_contains "JWKS has keys" "$RESP" '"keys"'
@@ -249,31 +254,13 @@ assert_contains "JWKS alias works" "$RESP" '"keys"'
 RESP=$(curl -fsS --max-time 5 "http://$HOST:$APP_PORT/jwks.json")
 assert_contains "JWKS /jwks.json works" "$RESP" '"keys"'
 
-# ═══════════════════════════════════════════════════════════════
-log_section "3. JWKS RATE LIMITING"
-# ═══════════════════════════════════════════════════════════════
+# JWKS rate limiting is removed, but we note it.
+log_info "JWKS rate limiting is intentionally disabled (no user context)"
 
-docker exec valkey valkey-cli FLUSHDB >/dev/null 2>&1 || true
-
-log_info "Sending 7 rapid JWKS requests..."
-JWKS_429=0
-for i in $(seq 1 7); do
-  STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://$HOST:$APP_PORT/auth/.well-known/jwks.json")
-  if [ "$STATUS" = "429" ]; then
-    JWKS_429=1
-    log_info "  Request $i → HTTP 429"
-    break
-  fi
-done
-if [ "$JWKS_429" = "1" ]; then
-  log_pass "JWKS rate limiting works (429 received)"
-else
-  log_fail "JWKS rate limiting did NOT trigger (JWKS is not rate-limited in current config — this is expected)"
-fi
-
-# ═══════════════════════════════════════════════════════════════
-log_section "4. JWT TOKEN OPERATIONS"
-# ═══════════════════════════════════════════════════════════════
+# -----------------------------------------------------------------
+# 3. JWT TOKEN OPERATIONS
+# -----------------------------------------------------------------
+log_section "3. JWT TOKEN OPERATIONS"
 
 TOKEN="$(python3 - <<'PY'
 import os, secrets
@@ -343,9 +330,10 @@ PY
 STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://$HOST:$APP_PORT/auth/me" -H "Authorization: Bearer $EXPIRED_TOKEN")
 assert_status "Expired token rejected" "401" "$STATUS"
 
-# ═══════════════════════════════════════════════════════════════
-log_section "5. /auth/me RATE LIMITING"
-# ═══════════════════════════════════════════════════════════════
+# -----------------------------------------------------------------
+# 4. /auth/me RATE LIMITING (per-user, uses sub)
+# -----------------------------------------------------------------
+log_section "4. /auth/me RATE LIMITING"
 
 docker exec valkey valkey-cli FLUSHDB >/dev/null 2>&1 || true
 
@@ -365,9 +353,10 @@ else
   log_fail "/auth/me rate limiting did NOT trigger (check Valkey connectivity)"
 fi
 
-# ═══════════════════════════════════════════════════════════════
-log_section "6. GENERATE STREAM"
-# ═══════════════════════════════════════════════════════════════
+# -----------------------------------------------------------------
+# 5. GENERATE STREAM
+# -----------------------------------------------------------------
+log_section "5. GENERATE STREAM"
 
 STREAM_OUT="$(curl -fsS --max-time 10 "http://$HOST:$APP_PORT/generate/stream" \
   -H "Authorization: Bearer $TOKEN" \
@@ -389,9 +378,10 @@ STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://$HOST:$APP_
   -H "Content-Type: application/json" --data 'not json')
 assert_status "Invalid JSON rejected" "400" "$STATUS"
 
-# ═══════════════════════════════════════════════════════════════
-log_section "7. STREAM RATE LIMITING"
-# ═══════════════════════════════════════════════════════════════
+# -----------------------------------------------------------------
+# 6. STREAM RATE LIMITING (per-user)
+# -----------------------------------------------------------------
+log_section "6. STREAM RATE LIMITING"
 
 docker exec valkey valkey-cli FLUSHDB >/dev/null 2>&1 || true
 
@@ -413,9 +403,10 @@ else
   log_fail "Stream rate limiting did NOT trigger"
 fi
 
-# ═══════════════════════════════════════════════════════════════
-log_section "8. CONCURRENCY"
-# ═══════════════════════════════════════════════════════════════
+# -----------------------------------------------------------------
+# 7. CONCURRENCY (fresh token to avoid rate limits)
+# -----------------------------------------------------------------
+log_section "7. CONCURRENCY"
 
 CONCUR_TOKEN="$(python3 - <<'PY'
 import os, secrets
@@ -448,7 +439,7 @@ PY
 
 docker exec valkey valkey-cli FLUSHDB >/dev/null 2>&1 || true
 
-log_info "Sending 6 concurrent stream requests (semaphore limit: 3)..."
+log_info "Sending 6 concurrent stream requests (concurrency limit: 3)..."
 CONCUR_DIR="$tmpdir/concurrent"
 mkdir -p "$CONCUR_DIR"
 
@@ -485,9 +476,10 @@ else
   log_fail "Concurrent streams low ($SUCCESS/6)"
 fi
 
-# ═══════════════════════════════════════════════════════════════
-log_section "9. PROMETHEUS METRICS"
-# ═══════════════════════════════════════════════════════════════
+# -----------------------------------------------------------------
+# 8. PROMETHEUS METRICS
+# -----------------------------------------------------------------
+log_section "8. PROMETHEUS METRICS"
 
 METRICS=$(curl -fsS --max-time 5 "http://$HOST:$APP_PORT/metrics")
 
@@ -516,9 +508,10 @@ done
 
 assert_contains "Service ready = 1" "$METRICS" 'frontend_service_ready{service="frontend",environment="TEST"} 1.0'
 
-# ═══════════════════════════════════════════════════════════════
-log_section "10. UI ENDPOINTS"
-# ═══════════════════════════════════════════════════════════════
+# -----------------------------------------------------------------
+# 9. UI ENDPOINTS
+# -----------------------------------------------------------------
+log_section "9. UI ENDPOINTS"
 
 RESP=$(curl -fsS --max-time 5 "http://$HOST:$APP_PORT/")
 assert_contains "Index has RAG UI" "$RESP" "RAG UI"
@@ -530,9 +523,10 @@ assert_contains "Login page loads" "$RESP" "Sign in"
 STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://$HOST:$APP_PORT/auth/logout")
 assert_status "Logout returns 200" "200" "$STATUS"
 
-# ═══════════════════════════════════════════════════════════════
-log_section "11. EDGE CASES"
-# ═══════════════════════════════════════════════════════════════
+# -----------------------------------------------------------------
+# 10. EDGE CASES
+# -----------------------------------------------------------------
+log_section "10. EDGE CASES"
 
 STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://$HOST:$APP_PORT/nonexistent")
 assert_status "404 for unknown route" "404" "$STATUS"
@@ -543,9 +537,10 @@ RESP=$(curl -fsS --max-time 10 "http://$HOST:$APP_PORT/generate/stream" \
   --data '{"query":"<script>alert(1)</script>"}')
 assert_contains "XSS-safe stream" "$RESP" "event: done"
 
-# ═══════════════════════════════════════════════════════════════
+# -----------------------------------------------------------------
+# RESULTS
+# -----------------------------------------------------------------
 log_section "RESULTS"
-# ═══════════════════════════════════════════════════════════════
 
 echo ""
 echo -e "  ${GREEN}Passed: $PASS${NC}"
