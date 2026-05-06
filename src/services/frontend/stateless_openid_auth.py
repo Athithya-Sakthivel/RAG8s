@@ -40,10 +40,10 @@ from config import (
     MS_CLIENT_SECRET,
     MS_TENANT_ID,
     SESSION_SECRET,
+    USE_UVLOOP,
     enabled_providers_effective,
     get_redirect,
     has_jwt_signing_material,
-    USE_UVLOOP,
 )
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -51,6 +51,7 @@ from joserfc import jwk, jwt
 from joserfc.errors import ClaimError, ExpiredTokenError, InvalidClaimError, JoseError
 from joserfc.jwk import ECKey
 from joserfc.jwt import JWTClaimsRegistry
+from rate_limits import limiter, _auth_ip_key
 from starlette.middleware.sessions import SessionMiddleware
 
 logger = logging.getLogger(__name__)
@@ -131,6 +132,7 @@ CLAIMS_REQUESTS = _SkewClaimsRegistry(
 
 oauth = OAuth()
 ENABLED_PROVIDERS = enabled_providers_effective()
+_provider_clients: dict[str, Any] = {}  # cache OAuth clients
 
 if ENABLE_GOOGLE and "google" in ENABLED_PROVIDERS:
     oauth.register(
@@ -185,10 +187,12 @@ def _redirect_uri(provider: str) -> str:
 
 
 def _provider_client(provider: str):
-    client = oauth.create_client(provider)
-    if client is None:
-        raise HTTPException(status_code=500, detail=f"OAuth client unavailable for provider '{provider}'")
-    return client
+    if provider not in _provider_clients:
+        client = oauth.create_client(provider)
+        if client is None:
+            raise HTTPException(status_code=500, detail=f"OAuth client unavailable for provider '{provider}'")
+        _provider_clients[provider] = client
+    return _provider_clients[provider]
 
 
 def _session(request: Request):
@@ -303,11 +307,13 @@ async def redirects_page():
 
 
 @app.get("/login", response_class=HTMLResponse)
+@limiter.limit(limits.auth_login, key_func=_auth_ip_key)
 async def login_page():
     return _render_index()
 
 
 @app.get("/login/start/{provider}")
+@limiter.limit(limits.auth_start, key_func=_auth_ip_key)
 async def login_start(request: Request, provider: str):
     provider = (provider or "").strip().lower()
     if provider not in _enabled_providers():
@@ -319,7 +325,6 @@ async def login_start(request: Request, provider: str):
     sess = _session(request)
     sess["oauth_provider"] = provider
     sess["oauth_started_at"] = int(_jwt_now().timestamp())
-    # Generate and store a random state to prevent CSRF
     state = secrets.token_urlsafe(32)
     sess["oauth_state"] = state
 
@@ -403,6 +408,7 @@ def _deny_github(identity: dict[str, Any], orgs: list[str]) -> None:
 
 
 @app.get("/callback/{provider}")
+@limiter.limit(limits.auth_callback, key_func=_auth_ip_key)
 async def callback(request: Request, provider: str):
     provider = (provider or "").strip().lower()
     if provider not in _enabled_providers():
@@ -410,7 +416,7 @@ async def callback(request: Request, provider: str):
 
     client = _provider_client(provider)
 
-    # Validate state to prevent CSRF
+    # Validate state
     sess = _session(request)
     stored_state = sess.pop("oauth_state", None)
     request_state = request.query_params.get("state")
@@ -479,6 +485,7 @@ async def success_page():
 
 
 @app.get("/logout", response_class=HTMLResponse)
+@limiter.limit(limits.auth_logout, key_func=_auth_ip_key)
 async def logout(request: Request):
     try:
         _session(request).clear()
@@ -499,6 +506,7 @@ window.location.replace({json.dumps(_frontend_base())});
 
 
 @app.get("/me")
+@limiter.limit(limits.auth_me)   # uses global user key
 async def me(request: Request):
     token_text = _extract_bearer_token(request)
     try:
@@ -508,7 +516,7 @@ async def me(request: Request):
     except (ClaimError, JoseError):
         raise HTTPException(status_code=401, detail="Invalid token")
     except Exception as exc:
-        logger.error("token verification failed")
+        logger.error("token verification failed: %s", exc)
         raise HTTPException(status_code=401, detail="Invalid token")
 
     return {"authenticated": True, "user": claims}

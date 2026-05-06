@@ -1,3 +1,4 @@
+# config.py
 from __future__ import annotations
 
 import os
@@ -56,7 +57,6 @@ def norm_path(value, default: str) -> str:
 
 SERVICE_NAME = (os.getenv("SERVICE_NAME") or "frontend").strip()
 ENV = (os.getenv("ENV") or "STAGING").strip().upper()
-DEPLOYMENT_ENVIRONMENT = ENV  # aligned with retriever
 
 FRONTEND_HOSTNAME = (os.getenv("FRONTEND_HOSTNAME") or "").strip()
 DEFAULT_LOCAL = "http://127.0.0.1:8000"
@@ -68,7 +68,6 @@ else:
         DEFAULT_LOCAL,
     )
 
-# Default retriever URL matches Kubernetes service name "retriever" in inference namespace
 QUERY_URL = norm_url(
     os.getenv("QUERY_URL")
     or os.getenv("RETRIEVER_URL")
@@ -145,31 +144,18 @@ JWT_KID = (os.getenv("JWT_KID") or "").strip()
 JWT_PRIVATE_KEY_PEM = (os.getenv("JWT_PRIVATE_KEY_PEM") or "").strip()
 JWT_PRIVATE_KEY_PATH = (os.getenv("JWT_PRIVATE_KEY_PATH") or "").strip()
 
-# Fixed - derive from password only
-VALKEY_PASSWORD = os.getenv("VALKEY_PASSWORD", "").strip()
-if VALKEY_PASSWORD:
-    VALKEY_URL = f"redis://:{VALKEY_PASSWORD}@valkey.valkey.svc.cluster.local:6379/0"
-else:
-    VALKEY_URL = os.getenv("VALKEY_URL") or os.getenv("REDIS_URL") or "redis://localhost:6379/0"
-VALKEY_URL = VALKEY_URL.strip()
+VALKEY_URL = (os.getenv("VALKEY_URL") or os.getenv("REDIS_URL") or "").strip()
 
-
-RATE_LIMIT_AUTH_LOGIN = (os.getenv("RATE_LIMIT_AUTH_LOGIN") or "5/minute").strip()
-RATE_LIMIT_AUTH_START = (os.getenv("RATE_LIMIT_AUTH_START") or "5/minute").strip()
-RATE_LIMIT_AUTH_CALLBACK = (os.getenv("RATE_LIMIT_AUTH_CALLBACK") or "10/minute").strip()
-RATE_LIMIT_AUTH_ME = (os.getenv("RATE_LIMIT_AUTH_ME") or "60/minute").strip()
-RATE_LIMIT_AUTH_LOGOUT = (os.getenv("RATE_LIMIT_AUTH_LOGOUT") or "20/minute").strip()
-RATE_LIMIT_JWKS = (os.getenv("RATE_LIMIT_JWKS") or "120/minute").strip()
-RATE_LIMIT_GENERATE_STREAM_AUTH = (os.getenv("RATE_LIMIT_GENERATE_STREAM_AUTH") or "10/minute").strip()
-RATE_LIMIT_GENERATE_STREAM_ANON = (os.getenv("RATE_LIMIT_GENERATE_STREAM_ANON") or "2/minute").strip()
-RATE_LIMIT_GENERATE_STREAM_CONCURRENCY = parse_int_env(
-    os.getenv("RATE_LIMIT_GENERATE_STREAM_CONCURRENCY"), 2
-)
+# ---------------------------------------------------------------------------
+# Rate limits – user‑subject only (no IP buckets)
+# ---------------------------------------------------------------------------
+RATE_LIMIT_GENERATE_STREAM = (os.getenv("RATE_LIMIT_GENERATE_STREAM") or "5/minute").strip()
+RATE_LIMIT_AUTH_ME          = (os.getenv("RATE_LIMIT_AUTH_ME") or "20/minute").strip()
+RATE_LIMIT_STREAM_CONCURRENCY = parse_int_env(os.getenv("RATE_LIMIT_STREAM_CONCURRENCY"), 2)
 
 UPSTREAM_TIMEOUT_SECONDS = parse_int_env(os.getenv("UPSTREAM_TIMEOUT_SECONDS"), 60)
 UPSTREAM_PRESIGN_TIMEOUT_SECONDS = parse_int_env(os.getenv("UPSTREAM_PRESIGN_TIMEOUT_SECONDS"), 20)
 
-# Use uvloop if available (recommended for production)
 USE_UVLOOP = parse_bool_env(os.getenv("USE_UVLOOP"), True)
 
 if JWT_TTL_SECONDS <= 0:
@@ -178,8 +164,8 @@ if JWT_TTL_SECONDS <= 0:
 if JWT_CLOCK_SKEW_SECONDS < 0:
     raise RuntimeError("JWT_CLOCK_SKEW_SECONDS must be zero or positive")
 
-if RATE_LIMIT_GENERATE_STREAM_CONCURRENCY <= 0:
-    raise RuntimeError("RATE_LIMIT_GENERATE_STREAM_CONCURRENCY must be positive")
+if RATE_LIMIT_STREAM_CONCURRENCY <= 0:
+    raise RuntimeError("RATE_LIMIT_STREAM_CONCURRENCY must be positive")
 
 
 def get_redirect(provider: str) -> str:

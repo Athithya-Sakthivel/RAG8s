@@ -113,12 +113,15 @@ python3 src/infra/rag/sparse_service.py --generate
 python3 src/infra/rag/dense_service.py --dry-run
 sleep 5
 python3 src/infra/network/zitadel_setup.py --write --apply-secrets
+
 export CLOUDFLARE_TUNNEL_TOKEN="$(tofu -chdir=src/infra/terraform/cloudflare output -raw cloudflare_tunnel_token)"
 export CLOUDFLARE_TUNNEL_NAME="$(tofu -chdir=src/infra/terraform/cloudflare output -raw cloudflare_tunnel_name)"
 export CLOUDFLARE_SECRET_NAME="cloudflared-token"
 export CLOUDFLARE_SECRET_KEY="token"
 export DOMAIN="athithya.site"
-python3 src/infra/network/cloudflared.py --write
+python3 src/infra/network/cloudflared_setup.py --write
+
+
 sleep 5
 find src/manifests -name "00-namespace.yaml" -delete || true
 sleep 5

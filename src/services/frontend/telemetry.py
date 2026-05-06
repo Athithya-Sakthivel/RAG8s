@@ -31,7 +31,7 @@ if LOG_LEVEL not in _ALLOWED_LEVELS:
 
 logging.basicConfig(stream=sys.stderr, level=getattr(logging, LOG_LEVEL, logging.INFO), force=True)
 
-# ── Prometheus metrics (aligned naming with retriever) ──────────
+# Prometheus metrics
 REQUEST_LATENCY = Histogram(
     "frontend_request_latency_seconds",
     "Request latency in seconds",
@@ -96,8 +96,6 @@ def _jsonable(value: Any) -> Any:
 
 
 class JsonFormatter(logging.Formatter):
-    """Align log format with retriever service."""
-
     _STANDARD_ATTRS = frozenset({
         "name", "msg", "args", "levelname", "levelno", "pathname",
         "filename", "module", "exc_info", "exc_text", "stack_info",
@@ -128,8 +126,6 @@ class JsonFormatter(logging.Formatter):
 
 
 class JsonLogger:
-    """Convenience class for structured logging; writes to stdout."""
-
     def __init__(self) -> None:
         self._std = logging.getLogger("frontend-json")
         self._level_map = {
@@ -152,8 +148,8 @@ class JsonLogger:
         if fields:
             record["fields"] = _jsonable(fields)
         try:
+            # Write without explicit flush; Python line buffering handles it
             sys.stdout.write(json.dumps(record, separators=(",", ":"), ensure_ascii=False) + "\n")
-            sys.stdout.flush()
         except Exception:
             try:
                 sys.stderr.write(f"logger failed for message={message}\n")
@@ -183,18 +179,50 @@ class JsonLogger:
 log = JsonLogger()
 
 
-# ── Public helpers (called from app.py middleware) ─────────────
+def status_class(status_code: int) -> str:
+    return f"{int(status_code) // 100}xx"
+
+
+def _now() -> float:
+    from time import monotonic
+    return monotonic()
+
+
+@contextmanager
+def request_timer(route: str, method: str) -> Iterator[None]:
+    with ACTIVE_REQUESTS.labels(
+        service=SERVICE, route=route, method=method, environment=DEPLOYMENT_ENVIRONMENT
+    ).track_inprogress():
+        start = _now()
+        try:
+            yield
+            elapsed = _now() - start
+            REQUEST_LATENCY.labels(
+                service=SERVICE, route=route, method=method,
+                status_class="2xx", environment=DEPLOYMENT_ENVIRONMENT,
+            ).observe(elapsed)
+            REQUESTS_TOTAL.labels(
+                service=SERVICE, route=route, method=method,
+                status_class="2xx", environment=DEPLOYMENT_ENVIRONMENT,
+            ).inc()
+        except Exception:
+            elapsed = _now() - start
+            REQUEST_LATENCY.labels(
+                service=SERVICE, route=route, method=method,
+                status_class="5xx", environment=DEPLOYMENT_ENVIRONMENT,
+            ).observe(elapsed)
+            REQUESTS_TOTAL.labels(
+                service=SERVICE, route=route, method=method,
+                status_class="5xx", environment=DEPLOYMENT_ENVIRONMENT,
+            ).inc()
+            raise
+
 
 def observe_request(route: str, method: str, status_code: int, elapsed_seconds: float) -> None:
-    """Record a completed HTTP request.
-
-    Called by the metrics middleware in app.py for **every** request.
-    """
     REQUEST_LATENCY.labels(
         service=SERVICE, route=route, method=method,
         status_code=str(status_code), environment=DEPLOYMENT_ENVIRONMENT,
     ).observe(float(elapsed_seconds))
-
     REQUESTS_TOTAL.labels(
         service=SERVICE, route=route, method=method,
         status_code=str(status_code), environment=DEPLOYMENT_ENVIRONMENT,
@@ -202,7 +230,6 @@ def observe_request(route: str, method: str, status_code: int, elapsed_seconds: 
 
 
 def track_active(route: str, method: str) -> None:
-    """Increment the in-flight gauge."""
     ACTIVE_REQUESTS.labels(
         service=SERVICE, route=route, method=method,
         environment=DEPLOYMENT_ENVIRONMENT,
@@ -210,7 +237,6 @@ def track_active(route: str, method: str) -> None:
 
 
 def untrack_active(route: str, method: str) -> None:
-    """Decrement the in-flight gauge."""
     ACTIVE_REQUESTS.labels(
         service=SERVICE, route=route, method=method,
         environment=DEPLOYMENT_ENVIRONMENT,
@@ -254,7 +280,6 @@ def metrics_response() -> Response:
 
 
 def install_metrics(app: FastAPI) -> None:
-    """Mount the Prometheus metrics endpoint."""
     @app.get("/metrics", include_in_schema=False)
     def _metrics():
         return metrics_response()

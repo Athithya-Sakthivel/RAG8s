@@ -18,10 +18,21 @@ spec:
         app.kubernetes.io/name: cloudflared
         app.kubernetes.io/component: tunnel
       annotations:
-        cloudflared/config-checksum: 4ecf7af99953ca1bb14274f90b93d14a2cd749c9bae577d63925d1a6e2ca2966
+        cloudflared/config-checksum: 9efe08354e8bfc3f56e84e02c26f003b5c909b74c29822001f011acb187662db
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '2000'
     spec:
       serviceAccountName: cloudflared-sa
       terminationGracePeriodSeconds: 30
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: cloudflared
+            app.kubernetes.io/component: tunnel
+      priorityClassName: system-cluster-critical
       volumes:
       - name: cloudflared-config
         configMap:
@@ -33,6 +44,13 @@ spec:
       - name: cloudflared
         image: cloudflare/cloudflared:2026.3.0@sha256:6b599ca3e974349ead3286d178da61d291961182ec3fe9c505e1dd02c8ac31b0
         imagePullPolicy: IfNotPresent
+        resources:
+          requests:
+            cpu: 250m
+            memory: 256Mi
+          limits:
+            cpu: 1000m
+            memory: 512Mi
         command:
         - cloudflared
         args:
@@ -53,6 +71,8 @@ spec:
             secretKeyRef:
               name: cloudflared-token
               key: token
+        - name: TUNNEL_METRICS
+          value: 'true'
         ports:
         - name: metrics
           containerPort: 2000
@@ -61,12 +81,28 @@ spec:
         - name: cloudflared-config
           mountPath: /etc/cloudflared
           readOnly: true
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 65532
+          runAsGroup: 65532
+          capabilities:
+            drop:
+            - ALL
+          ulimits:
+          - name: nofile
+            hard: 70000
+            soft: 70000
+          - name: nproc
+            hard: 65536
+            soft: 65536
         startupProbe:
           httpGet:
             path: /ready
             port: 2000
-          periodSeconds: 5
-          failureThreshold: 36
+          periodSeconds: 2
+          failureThreshold: 30
           timeoutSeconds: 1
         readinessProbe:
           httpGet:
@@ -80,16 +116,18 @@ spec:
           httpGet:
             path: /ready
             port: 2000
-          initialDelaySeconds: 15
+          initialDelaySeconds: 10
           periodSeconds: 10
           failureThreshold: 3
           timeoutSeconds: 1
-        securityContext:
-          allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: true
-          runAsNonRoot: true
-          runAsUser: 65532
-          runAsGroup: 65532
-          capabilities:
-            drop:
-            - ALL
+        lifecycle:
+          preStop:
+            exec:
+              command:
+              - /bin/sh
+              - -c
+              - sleep 5 && kill -SIGTERM 1
+      restartPolicy: Always
+      dnsPolicy: ClusterFirst
+      nodeSelector: {}
+      tolerations: []

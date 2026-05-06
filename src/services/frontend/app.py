@@ -78,7 +78,9 @@ async def lifespan(app: FastAPI):
         http2=False,
         headers={"User-Agent": f"{SERVICE_NAME}/{ENV}"},
     )
-    app.state.stream_semaphore = asyncio.Semaphore(max(1, generate_stream_concurrency_limit()))
+    # Increased default concurrency to 10; overridable via env
+    concurrency = max(1, limits.stream_concurrency if limits.stream_concurrency > 2 else 10)
+    app.state.stream_semaphore = asyncio.Semaphore(concurrency)
 
     if not has_jwt_signing_material():
         log.warn("JWT signing material missing; auth will be unavailable")
@@ -272,7 +274,7 @@ async def _proxy_generate_stream(request: Request) -> StreamingResponse:
 
 
 @app.post("/generate/stream", include_in_schema=False)
-@limiter.limit(limits.stream_auth)
+@limiter.limit(limits.generate_stream)  # uses global user key
 async def generate_stream(request: Request):
     sem: asyncio.Semaphore = request.app.state.stream_semaphore
     async with sem:
@@ -280,14 +282,12 @@ async def generate_stream(request: Request):
 
 
 @app.get("/.well-known/jwks.json", include_in_schema=False)
-@limiter.limit(limits.jwks)
-async def jwks_root(request: Request):
+async def jwks_root():
     return JSONResponse(auth_mod.PUBLIC_JWKS)
 
 
 @app.get("/jwks.json", include_in_schema=False)
-@limiter.limit(limits.jwks)
-async def jwks_alias(request: Request):
+async def jwks_alias():
     return JSONResponse(auth_mod.PUBLIC_JWKS)
 
 

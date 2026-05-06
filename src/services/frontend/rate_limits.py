@@ -9,10 +9,8 @@ from config import (
     RATE_LIMIT_AUTH_LOGOUT,
     RATE_LIMIT_AUTH_ME,
     RATE_LIMIT_AUTH_START,
-    RATE_LIMIT_GENERATE_STREAM_ANON,
-    RATE_LIMIT_GENERATE_STREAM_AUTH,
-    RATE_LIMIT_GENERATE_STREAM_CONCURRENCY,
-    RATE_LIMIT_JWKS,
+    RATE_LIMIT_GENERATE_STREAM,
+    RATE_LIMIT_STREAM_CONCURRENCY,
     VALKEY_URL,
 )
 from fastapi import FastAPI, Request
@@ -64,22 +62,25 @@ def verified_subject(request: Request) -> str | None:
     )
 
 
-def _global_key_func(request: Request) -> str:
-    path = _path(request)
-    if path.startswith("/generate/stream") or path.startswith("/api/generate/stream"):
-        sub = verified_subject(request)
-        if sub:
-            return f"stream:sub:{sub}"
-        return f"stream:ip:{get_ipaddr(request)}"
+# ── Key functions for different route categories ─────────────
 
-    if path.startswith("/auth") or path.startswith("/.well-known"):
-        return f"auth:ip:{get_ipaddr(request)}"
-
-    return f"default:ip:{get_ipaddr(request)}"
+def _user_key_func(request: Request) -> str:
+    """Global default key function: authenticated user sub, else empty -> no limit.
+    This ensures that only authenticated routes get rate limited via user identity."""
+    sub = verified_subject(request)
+    if sub:
+        return f"user:{sub}"
+    return ""   # anonymous requests are not rate limited by default
 
 
+def _auth_ip_key(request: Request) -> str:
+    """IP‑based key for unauthenticated auth routes (login, start, callback, logout)."""
+    return f"auth:ip:{get_ipaddr(request)}"
+
+
+# ── Limiter singleton ────────────────────────────────────────
 limiter = Limiter(
-    key_func=_global_key_func,
+    key_func=_user_key_func,          # safe default for authenticated routes
     storage_uri=VALKEY_URL,
     headers_enabled=True,
     in_memory_fallback_enabled=True,
@@ -91,17 +92,16 @@ def install_rate_limits(app: FastAPI) -> None:
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
+# ── Rate limit strings ───────────────────────────────────────
 class limits:
-    auth_login   = RATE_LIMIT_AUTH_LOGIN
-    auth_start   = RATE_LIMIT_AUTH_START
-    auth_callback = RATE_LIMIT_AUTH_CALLBACK
-    auth_me      = RATE_LIMIT_AUTH_ME
-    auth_logout  = RATE_LIMIT_AUTH_LOGOUT
-    jwks         = RATE_LIMIT_JWKS
-    stream_auth  = RATE_LIMIT_GENERATE_STREAM_AUTH
-    stream_anon  = RATE_LIMIT_GENERATE_STREAM_ANON
-    stream_concurrency = RATE_LIMIT_GENERATE_STREAM_CONCURRENCY
+    generate_stream = RATE_LIMIT_GENERATE_STREAM
+    auth_me         = RATE_LIMIT_AUTH_ME
+    auth_login      = RATE_LIMIT_AUTH_LOGIN
+    auth_start      = RATE_LIMIT_AUTH_START
+    auth_callback   = RATE_LIMIT_AUTH_CALLBACK
+    auth_logout     = RATE_LIMIT_AUTH_LOGOUT
+    stream_concurrency = RATE_LIMIT_STREAM_CONCURRENCY
 
 
 def generate_stream_concurrency_limit() -> int:
-    return RATE_LIMIT_GENERATE_STREAM_CONCURRENCY
+    return RATE_LIMIT_STREAM_CONCURRENCY
