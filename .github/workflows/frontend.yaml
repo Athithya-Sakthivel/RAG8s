@@ -81,8 +81,8 @@ jobs:
         id: build-image
         uses: docker/build-push-action@v6
         with:
-          context: src/frontend
-          file: src/frontend/Dockerfile
+          context: src/services/frontend
+          file: src/services/frontend/Dockerfile
           load: true
           push: false
           pull: true
@@ -97,7 +97,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "::group::Running frontend e2e smoke tests"
-          bash src/frontend/test.sh
+          bash src/services/frontend/test.sh
           echo "::endgroup::"
 
       - name: Scan built image with Trivy (CI-level scan)
@@ -107,7 +107,7 @@ jobs:
           test -n "${scan_image}"
 
           ignore_args=()
-          if [[ -f src/frontend/.trivyignore ]]; then
+          if [[ -f src/services/frontend/.trivyignore ]]; then
             ignore_args+=(--ignorefile src/frontend/.trivyignore)
           elif [[ -f .trivyignore ]]; then
             ignore_args+=(--ignorefile .trivyignore)

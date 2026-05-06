@@ -81,6 +81,7 @@ jobs:
                 --exclude node_modules \
                 --exclude src/indexing_pipeline \
                 --exclude src/scripts/local/force_sync_s3_local_fs.py \
+                --exclude src/scripts/archive \
                 /workspace/src/
 
               echo "[INFO] === Gitleaks Full History Scan ==="

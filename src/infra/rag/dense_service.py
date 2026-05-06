@@ -20,7 +20,7 @@ DEFAULT_MANIFESTS_DIR = Path("src/manifests/dense-service")
 DEFAULT_STATE_DIRNAME = ".state"
 DEFAULTS: dict[str, Any] = {
     "DEPLOY_ENV": "NONPROD",
-    "IMAGE": "ghcr.io/athithya-sakthivel/dense:2026-04-26-08-57--a0cce10@sha256:5b804638527906701a4065b27071a237c3783ca3c9ef4bf5e94dc233e5dc7f7f",
+    "IMAGE": "ghcr.io/athithya-sakthivel/dense:2026-05-06-06-15--70eca4b@sha256:c8a9fbb234cb355f530b3ecf6a14c1ebbecbaf24b74e6c865ca79a0073afbe70",
     "NAMESPACE": "inference",
     "SERVICE_NAME": "dense",
     "CONTAINER_PORT": 8200,
