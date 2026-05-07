@@ -5,10 +5,12 @@ import os
 
 logger = logging.getLogger("frontend.config")
 
+
 def parse_bool_env(value, default: bool = False) -> bool:
     if value is None:
         return default
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
 
 def parse_int_env(value, default: int) -> int:
     if value is None or str(value).strip() == "":
@@ -17,6 +19,7 @@ def parse_int_env(value, default: int) -> int:
         return int(str(value).strip())
     except Exception:
         return default
+
 
 def parse_list_env(value) -> list[str]:
     if not value:
@@ -27,6 +30,7 @@ def parse_list_env(value) -> list[str]:
         if item:
             items.append(item)
     return items
+
 
 def norm_url(value, default: str) -> str:
     if not value:
@@ -43,6 +47,7 @@ def norm_url(value, default: str) -> str:
             s = "https://" + s
     return s
 
+
 def norm_path(value, default: str) -> str:
     s = str(value).strip() if value else ""
     if not s:
@@ -50,6 +55,7 @@ def norm_path(value, default: str) -> str:
     if not s.startswith("/"):
         s = "/" + s
     return s
+
 
 SERVICE_NAME = (os.getenv("SERVICE_NAME") or "frontend").strip()
 ENV = (os.getenv("ENV") or "STAGING").strip().upper()
@@ -158,12 +164,6 @@ if ENABLE_GOOGLE and (not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET):
     logger.warning("Google auth disabled because GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET is missing")
     ENABLE_GOOGLE = False
 
-# JWT / session validations
-if REQUIRE_AUTH and not SESSION_SECRET:
-    logger.warning("REQUIRE_AUTH is true but SESSION_SECRET is empty; OAuth flow will fail")
-
-if REQUIRE_AUTH and not has_jwt_signing_material():
-    logger.warning("REQUIRE_AUTH is true but no JWT signing material is available; tokens cannot be minted")
 
 def get_redirect(provider: str) -> str:
     p = (provider or "").strip().lower()
@@ -180,12 +180,14 @@ def get_redirect(provider: str) -> str:
         return f"{base}/{p}"
     return f"{base}/auth/callback/{p}"
 
+
 def enabled_flags():
     return {
         "google": ENABLE_GOOGLE,
         "microsoft": ENABLE_MICROSOFT,
         "github": ENABLE_GITHUB,
     }
+
 
 def enabled_providers_effective():
     out = []
@@ -197,5 +199,14 @@ def enabled_providers_effective():
         out.append("github")
     return out
 
+
 def has_jwt_signing_material() -> bool:
     return bool(JWT_PRIVATE_KEY_PEM or JWT_PRIVATE_KEY_PATH)
+
+
+# Runtime validations (after all definitions)
+if REQUIRE_AUTH and not SESSION_SECRET:
+    logger.warning("REQUIRE_AUTH is true but SESSION_SECRET is empty; OAuth flow will fail")
+
+if REQUIRE_AUTH and not has_jwt_signing_material():
+    logger.warning("REQUIRE_AUTH is true but no JWT signing material is available; tokens cannot be minted")
