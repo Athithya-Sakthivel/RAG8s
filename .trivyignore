@@ -2,6 +2,11 @@
 CVE-2023-45853 # Ignore zlib false positive (Debian marks CVE-2023-45853 as `will_not_fix`)
 CVE-2025-7458 # does not process untrusted SQL. CronJob is internal, the attack surface is limited.
 
-
+# retriever
 KSV-0109 # False positive: `LLM_MAX_TOKENS` is a non-sensitive numeric config, not a secret
-AWS-0132 # Ignores“bucket does not encrypt data with a customer managed key” rule.
+
+# terraform
+AWS-0132 # Ignores “bucket does not encrypt data with a customer managed key” rule as its not required.
+
+# fastembed images
+CVE-2026-33845 # Debian GnuTLS DTLS vulnerability - app does not use DTLS, temporary until 3.8.13-1 reaches stable

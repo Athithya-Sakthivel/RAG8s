@@ -213,7 +213,7 @@ def load_config() -> dict[str, Any]:
         cfg["DENSE_BATCH_SIZE"] = DEFAULTS["DENSE_BATCH_SIZE"]
     cfg["DENSE_NORMALIZE"] = _env_bool("DENSE_NORMALIZE", str(DEFAULTS["DENSE_NORMALIZE"]).lower())
     cfg["DENSE_CUDA"] = _env_bool("DENSE_CUDA", str(DEFAULTS["DENSE_CUDA"]).lower())
-    cfg["PRELOAD_MODEL"] = _env_bool("DENSE_PRELOAD_MODEL", "0")
+    cfg["PRELOAD_MODEL"] = _env_bool("DENSE_PRELOAD_MODEL", "1")
 
     cfg["RUN_AS_NONROOT"] = _env_bool("DENSE_RUN_AS_NONROOT", str(DEFAULTS["RUN_AS_NONROOT"]).lower())
     try:

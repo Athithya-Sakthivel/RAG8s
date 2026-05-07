@@ -273,7 +273,7 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
             {"name": "SPARSE_MODEL_NAME", "value": str(cfg["SPARSE_MODEL_NAME"])},
             {"name": "SPARSE_BATCH_SIZE", "value": str(cfg["SPARSE_BATCH_SIZE"])},
             {"name": "SPARSE_CUDA", "value": "1" if cfg.get("SPARSE_CUDA", False) else "0"},
-            {"name": "PRELOAD_MODEL", "value": "1" if cfg.get("SPARSE_PRELOAD_MODEL", False) else "0"},
+            {"name": "PRELOAD_MODEL", "value": "1"},
             {"name": "ENV", "value": cfg["DEPLOY_ENV"]},
         ],
         "livenessProbe": {
