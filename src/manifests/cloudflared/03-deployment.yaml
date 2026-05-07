@@ -18,7 +18,7 @@ spec:
         app.kubernetes.io/name: cloudflared
         app.kubernetes.io/component: tunnel
       annotations:
-        cloudflared/config-checksum: 9efe08354e8bfc3f56e84e02c26f003b5c909b74c29822001f011acb187662db
+        cloudflared/config-checksum: 31d2a0687ef6f58da105c07b4f5cd96771e3f7aae285931c16baf20bd4f43494
         prometheus.io/scrape: 'true'
         prometheus.io/port: '2000'
     spec:
@@ -90,13 +90,6 @@ spec:
           capabilities:
             drop:
             - ALL
-          ulimits:
-          - name: nofile
-            hard: 70000
-            soft: 70000
-          - name: nproc
-            hard: 65536
-            soft: 65536
         startupProbe:
           httpGet:
             path: /ready
@@ -129,5 +122,3 @@ spec:
               - sleep 5 && kill -SIGTERM 1
       restartPolicy: Always
       dnsPolicy: ClusterFirst
-      nodeSelector: {}
-      tolerations: []

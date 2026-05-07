@@ -35,9 +35,6 @@ export TF_VAR_account_id="${TF_VAR_account_id:-${CLOUDFLARE_ACCOUNT_ID:-}}"
 export TF_VAR_zone_id="${TF_VAR_zone_id:-${CLOUDFLARE_ZONE_ID:-}}"
 export TF_VAR_domain="${TF_VAR_domain:-${CLOUDFLARE_ZONE:-${DOMAIN:-}}}"
 export TF_VAR_tunnel_name="${TF_VAR_tunnel_name:-${CLOUDFLARE_TUNNEL_NAME:-default-tunnel-1}}"
-export TF_VAR_root_host="${TF_VAR_root_host:-${ROOT_HOST:-${TF_VAR_domain}}}"
-export TF_VAR_api_host="${TF_VAR_api_host:-${API_HOST:-api.${TF_VAR_domain}}}"
-export TF_VAR_auth_host="${TF_VAR_auth_host:-${AUTH_HOST:-auth.${TF_VAR_domain}}}"
 export TF_VAR_enable_always_use_https="${TF_VAR_enable_always_use_https:-true}"
 export TF_VAR_enable_tls_1_3="${TF_VAR_enable_tls_1_3:-true}"
 export TF_VAR_enable_bot_fight_mode="${TF_VAR_enable_bot_fight_mode:-false}"
@@ -205,9 +202,10 @@ fi
 "$TF_BIN" -chdir="${STACK_DIR}" validate
 
 if [[ "${MODE}" != "--destroy" ]]; then
-  import_dns_record_if_exists "cloudflare_dns_record.root_cname" "${TF_VAR_root_host}"
-  import_dns_record_if_exists "cloudflare_dns_record.api_cname" "${TF_VAR_api_host}"
-  import_dns_record_if_exists "cloudflare_dns_record.auth_cname" "${TF_VAR_auth_host}"
+  # Import root domain CNAME
+  import_dns_record_if_exists "cloudflare_dns_record.root_cname" "${TF_VAR_domain}"
+  # Import wildcard CNAME (optional - remove if not using wildcard)
+  import_dns_record_if_exists "cloudflare_dns_record.wildcard_cname" "*.${TF_VAR_domain}"
   import_zone_setting_if_exists "cloudflare_zone_setting.ssl" "ssl"
   import_zone_setting_if_exists "cloudflare_zone_setting.always_use_https[0]" "always_use_https"
   import_zone_setting_if_exists "cloudflare_zone_setting.tls_1_3[0]" "tls_1_3"

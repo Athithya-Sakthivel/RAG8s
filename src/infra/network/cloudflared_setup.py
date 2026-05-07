@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+"""Production Cloudflare Tunnel manifest generator.
+Routes everything through a single frontend service with one hostname."""
+
 from __future__ import annotations
 
 import argparse
@@ -27,18 +30,14 @@ def _repo_root() -> Path:
 ROOT = _repo_root()
 OUT_DIR = ROOT / "src" / "manifests" / "cloudflared"
 
+# ---------------------------------------------------------------------------
+# Configuration - all overridable via environment
+# ---------------------------------------------------------------------------
 NAMESPACE = os.getenv("NAMESPACE", "inference").strip() or "inference"
 DOMAIN = os.getenv("DOMAIN", "athithya.site").strip().rstrip(".") or "athithya.site"
-ROOT_HOST = os.getenv("ROOT_HOST", DOMAIN).strip().rstrip(".") or DOMAIN
-API_HOST = os.getenv("API_HOST", f"api.{DOMAIN}").strip().rstrip(".") or f"api.{DOMAIN}"
-AUTH_HOST = os.getenv("AUTH_HOST", f"auth.{DOMAIN}").strip().rstrip(".") or f"auth.{DOMAIN}"
 
-ZITADEL_NAMESPACE = os.getenv("ZITADEL_NAMESPACE", "zitadel").strip() or "inference"
-ZITADEL_SERVICE_NAME = os.getenv("ZITADEL_SERVICE_NAME", "zitadel").strip() or "zitadel"
-ZITADEL_SERVICE_PORT = int(os.getenv("ZITADEL_SERVICE_PORT", "8080"))
-
-FRONTEND_SERVICE_NAME = os.getenv("FRONTEND_SERVICE_NAME", "frontend-nginx").strip() or "frontend-nginx"
-FRONTEND_SERVICE_PORT = int(os.getenv("FRONTEND_SERVICE_PORT", "8080"))
+FRONTEND_SERVICE_NAME = os.getenv("FRONTEND_SERVICE_NAME", "frontend").strip() or "frontend"
+FRONTEND_SERVICE_PORT = int(os.getenv("FRONTEND_SERVICE_PORT", "8000"))
 
 TUNNEL_NAME = os.getenv("CLOUDFLARE_TUNNEL_NAME", "default-tunnel-1").strip() or "default-tunnel-1"
 TUNNEL_TOKEN = os.getenv("CLOUDFLARE_TUNNEL_TOKEN", "").strip()
@@ -52,23 +51,25 @@ DEPLOYMENT_NAME = os.getenv("DEPLOYMENT_NAME", "cloudflared").strip() or "cloudf
 IMAGE = os.getenv(
     "IMAGE",
     "cloudflare/cloudflared:2026.3.0@sha256:6b599ca3e974349ead3286d178da61d291961182ec3fe9c505e1dd02c8ac31b0",
-).strip() or "cloudflare/cloudflared:2026.3.0@sha256:6b599ca3e974349ead3286d178da61d291961182ec3fe9c505e1dd02c8ac31b0"
+).strip()
 
 REPLICAS = int(os.getenv("REPLICAS", "1"))
 METRICS_PORT = int(os.getenv("METRICS_PORT", "2000"))
 TUNNEL_PROTOCOL = os.getenv("TUNNEL_PROTOCOL", "http2").strip().lower() or "http2"
 
-STARTUP_FAILURE_THRESHOLD = int(os.getenv("CLOUDFLARED_STARTUP_FAILURE_THRESHOLD", "36"))
-STARTUP_PERIOD_SECONDS = int(os.getenv("CLOUDFLARED_STARTUP_PERIOD_SECONDS", "5"))
+STARTUP_PERIOD_SECONDS = int(os.getenv("CLOUDFLARED_STARTUP_PERIOD_SECONDS", "2"))
+STARTUP_FAILURE_THRESHOLD = int(os.getenv("CLOUDFLARED_STARTUP_FAILURE_THRESHOLD", "30"))
 READINESS_INITIAL_DELAY_SECONDS = int(os.getenv("CLOUDFLARED_READINESS_INITIAL_DELAY_SECONDS", "5"))
 READINESS_PERIOD_SECONDS = int(os.getenv("CLOUDFLARED_READINESS_PERIOD_SECONDS", "5"))
-LIVENESS_INITIAL_DELAY_SECONDS = int(os.getenv("CLOUDFLARED_LIVENESS_INITIAL_DELAY_SECONDS", "15"))
+LIVENESS_INITIAL_DELAY_SECONDS = int(os.getenv("CLOUDFLARED_LIVENESS_INITIAL_DELAY_SECONDS", "10"))
 LIVENESS_PERIOD_SECONDS = int(os.getenv("CLOUDFLARED_LIVENESS_PERIOD_SECONDS", "10"))
 
 VERBOSE = os.getenv("VERBOSE", "0").strip().lower() in {"1", "true", "yes", "y", "on"}
 ALLOWED_PROTOCOLS = {"auto", "http2", "quic"}
 
-
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
 LOG_LEVEL = logging.DEBUG if VERBOSE else logging.INFO
 logging.basicConfig(
     level=LOG_LEVEL,
@@ -118,7 +119,7 @@ def atomic_write_text(path: Path, content: str) -> None:
 
 
 def run(cmd: list[str], stdin: str | None = None) -> None:
-    logger.debug(f"Executing command: {' '.join(map(str, cmd))}")
+    logger.debug(f"Executing: {' '.join(map(str, cmd))}")
     subprocess.run(list(map(str, cmd)), input=stdin, text=True, check=True)
 
 
@@ -141,41 +142,17 @@ def hash_obj(obj: Any) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def normalize_service(service: str) -> str:
-    value = service.strip()
-    if not value:
-        return value
-    if value == "http_status:404":
-        return value
-    if "://" not in value:
-        value = f"http://{value}"
-    return value.rstrip("/")
-
-
-def zitadel_upstream() -> str:
-    return f"{ZITADEL_SERVICE_NAME}.{ZITADEL_NAMESPACE}.svc.cluster.local:{ZITADEL_SERVICE_PORT}"
-
-
 def frontend_upstream() -> str:
+    """Build the internal K8s DNS name for the frontend service."""
     return f"{FRONTEND_SERVICE_NAME}.{NAMESPACE}.svc.cluster.local:{FRONTEND_SERVICE_PORT}"
 
 
 def ingress_rules() -> list[dict[str, Any]]:
+    """Single ingress rule pointing to the frontend service."""
     return [
         {
-            "hostname": AUTH_HOST,
-            "service": normalize_service(f"http://{zitadel_upstream()}"),
-            "originRequest": {
-                "connectTimeout": "10s",
-                "keepAliveTimeout": "30s",
-                "noTLSVerify": True,
-                "httpHostHeader": AUTH_HOST,
-                "disableChunkedEncoding": True,
-            },
-        },
-        {
-            "hostname": API_HOST,
-            "service": normalize_service(f"http://{frontend_upstream()}"),
+            "hostname": DOMAIN,
+            "service": f"http://{frontend_upstream()}",
             "originRequest": {
                 "connectTimeout": "10s",
                 "keepAliveTimeout": "30s",
@@ -183,16 +160,7 @@ def ingress_rules() -> list[dict[str, Any]]:
                 "disableChunkedEncoding": True,
             },
         },
-        {
-            "hostname": ROOT_HOST,
-            "service": normalize_service(f"http://{frontend_upstream()}"),
-            "originRequest": {
-                "connectTimeout": "10s",
-                "keepAliveTimeout": "30s",
-                "noTLSVerify": True,
-                "disableChunkedEncoding": True,
-            },
-        },
+        # Catch-all 404 for any unmatched hostnames
         {"service": "http_status:404"},
     ]
 
@@ -200,24 +168,24 @@ def ingress_rules() -> list[dict[str, Any]]:
 def validate() -> None:
     require(bool(NAMESPACE), "NAMESPACE is required")
     require(bool(DOMAIN), "DOMAIN is required")
-    require(bool(AUTH_HOST), "AUTH_HOST is required")
-    require(bool(ROOT_HOST), "ROOT_HOST is required")
-    require(bool(API_HOST), "API_HOST is required")
-    require(TUNNEL_PROTOCOL in ALLOWED_PROTOCOLS, f"TUNNEL_PROTOCOL must be one of: {', '.join(sorted(ALLOWED_PROTOCOLS))}")
+    require(TUNNEL_PROTOCOL in ALLOWED_PROTOCOLS, 
+            f"TUNNEL_PROTOCOL must be one of: {', '.join(sorted(ALLOWED_PROTOCOLS))}")
     require(REPLICAS > 0, "REPLICAS must be greater than 0")
     require(METRICS_PORT > 0, "METRICS_PORT must be greater than 0")
-    require(STARTUP_FAILURE_THRESHOLD > 0, "CLOUDFLARED_STARTUP_FAILURE_THRESHOLD must be greater than 0")
-    require(ZITADEL_SERVICE_PORT > 0, "ZITADEL_SERVICE_PORT must be greater than 0")
+    require(STARTUP_FAILURE_THRESHOLD > 0, "STARTUP_FAILURE_THRESHOLD must be greater than 0")
     require(FRONTEND_SERVICE_PORT > 0, "FRONTEND_SERVICE_PORT must be greater than 0")
 
 
-def render_serviceaccount(namespace: str) -> dict[str, Any]:
+# ---------------------------------------------------------------------------
+# Manifest builders
+# ---------------------------------------------------------------------------
+def render_serviceaccount() -> dict[str, Any]:
     return {
         "apiVersion": "v1",
         "kind": "ServiceAccount",
         "metadata": {
             "name": SERVICE_ACCOUNT,
-            "namespace": namespace,
+            "namespace": NAMESPACE,
             "labels": {
                 "app.kubernetes.io/name": DEPLOYMENT_NAME,
                 "app.kubernetes.io/component": "tunnel",
@@ -226,14 +194,14 @@ def render_serviceaccount(namespace: str) -> dict[str, Any]:
     }
 
 
-def render_secret(namespace: str) -> dict[str, Any]:
+def render_secret() -> dict[str, Any]:
     require(bool(TUNNEL_TOKEN), "CLOUDFLARE_TUNNEL_TOKEN is required")
     return {
         "apiVersion": "v1",
         "kind": "Secret",
         "metadata": {
             "name": SECRET_NAME,
-            "namespace": namespace,
+            "namespace": NAMESPACE,
             "labels": {
                 "app.kubernetes.io/name": DEPLOYMENT_NAME,
                 "app.kubernetes.io/component": "tunnel-token",
@@ -246,7 +214,7 @@ def render_secret(namespace: str) -> dict[str, Any]:
     }
 
 
-def render_configmap(namespace: str) -> dict[str, Any]:
+def render_configmap() -> dict[str, Any]:
     config = {
         "tunnel": TUNNEL_NAME,
         "ingress": ingress_rules(),
@@ -256,7 +224,7 @@ def render_configmap(namespace: str) -> dict[str, Any]:
         "kind": "ConfigMap",
         "metadata": {
             "name": CONFIGMAP_NAME,
-            "namespace": namespace,
+            "namespace": NAMESPACE,
             "labels": {
                 "app.kubernetes.io/name": DEPLOYMENT_NAME,
                 "app.kubernetes.io/component": "tunnel-config",
@@ -269,6 +237,7 @@ def render_configmap(namespace: str) -> dict[str, Any]:
 
 
 def render_routes_reference() -> dict[str, Any]:
+    """Human-readable reference of the tunnel routing configuration."""
     return {
         "apiVersion": "v1",
         "kind": "ConfigMap",
@@ -281,22 +250,21 @@ def render_routes_reference() -> dict[str, Any]:
             },
         },
         "data": {
-            "routes.yaml": yaml_dump(
-                {
-                    "tunnel": TUNNEL_NAME,
-                    "ingress": ingress_rules(),
-                }
-            ),
+            "routes.yaml": yaml_dump({
+                "tunnel": TUNNEL_NAME,
+                "ingress": ingress_rules(),
+            }),
         },
     }
 
-def render_deployment(namespace: str, checksum: str) -> dict[str, Any]:
+
+def render_deployment(checksum: str) -> dict[str, Any]:
     return {
         "apiVersion": "apps/v1",
         "kind": "Deployment",
         "metadata": {
             "name": DEPLOYMENT_NAME,
-            "namespace": namespace,
+            "namespace": NAMESPACE,
             "labels": {
                 "app.kubernetes.io/name": DEPLOYMENT_NAME,
                 "app.kubernetes.io/component": "tunnel",
@@ -318,7 +286,6 @@ def render_deployment(namespace: str, checksum: str) -> dict[str, Any]:
                     },
                     "annotations": {
                         "cloudflared/config-checksum": checksum,
-                        # Optional: Enable prometheus scraping
                         "prometheus.io/scrape": "true",
                         "prometheus.io/port": str(METRICS_PORT),
                     },
@@ -326,7 +293,6 @@ def render_deployment(namespace: str, checksum: str) -> dict[str, Any]:
                 "spec": {
                     "serviceAccountName": SERVICE_ACCOUNT,
                     "terminationGracePeriodSeconds": 30,
-                    # HPA recommendation: Add topology spread constraints for HA
                     "topologySpreadConstraints": [
                         {
                             "maxSkew": 1,
@@ -340,7 +306,6 @@ def render_deployment(namespace: str, checksum: str) -> dict[str, Any]:
                             },
                         }
                     ],
-                    # Priority class for production (ensure tunnel stays up)
                     "priorityClassName": "system-cluster-critical",
                     "volumes": [
                         {
@@ -356,29 +321,18 @@ def render_deployment(namespace: str, checksum: str) -> dict[str, Any]:
                             "name": "cloudflared",
                             "image": IMAGE,
                             "imagePullPolicy": "IfNotPresent",
-                            # Resource limits for 1K QPS RAG workload
                             "resources": {
-                                "requests": {
-                                    "cpu": "250m",
-                                    "memory": "256Mi",
-                                },
-                                "limits": {
-                                    "cpu": "1000m",      # Burst to 1 core
-                                    "memory": "512Mi",    # Extra for connection buffers
-                                },
+                                "requests": {"cpu": "250m", "memory": "256Mi"},
+                                "limits": {"cpu": "1000m", "memory": "512Mi"},
                             },
                             "command": ["cloudflared"],
                             "args": [
                                 "tunnel",
                                 "--no-autoupdate",
-                                "--loglevel",
-                                "info",                  # Consider "warn" at 5K+ QPS
-                                "--protocol",
-                                TUNNEL_PROTOCOL,
-                                "--metrics",
-                                f"0.0.0.0:{METRICS_PORT}",
-                                "--config",
-                                "/etc/cloudflared/config.yaml",
+                                "--loglevel", "info",
+                                "--protocol", TUNNEL_PROTOCOL,
+                                "--metrics", f"0.0.0.0:{METRICS_PORT}",
+                                "--config", "/etc/cloudflared/config.yaml",
                                 "run",
                             ],
                             "env": [
@@ -391,11 +345,7 @@ def render_deployment(namespace: str, checksum: str) -> dict[str, Any]:
                                         }
                                     },
                                 },
-                                # Optional: Enable detailed metrics
-                                {
-                                    "name": "TUNNEL_METRICS",
-                                    "value": "true",
-                                },
+                                {"name": "TUNNEL_METRICS", "value": "true"},
                             ],
                             "ports": [
                                 {"name": "metrics", "containerPort": METRICS_PORT, "protocol": "TCP"}
@@ -407,53 +357,34 @@ def render_deployment(namespace: str, checksum: str) -> dict[str, Any]:
                                     "readOnly": True,
                                 }
                             ],
-                            # ENHANCED: Ulimit settings for high QPS
                             "securityContext": {
                                 "allowPrivilegeEscalation": False,
                                 "readOnlyRootFilesystem": True,
                                 "runAsNonRoot": True,
                                 "runAsUser": 65532,
                                 "runAsGroup": 65532,
-                                "capabilities": {
-                                    "drop": ["ALL"],
-                                },
-                                # KEY ADDITION: Increase open file limits
-                                "ulimits": [
-                                    {
-                                        "name": "nofile",
-                                        "hard": 70000,
-                                        "soft": 70000,
-                                    },
-                                    # Optional: Increase process limits for high connection churn
-                                    {
-                                        "name": "nproc",
-                                        "hard": 65536,
-                                        "soft": 65536,
-                                    },
-                                ],
+                                "capabilities": {"drop": ["ALL"]},
                             },
-                            # ENHANCED: More aggressive startup for 1K QPS
                             "startupProbe": {
                                 "httpGet": {"path": "/ready", "port": METRICS_PORT},
-                                "periodSeconds": 2,
-                                "failureThreshold": 30,
+                                "periodSeconds": STARTUP_PERIOD_SECONDS,
+                                "failureThreshold": STARTUP_FAILURE_THRESHOLD,
                                 "timeoutSeconds": 1,
                             },
                             "readinessProbe": {
                                 "httpGet": {"path": "/ready", "port": METRICS_PORT},
-                                "initialDelaySeconds": 5,
-                                "periodSeconds": 5,
+                                "initialDelaySeconds": READINESS_INITIAL_DELAY_SECONDS,
+                                "periodSeconds": READINESS_PERIOD_SECONDS,
                                 "failureThreshold": 3,
                                 "timeoutSeconds": 1,
                             },
                             "livenessProbe": {
                                 "httpGet": {"path": "/ready", "port": METRICS_PORT},
-                                "initialDelaySeconds": 10,
-                                "periodSeconds": 10,
+                                "initialDelaySeconds": LIVENESS_INITIAL_DELAY_SECONDS,
+                                "periodSeconds": LIVENESS_PERIOD_SECONDS,
                                 "failureThreshold": 3,
                                 "timeoutSeconds": 1,
                             },
-                            # Optional: Pre-stop hook for graceful shutdown
                             "lifecycle": {
                                 "preStop": {
                                     "exec": {
@@ -463,62 +394,43 @@ def render_deployment(namespace: str, checksum: str) -> dict[str, Any]:
                             },
                         }
                     ],
-                    # Additional production settings
                     "restartPolicy": "Always",
                     "dnsPolicy": "ClusterFirst",
-                    "nodeSelector": {
-                        # Optional: Pin to specific node pool with good network
-                        # "node-group": "cloudflare-tunnel"
-                    },
-                    "tolerations": [
-                        # Optional: Allow running on dedicated nodes
-                        # {
-                        #     "key": "cloudflare-tunnel",
-                        #     "operator": "Equal",
-                        #     "value": "true",
-                        #     "effect": "NoSchedule"
-                        # }
-                    ],
-                    # Ensure graceful shutdown of connections
-                    "terminationGracePeriodSeconds": 30,
                 },
             },
         },
     }
 
+
+# ---------------------------------------------------------------------------
+# Build & deploy
+# ---------------------------------------------------------------------------
 def build() -> tuple[list[dict[str, Any]], dict[str, Any]]:
     validate()
 
-    configmap = render_configmap(NAMESPACE)
-    secret = render_secret(NAMESPACE)
-    checksum = hash_obj(
-        {
-            "namespace": NAMESPACE,
-            "image": IMAGE,
-            "replicas": REPLICAS,
-            "metrics_port": METRICS_PORT,
-            "protocol": TUNNEL_PROTOCOL,
-            "tunnel_name": TUNNEL_NAME,
-            "secret_name": SECRET_NAME,
-            "secret_key": SECRET_KEY,
-            "token_hash": hash_text(TUNNEL_TOKEN) if TUNNEL_TOKEN else "",
-            "domain": DOMAIN,
-            "root_host": ROOT_HOST,
-            "api_host": API_HOST,
-            "auth_host": AUTH_HOST,
-            "zitadel_namespace": ZITADEL_NAMESPACE,
-            "zitadel_service_name": ZITADEL_SERVICE_NAME,
-            "zitadel_service_port": ZITADEL_SERVICE_PORT,
-            "frontend_service_name": FRONTEND_SERVICE_NAME,
-            "frontend_service_port": FRONTEND_SERVICE_PORT,
-            "config_yaml": configmap["data"]["config.yaml"],
-        }
-    )
+    configmap = render_configmap()
+    secret = render_secret()
+
+    checksum = hash_obj({
+        "namespace": NAMESPACE,
+        "image": IMAGE,
+        "replicas": REPLICAS,
+        "metrics_port": METRICS_PORT,
+        "protocol": TUNNEL_PROTOCOL,
+        "tunnel_name": TUNNEL_NAME,
+        "secret_name": SECRET_NAME,
+        "secret_key": SECRET_KEY,
+        "token_hash": hash_text(TUNNEL_TOKEN) if TUNNEL_TOKEN else "",
+        "domain": DOMAIN,
+        "frontend_service_name": FRONTEND_SERVICE_NAME,
+        "frontend_service_port": FRONTEND_SERVICE_PORT,
+        "config_yaml": configmap["data"]["config.yaml"],
+    })
 
     docs = [
-        render_serviceaccount(NAMESPACE),
+        render_serviceaccount(),
         configmap,
-        render_deployment(NAMESPACE, checksum),
+        render_deployment(checksum),
         render_routes_reference(),
     ]
     return docs, secret
@@ -548,29 +460,39 @@ def apply_rollout(docs: list[dict[str, Any]]) -> None:
 
 def delete_resources() -> None:
     logger.info(f"Deleting cloudflared resources in namespace {NAMESPACE}")
-    run(
-        [
-            "kubectl",
-            "delete",
-            f"deployment/{DEPLOYMENT_NAME}",
-            f"serviceaccount/{SERVICE_ACCOUNT}",
-            f"configmap/{CONFIGMAP_NAME}",
-            f"configmap/{DEPLOYMENT_NAME}-routes-reference",
-            f"secret/{SECRET_NAME}",
-            "-n",
-            NAMESPACE,
-            "--ignore-not-found=true",
-        ]
-    )
+    run([
+        "kubectl", "delete",
+        f"deployment/{DEPLOYMENT_NAME}",
+        f"serviceaccount/{SERVICE_ACCOUNT}",
+        f"configmap/{CONFIGMAP_NAME}",
+        f"configmap/{DEPLOYMENT_NAME}-routes-reference",
+        f"secret/{SECRET_NAME}",
+        "-n", NAMESPACE,
+        "--ignore-not-found=true",
+    ])
     logger.info("Delete operation completed")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Render and deploy Cloudflare Tunnel Kubernetes manifests.")
+    parser = argparse.ArgumentParser(
+        description="Render and deploy Cloudflare Tunnel Kubernetes manifests."
+    )
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--write", action="store_true", help="Render YAML files and apply only the tunnel credential.")
-    group.add_argument("--rollout", action="store_true", help="Render YAML files, apply the tunnel credential, then apply workload manifests.")
-    group.add_argument("--delete", action="store_true", help="Delete the generated tunnel resources from the cluster.")
+    group.add_argument(
+        "--write",
+        action="store_true",
+        help="Render YAML files and apply only the tunnel credential.",
+    )
+    group.add_argument(
+        "--rollout",
+        action="store_true",
+        help="Render YAML files, apply the tunnel credential, then apply workload manifests.",
+    )
+    group.add_argument(
+        "--delete",
+        action="store_true",
+        help="Delete the generated tunnel resources from the cluster.",
+    )
     args = parser.parse_args()
 
     logger.debug(f"Starting build process with verbose={VERBOSE}")

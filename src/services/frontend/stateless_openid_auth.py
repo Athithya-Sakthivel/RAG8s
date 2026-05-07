@@ -516,7 +516,7 @@ async def me(request: Request):
     except (ClaimError, JoseError):
         raise HTTPException(status_code=401, detail="Invalid token")
     except Exception as exc:
-        logger.error("token verification failed: %s", exc)
+        logger.error("token verification failed")
         raise HTTPException(status_code=401, detail="Invalid token")
 
     # Return a proper Response so slowapi can add rate‑limit headers

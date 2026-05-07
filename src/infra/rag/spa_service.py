@@ -46,8 +46,8 @@ DEFAULTS: dict[str, Any] = {
 
     # Image (Kolkata‑style tag will be built by CI)
     "IMAGE": "ghcr.io/athithya-sakthivel/frontend:staging",
-    "IMAGE_PULL_POLICY": "IfNotPresent",
-
+    "IMAGE_PULL_POLICY": "Always",
+    
     # Replicas and ports
     "REPLICAS": 1,
     "CONTAINER_PORT": 8000,

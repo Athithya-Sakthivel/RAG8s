@@ -30,21 +30,6 @@ variable "tunnel_name" {
   default     = "default-tunnel-1"
 }
 
-variable "root_host" {
-  type    = string
-  default = null
-}
-
-variable "api_host" {
-  type    = string
-  default = null
-}
-
-variable "auth_host" {
-  type    = string
-  default = null
-}
-
 variable "enable_always_use_https" {
   type    = bool
   default = true
@@ -57,19 +42,16 @@ variable "enable_tls_1_3" {
 
 variable "enable_bot_fight_mode" {
   type    = bool
-  default = true
+  default = false
 }
 
 variable "enable_js_detections" {
   type    = bool
-  default = true
+  default = false
 }
 
 locals {
   domain       = trim(var.domain, ".")
-  root_host    = coalesce(var.root_host, local.domain)
-  api_host     = coalesce(var.api_host, "api.${local.domain}")
-  auth_host    = coalesce(var.auth_host, "auth.${local.domain}")
   tunnel_cname = "${data.cloudflare_zero_trust_tunnel_cloudflared.default.id}.cfargotunnel.com"
 }
 
@@ -84,30 +66,23 @@ data "cloudflare_zero_trust_tunnel_cloudflared" "default" {
 
 data "cloudflare_zero_trust_tunnel_cloudflared_token" "default" {
   account_id = var.account_id
-  tunnel_id   = data.cloudflare_zero_trust_tunnel_cloudflared.default.id
+  tunnel_id  = data.cloudflare_zero_trust_tunnel_cloudflared.default.id
 }
 
+# Single DNS record for the root domain
 resource "cloudflare_dns_record" "root_cname" {
   zone_id = var.zone_id
-  name    = local.root_host
+  name    = local.domain
   type    = "CNAME"
   content = local.tunnel_cname
   proxied = true
   ttl     = 1
 }
 
-resource "cloudflare_dns_record" "api_cname" {
+# Wildcard record for any subdomains (optional, remove if not needed)
+resource "cloudflare_dns_record" "wildcard_cname" {
   zone_id = var.zone_id
-  name    = local.api_host
-  type    = "CNAME"
-  content = local.tunnel_cname
-  proxied = true
-  ttl     = 1
-}
-
-resource "cloudflare_dns_record" "auth_cname" {
-  zone_id = var.zone_id
-  name    = local.auth_host
+  name    = "*.${local.domain}"
   type    = "CNAME"
   content = local.tunnel_cname
   proxied = true
@@ -164,13 +139,5 @@ output "cloudflare_tunnel_token" {
 }
 
 output "root_url" {
-  value = "https://${local.root_host}"
-}
-
-output "api_url" {
-  value = "https://${local.api_host}"
-}
-
-output "auth_url" {
-  value = "https://${local.auth_host}"
+  value = "https://${local.domain}"
 }

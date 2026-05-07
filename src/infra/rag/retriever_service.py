@@ -36,8 +36,8 @@ DEFAULTS: dict[str, Any] = {
     "SECRET_NAME": "retriever-secrets",
     
     # Container image
-    "IMAGE": "ghcr.io/athithya-sakthivel/frontend:2026-05-03-21-22--6f63fcf@sha256:66e58c2ced13fcb362525f8107e723e56aa719515944582d2509d086c547799f",
-    "IMAGE_PULL_POLICY": "IfNotPresent",
+    "IMAGE": "ghcr.io/athithya-sakthivel/retriever:2026-05-05-21-31--396f167@sha256:5e2286908f064e5482bdc6f0cce2596a78d38c1e28472ac64d030306734b2c10",
+    "IMAGE_PULL_POLICY": "Always",
     
     # Scaling
     "REPLICAS": 1,
