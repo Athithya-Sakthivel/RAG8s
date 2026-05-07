@@ -429,6 +429,8 @@ setup_namespace_and_secret() {
 # --- Output ---
 print_connection_info() {
   log_step "Connection information"
+  
+  # Print the info box with variable placeholders
   cat <<EOF
 
 ========================================
@@ -439,13 +441,16 @@ SERVICE        : ${CLIENT_SVC}
 HEADLESS       : ${HEADLESS_SVC}
 PORT           : ${VALKEY_PORT}
 SECRET         : ${NAMESPACE}/${SECRET_NAME}
-IN_CLUSTER_URL : valkey://:<password>@${CLIENT_SVC}.${NAMESPACE}.svc.cluster.local:${VALKEY_PORT}
+IN_CLUSTER_URL : redis://:<password>@${CLIENT_SVC}.${NAMESPACE}.svc.cluster.local:${VALKEY_PORT}
 PORT_FORWARD   : kubectl -n ${NAMESPACE} port-forward svc/${CLIENT_SVC} 6379:6379
 ========================================
 
+To export VALKEY_URL, run:
+
+export VALKEY_URL="redis://:\$(kubectl -n ${NAMESPACE:-valkey} get secret ${SECRET_NAME:-valkey-auth} -o jsonpath='{.data.VALKEY_PASSWORD}' | base64 -d)@${CLIENT_SVC:-valkey}.${NAMESPACE:-valkey}.svc.cluster.local:${VALKEY_PORT:-6379}"
+
 EOF
 }
-
 # --- Delete ---
 delete_resources() {
   log_info "Deleting Valkey resources in namespace ${NAMESPACE}"
