@@ -12,6 +12,7 @@ h11==0.16.0
 h2==4.3.0
 hpack==4.1.0
 httpcore==1.0.9
+httptools==0.7.1
 httpx==0.28.1
 hyperframe==6.1.0
 idna==3.13

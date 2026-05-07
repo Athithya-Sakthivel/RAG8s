@@ -23,12 +23,12 @@ spec:
     metadata:
       labels: *id001
       annotations:
-        gen-reranker/inputs-hash: 313e752c4aa4518c59bfb818dc64819d2490ac6f6c884779681cba8dce434562
+        gen-reranker/inputs-hash: 2f5574a2359575a0a72daf6997cf0af3f395cbb7180f4282e2a684085f62190e
     spec:
       serviceAccountName: reranker-sa
       containers:
       - name: reranker
-        image: ghcr.io/athithya-sakthivel/reranker:2026-05-06-06-26--13b7433@sha256:c2fe5136f124758462112bf7bec9f08f485ed2e53c918c4bdb6add5a777f344b
+        image: ghcr.io/athithya-sakthivel/reranker:2026-05-07-06-10--5e0b28b@sha256:60475c50371406a2f43ef9b5c2e5a0a32f9b953a02ecbe7f622ad9c1ddd92495
         ports:
         - containerPort: 8202
         env:
