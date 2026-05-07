@@ -28,6 +28,7 @@ from config import (
     UPSTREAM_TIMEOUT_SECONDS,
     USE_UVLOOP,
     has_jwt_signing_material,
+    enabled_providers_effective,
 )
 from rate_limits import (
     generate_stream_concurrency_limit,
@@ -78,14 +79,17 @@ async def lifespan(app: FastAPI):
         http2=False,
         headers={"User-Agent": f"{SERVICE_NAME}/{ENV}"},
     )
-    # Increased default concurrency to 10; overridable via env
     concurrency = max(1, limits.stream_concurrency if limits.stream_concurrency > 2 else 10)
     app.state.stream_semaphore = asyncio.Semaphore(concurrency)
 
-    if not has_jwt_signing_material():
-        log.warn("JWT signing material missing; auth will be unavailable")
-    if not SESSION_SECRET:
-        log.warn("SESSION_SECRET missing; OAuth flow will fail")
+    # Graceful startup validation
+    if REQUIRE_AUTH:
+        if not has_jwt_signing_material():
+            log.warn("REQUIRE_AUTH is true but no JWT signing material; auth will fail")
+        if not SESSION_SECRET:
+            log.warn("REQUIRE_AUTH is true but SESSION_SECRET missing; OAuth flow will break")
+        if not enabled_providers_effective():
+            log.warn("REQUIRE_AUTH is true but no OAuth providers are enabled; users cannot log in")
 
     set_ready(True, ENV)
     log.info(
@@ -96,6 +100,7 @@ async def lifespan(app: FastAPI):
         generate_stream_url=GENERATE_STREAM_URL,
         require_auth=REQUIRE_AUTH,
         jwt_material_present=has_jwt_signing_material(),
+        enabled_providers=enabled_providers_effective(),
     )
     try:
         yield
@@ -138,17 +143,13 @@ async def metrics_middleware(request: Request, call_next):
         untrack_active(route, method)
 
 
-# app.py (only the relevant middleware section changed)
-
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     path = request.url.path.rstrip("/") or "/"
-    # Set auth_claims for any path that uses Bearer token authentication,
-    # so rate limiting can use the user's sub.
     if (
         path.startswith("/generate/stream")
         or path.startswith("/api/generate/stream")
-        or path == "/auth/me"          # ← added
+        or path == "/auth/me"
     ):
         auth = request.headers.get("authorization", "")
         if auth.lower().startswith("bearer "):
@@ -157,15 +158,14 @@ async def auth_middleware(request: Request, call_next):
                 try:
                     request.state.auth_claims = auth_mod.verify_access_token(token)
                 except Exception:
-                    # For /auth/me we let the endpoint handle the error;
-                    # here we just don't set claims so the key stays empty
                     request.state.auth_claims = None
             else:
                 request.state.auth_claims = None
         else:
             request.state.auth_claims = None
     return await call_next(request)
-    
+
+
 def _request_id(request: Request) -> str | None:
     rid = request.headers.get("x-request-id")
     return rid or None
@@ -283,7 +283,7 @@ async def _proxy_generate_stream(request: Request) -> StreamingResponse:
 
 
 @app.post("/generate/stream", include_in_schema=False)
-@limiter.limit(limits.generate_stream)  # uses global user key
+@limiter.limit(limits.generate_stream)
 async def generate_stream(request: Request):
     sem: asyncio.Semaphore = request.app.state.stream_semaphore
     async with sem:
@@ -319,6 +319,7 @@ async def orchestrator_health(request: Request):
         "static_prefix": STATIC_URL_PREFIX,
         "auth_ready": auth_ready,
         "upstream_client_ready": client_ready,
+        "enabled_providers": enabled_providers_effective(),
     })
 
 

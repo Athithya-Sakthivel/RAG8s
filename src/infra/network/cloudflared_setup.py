@@ -1,6 +1,8 @@
-#!/usr/bin/env python3
-"""Production Cloudflare Tunnel manifest generator.
-Routes everything through a single frontend service with one hostname."""
+"""
+Production Cloudflare Tunnel manifest generator.
+Routes everything through a single frontend service with one hostname.
+Now also creates a metric Service for Prometheus scraping.
+"""
 
 from __future__ import annotations
 
@@ -31,7 +33,7 @@ ROOT = _repo_root()
 OUT_DIR = ROOT / "src" / "manifests" / "cloudflared"
 
 # ---------------------------------------------------------------------------
-# Configuration - all overridable via environment
+# Configuration – all overridable via environment
 # ---------------------------------------------------------------------------
 NAMESPACE = os.getenv("NAMESPACE", "inference").strip() or "inference"
 DOMAIN = os.getenv("DOMAIN", "athithya.site").strip().rstrip(".") or "athithya.site"
@@ -47,6 +49,7 @@ CONFIGMAP_NAME = os.getenv("CONFIGMAP_NAME", "cloudflared-config").strip() or "c
 SECRET_NAME = os.getenv("CLOUDFLARE_SECRET_NAME", "cloudflared-token").strip() or "cloudflared-token"
 SECRET_KEY = os.getenv("CLOUDFLARE_SECRET_KEY", "token").strip() or "token"
 DEPLOYMENT_NAME = os.getenv("DEPLOYMENT_NAME", "cloudflared").strip() or "cloudflared"
+METRICS_SERVICE_NAME = os.getenv("METRICS_SERVICE_NAME", "cloudflared-metrics").strip() or "cloudflared-metrics"
 
 IMAGE = os.getenv(
     "IMAGE",
@@ -258,6 +261,37 @@ def render_routes_reference() -> dict[str, Any]:
     }
 
 
+def render_service() -> dict[str, Any]:
+    """Create a ClusterIP Service for Prometheus to scrape cloudflared metrics."""
+    return {
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": {
+            "name": METRICS_SERVICE_NAME,
+            "namespace": NAMESPACE,
+            "labels": {
+                "app.kubernetes.io/name": DEPLOYMENT_NAME,
+                "app.kubernetes.io/component": "tunnel",
+            },
+        },
+        "spec": {
+            "type": "ClusterIP",
+            "selector": {
+                "app.kubernetes.io/name": DEPLOYMENT_NAME,
+                "app.kubernetes.io/component": "tunnel",
+            },
+            "ports": [
+                {
+                    "name": "metrics",
+                    "port": METRICS_PORT,
+                    "targetPort": METRICS_PORT,
+                    "protocol": "TCP",
+                }
+            ],
+        },
+    }
+
+
 def render_deployment(checksum: str) -> dict[str, Any]:
     return {
         "apiVersion": "apps/v1",
@@ -432,6 +466,7 @@ def build() -> tuple[list[dict[str, Any]], dict[str, Any]]:
         configmap,
         render_deployment(checksum),
         render_routes_reference(),
+        render_service(),           # ← New metrics Service
     ]
     return docs, secret
 
@@ -442,6 +477,7 @@ def write_manifests(docs: list[dict[str, Any]]) -> None:
     atomic_write_text(OUT_DIR / "02-configmap.yaml", yaml_dump(docs[1]).rstrip() + "\n")
     atomic_write_text(OUT_DIR / "03-deployment.yaml", yaml_dump(docs[2]).rstrip() + "\n")
     atomic_write_text(OUT_DIR / "04-routes-reference.yaml", yaml_dump(docs[3]).rstrip() + "\n")
+    atomic_write_text(OUT_DIR / "05-service.yaml", yaml_dump(docs[4]).rstrip() + "\n")
     logger.info(f"Manifests written to {OUT_DIR}")
 
 
@@ -467,6 +503,7 @@ def delete_resources() -> None:
         f"configmap/{CONFIGMAP_NAME}",
         f"configmap/{DEPLOYMENT_NAME}-routes-reference",
         f"secret/{SECRET_NAME}",
+        f"service/{METRICS_SERVICE_NAME}",
         "-n", NAMESPACE,
         "--ignore-not-found=true",
     ])

@@ -1,4 +1,3 @@
-# rate_limits.py
 from __future__ import annotations
 
 from typing import Any
@@ -13,10 +12,12 @@ from fastapi import FastAPI, Request
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_ipaddr
+import logging
+
+logger = logging.getLogger(__name__)
 
 if not VALKEY_URL:
-    raise RuntimeError("VALKEY_URL is required for rate limiting storage.")
-
+    logger.warning("VALKEY_URL is not set. Rate limiting will use in-memory fallback (not suitable for multi-replica).")
 
 def _path(request: Request) -> str:
     return (request.url.path or "").rstrip("/")
@@ -58,10 +59,7 @@ def verified_subject(request: Request) -> str | None:
     )
 
 
-# ── Key functions ──────────────────────────────────────────────
-
 def _user_key_func(request: Request) -> str:
-    """Global key: authenticated user sub, else empty → no limit."""
     sub = verified_subject(request)
     if sub:
         return f"user:{sub}"
@@ -69,14 +67,12 @@ def _user_key_func(request: Request) -> str:
 
 
 def _auth_ip_key(request: Request) -> str:
-    """IP‑based key for unauthenticated auth routes."""
     return f"auth:ip:{get_ipaddr(request)}"
 
 
-# ── Limiter singleton ──────────────────────────────────────────
 limiter = Limiter(
     key_func=_user_key_func,
-    storage_uri=VALKEY_URL,
+    storage_uri=VALKEY_URL if VALKEY_URL else "memory://",
     headers_enabled=True,
     in_memory_fallback_enabled=True,
 )
@@ -87,14 +83,11 @@ def install_rate_limits(app: FastAPI) -> None:
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
-# ── Rate limit strings ─────────────────────────────────────────
 class limits:
-    # From config.py
     generate_stream   = RATE_LIMIT_GENERATE_STREAM
     auth_me           = RATE_LIMIT_AUTH_ME
     stream_concurrency = RATE_LIMIT_STREAM_CONCURRENCY
 
-    # Hardcoded defaults for auth flow (not in config.py)
     auth_login    = "10/minute"
     auth_start    = "5/minute"
     auth_callback = "10/minute"

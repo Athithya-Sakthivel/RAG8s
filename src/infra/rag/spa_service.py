@@ -12,11 +12,6 @@ AWS credentials (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY) are only
 included when USE_IAM=false.  When USE_IAM=true the service account
 receives an IRSA annotation and the Pod gets an IRSA_ROLE_ARN env var.
 
-local iteration:
-kubectl delete -f src/manifests/frontend || true
-python3 src/infra/rag/spa_service.py --apply-secrets
-python3 src/infra/rag/spa_service.py --write
-python3 src/infra/rag/spa_service.py --apply
 """
 
 from __future__ import annotations
@@ -70,16 +65,22 @@ DEFAULTS: dict[str, Any] = {
     "ALLOW_PRIV_ESC": False,
     "READONLY_ROOTFS": True,
     "SERVICE_TYPE": "ClusterIP",
-    "READINESS_INITIAL_DELAY": 5,
-    "LIVENESS_INITIAL_DELAY": 10,
-    "PROBE_PERIOD_SECONDS": 5,
-    "PROBE_TIMEOUT_SECONDS": 3,
-    "STARTUP_FAILURE_THRESHOLD": 30,
+    # Probes – tuned for single-node clusters
+    "PROBE_TIMEOUT_SECONDS": 5,          # was 3
+    "STARTUP_FAILURE_THRESHOLD": 12,     # 12 * 5s = 60s grace
+    "LIVENESS_PERIOD_SECONDS": 10,
+    "LIVENESS_FAILURE_THRESHOLD": 3,
+    "READINESS_PERIOD_SECONDS": 5,
+    "READINESS_FAILURE_THRESHOLD": 2,
     "ROLLOUT_TIMEOUT": 300,
     "ENABLE_PROMETHEUS": True,
     "PROMETHEUS_PATH": "/metrics",
     "USE_IAM": False,
     "IRSA_ROLE_ARN": "",
+    # Auth & domain
+    "ENABLE_GOOGLE_AUTH": True,
+    "REQUIRE_AUTH": True,
+    "FRONTEND_HOSTNAME": "athithya.site",
 }
 
 # Sensitive keys that will be stored in the cluster Secret (never on disk)
@@ -230,16 +231,22 @@ def load_config() -> dict[str, Any]:
     cfg["ALLOW_PRIV_ESC"] = _env_bool("ALLOW_PRIV_ESC", DEFAULTS["ALLOW_PRIV_ESC"])
     cfg["READONLY_ROOTFS"] = _env_bool("READONLY_ROOTFS", DEFAULTS["READONLY_ROOTFS"])
     cfg["SERVICE_TYPE"] = _env_str("SERVICE_TYPE", DEFAULTS["SERVICE_TYPE"])
-    cfg["READINESS_INITIAL_DELAY"] = _env_int("READINESS_INITIAL_DELAY", DEFAULTS["READINESS_INITIAL_DELAY"])
-    cfg["LIVENESS_INITIAL_DELAY"] = _env_int("LIVENESS_INITIAL_DELAY", DEFAULTS["LIVENESS_INITIAL_DELAY"])
-    cfg["PROBE_PERIOD_SECONDS"] = _env_int("PROBE_PERIOD_SECONDS", DEFAULTS["PROBE_PERIOD_SECONDS"])
     cfg["PROBE_TIMEOUT_SECONDS"] = _env_int("PROBE_TIMEOUT_SECONDS", DEFAULTS["PROBE_TIMEOUT_SECONDS"])
     cfg["STARTUP_FAILURE_THRESHOLD"] = _env_int("STARTUP_FAILURE_THRESHOLD", DEFAULTS["STARTUP_FAILURE_THRESHOLD"])
+    cfg["LIVENESS_PERIOD_SECONDS"] = _env_int("LIVENESS_PERIOD_SECONDS", DEFAULTS["LIVENESS_PERIOD_SECONDS"])
+    cfg["LIVENESS_FAILURE_THRESHOLD"] = _env_int("LIVENESS_FAILURE_THRESHOLD", DEFAULTS["LIVENESS_FAILURE_THRESHOLD"])
+    cfg["READINESS_PERIOD_SECONDS"] = _env_int("READINESS_PERIOD_SECONDS", DEFAULTS["READINESS_PERIOD_SECONDS"])
+    cfg["READINESS_FAILURE_THRESHOLD"] = _env_int("READINESS_FAILURE_THRESHOLD", DEFAULTS["READINESS_FAILURE_THRESHOLD"])
     cfg["ROLLOUT_TIMEOUT"] = _env_int("ROLLOUT_TIMEOUT", DEFAULTS["ROLLOUT_TIMEOUT"])
     cfg["ENABLE_PROMETHEUS"] = _env_bool("ENABLE_PROMETHEUS", DEFAULTS["ENABLE_PROMETHEUS"])
     cfg["PROMETHEUS_PATH"] = _env_str("PROMETHEUS_PATH", DEFAULTS["PROMETHEUS_PATH"])
     cfg["USE_IAM"] = _env_bool("USE_IAM", DEFAULTS["USE_IAM"])
     cfg["IRSA_ROLE_ARN"] = _env_str("IRSA_ROLE_ARN", DEFAULTS["IRSA_ROLE_ARN"])
+
+    # Auth & domain settings
+    cfg["ENABLE_GOOGLE_AUTH"] = _env_bool("ENABLE_GOOGLE_AUTH", DEFAULTS["ENABLE_GOOGLE_AUTH"])
+    cfg["REQUIRE_AUTH"] = _env_bool("REQUIRE_AUTH", DEFAULTS["REQUIRE_AUTH"])
+    cfg["FRONTEND_HOSTNAME"] = _env_str("FRONTEND_HOSTNAME", DEFAULTS["FRONTEND_HOSTNAME"])
 
     # No 02-secret.yaml anymore
     cfg["FILES"] = {
@@ -250,12 +257,14 @@ def load_config() -> dict[str, Any]:
     }
     cfg["UUID_SHORT"] = str(uuid.uuid4())[:8]
     log.info(
-        "Loaded config: namespace=%s deployment=%s replicas=%d image=%s use_iam=%s",
+        "Loaded config: namespace=%s deployment=%s replicas=%d image=%s google_auth=%s require_auth=%s frontend_hostname=%s",
         cfg["NAMESPACE"],
         cfg["DEPLOYMENT_NAME"],
         cfg["REPLICAS"],
         cfg["IMAGE"],
-        cfg["USE_IAM"],
+        cfg["ENABLE_GOOGLE_AUTH"],
+        cfg["REQUIRE_AUTH"],
+        cfg["FRONTEND_HOSTNAME"],
     )
     return cfg
 
@@ -326,7 +335,6 @@ def build_service_account_doc(cfg: dict[str, Any]) -> dict[str, Any]:
     }
 
 def build_deployment_doc(cfg: dict[str, Any], has_secret: bool) -> dict[str, Any]:
-    # Base environment variables – non‑sensitive, with strong defaults
     env_vars = [
         {"name": "POD_NAME", "valueFrom": {"fieldRef": {"fieldPath": "metadata.name"}}},
         {"name": "POD_NAMESPACE", "valueFrom": {"fieldRef": {"fieldPath": "metadata.namespace"}}},
@@ -335,11 +343,16 @@ def build_deployment_doc(cfg: dict[str, Any], has_secret: bool) -> dict[str, Any
         {"name": "LOG_LEVEL", "value": "INFO"},
         {"name": "ENABLE_PROMETHEUS", "value": str(cfg["ENABLE_PROMETHEUS"]).lower()},
         {"name": "PROMETHEUS_PATH", "value": cfg["PROMETHEUS_PATH"]},
-        {"name": "REQUIRE_AUTH", "value": "true"},
+        # Auth toggles
+        {"name": "REQUIRE_AUTH", "value": str(cfg.get("REQUIRE_AUTH", True)).lower()},
+        {"name": "ENABLE_GOOGLE_AUTH", "value": str(cfg.get("ENABLE_GOOGLE_AUTH", True)).lower()},
+        {"name": "ENABLE_MICROSOFT_AUTH", "value": "false"},
+        {"name": "ENABLE_GITHUB_AUTH", "value": "false"},
+        # UI settings
         {"name": "DISPLAY_SOURCES_IN_UI", "value": "true"},
         {"name": "DISPLAY_TOPK_IN_UI", "value": "true"},
         {"name": "USE_IAM", "value": str(cfg["USE_IAM"]).lower()},
-        # Rate limits – production defaults
+        # Rate limits
         {"name": "RATE_LIMIT_GENERATE_STREAM", "value": "10/minute"},
         {"name": "RATE_LIMIT_AUTH_ME", "value": "30/minute"},
         {"name": "RATE_LIMIT_STREAM_CONCURRENCY", "value": "10"},
@@ -347,32 +360,28 @@ def build_deployment_doc(cfg: dict[str, Any], has_secret: bool) -> dict[str, Any
         {"name": "RATE_LIMIT_AUTH_START", "value": "5/minute"},
         {"name": "RATE_LIMIT_AUTH_CALLBACK", "value": "20/minute"},
         {"name": "RATE_LIMIT_AUTH_LOGOUT", "value": "20/minute"},
-        # JWT static settings – signing material comes from secret
+        # JWT
         {"name": "JWT_ISS", "value": "stateless-openid-auth"},
         {"name": "JWT_AUD", "value": "rag-ui"},
         {"name": "JWT_TTL_SECONDS", "value": "900"},
         {"name": "JWT_CLOCK_SKEW_SECONDS", "value": "90"},
         {"name": "JWT_KID", "value": "production-key-1"},
-        # OAuth enabled flags (turn on/off via env; real secrets in Secret)
-        {"name": "ENABLE_GOOGLE_AUTH", "value": "false"},
-        {"name": "ENABLE_MICROSOFT_AUTH", "value": "false"},
-        {"name": "ENABLE_GITHUB_AUTH", "value": "false"},
-        # Google / Microsoft / GitHub domain restrictions
+        # OAuth domain restrictions (empty = allow all)
         {"name": "GOOGLE_ALLOWED_DOMAINS", "value": ""},
         {"name": "MICROSOFT_ALLOWED_DOMAINS", "value": ""},
         {"name": "MICROSOFT_ALLOWED_TENANT_IDS", "value": ""},
         {"name": "GITHUB_ALLOWED_ORGS", "value": ""},
-        # Upstream retriever URL (Kubernetes DNS)
+        # Critical: the public hostname for OAuth redirects
+        {"name": "FRONTEND_HOSTNAME", "value": cfg.get("FRONTEND_HOSTNAME", "")},
+        # Upstream retriever
         {"name": "RETRIEVER_URL", "value": "http://retriever.inference.svc.cluster.local:8001"},
         {"name": "GENERATE_STREAM_PATH", "value": "/generate/stream"},
         {"name": "UPSTREAM_TIMEOUT_SECONDS", "value": "60"},
-        # Valkey / Redis connection will be built from VALKEY_PASSWORD secret (via entrypoint or config)
-        # We'll set VALKEY_SERVICE_HOST and let config.py construct the URL
+        # Valkey / Redis
         {"name": "VALKEY_SERVICE_HOST", "value": "valkey.valkey.svc.cluster.local"},
         {"name": "VALKEY_SERVICE_PORT", "value": "6379"},
     ]
 
-    # If a secret is provided, mount it as envFrom
     env_from = [{"secretRef": {"name": cfg["SECRET_NAME"]}}] if has_secret else []
 
     container = {
@@ -385,7 +394,7 @@ def build_deployment_doc(cfg: dict[str, Any], has_secret: bool) -> dict[str, Any
         "volumeMounts": [
             {"name": "tmp", "mountPath": "/tmp"},
             {"name": "tmp", "mountPath": "/var/tmp"},
-            {"name": "static-files", "mountPath": "/app/static"},  # ← Mount for writable static dir
+            {"name": "static-files", "mountPath": "/app/static"},
         ],
         "securityContext": {
             "allowPrivilegeEscalation": bool(cfg["ALLOW_PRIV_ESC"]),
@@ -398,29 +407,30 @@ def build_deployment_doc(cfg: dict[str, Any], has_secret: bool) -> dict[str, Any
             "requests": {"cpu": cfg["CPU_REQUEST"], "memory": cfg["MEMORY_REQUEST"]},
             "limits": {"cpu": cfg["CPU_LIMIT"], "memory": cfg["MEMORY_LIMIT"]},
         },
-        "readinessProbe": _probe_http(
-            "/orchestrator/health",
+        # Fixed probes – startup, then liveness + readiness
+        "startupProbe": _probe_http(
+            "/health",
             cfg["CONTAINER_PORT"],
-            cfg["READINESS_INITIAL_DELAY"],
-            cfg["PROBE_PERIOD_SECONDS"],
-            cfg["PROBE_TIMEOUT_SECONDS"],
-            3,
+            initial_delay=5,
+            period=5,
+            timeout=cfg["PROBE_TIMEOUT_SECONDS"],
+            failure_threshold=cfg["STARTUP_FAILURE_THRESHOLD"],
         ),
         "livenessProbe": _probe_http(
             "/health",
             cfg["CONTAINER_PORT"],
-            cfg["LIVENESS_INITIAL_DELAY"],
-            cfg["PROBE_PERIOD_SECONDS"],
-            cfg["PROBE_TIMEOUT_SECONDS"],
-            6,
+            initial_delay=0,   # disabled until startup succeeds
+            period=cfg["LIVENESS_PERIOD_SECONDS"],
+            timeout=cfg["PROBE_TIMEOUT_SECONDS"],
+            failure_threshold=cfg["LIVENESS_FAILURE_THRESHOLD"],
         ),
-        "startupProbe": _probe_http(
-            "/health",
+        "readinessProbe": _probe_http(
+            "/orchestrator/health",
             cfg["CONTAINER_PORT"],
-            cfg["LIVENESS_INITIAL_DELAY"],
-            cfg["PROBE_PERIOD_SECONDS"],
-            cfg["PROBE_TIMEOUT_SECONDS"],
-            cfg["STARTUP_FAILURE_THRESHOLD"],
+            initial_delay=0,
+            period=cfg["READINESS_PERIOD_SECONDS"],
+            timeout=cfg["PROBE_TIMEOUT_SECONDS"],
+            failure_threshold=cfg["READINESS_FAILURE_THRESHOLD"],
         ),
     }
 
@@ -451,7 +461,7 @@ def build_deployment_doc(cfg: dict[str, Any], has_secret: bool) -> dict[str, Any
                     "securityContext": {"fsGroup": cfg["FS_GROUP"]},
                     "volumes": [
                         {"name": "tmp", "emptyDir": {}},
-                        {"name": "static-files", "emptyDir": {}},  # ← Volume for /app/static
+                        {"name": "static-files", "emptyDir": {}},
                     ],
                     "containers": [container],
                 },
@@ -653,7 +663,7 @@ def apply_to_cluster(cfg: dict[str, Any], dry_run: bool = False) -> None:
 
     use_iam = bool(cfg["USE_IAM"])
 
-    # Assemble secrets (user-provided + auto‑generated + AWS creds if needed)
+    # Assemble secrets
     secret_env = collect_user_secrets()
     _auto_generate_missing_keys(secret_env, cfg["NAMESPACE"], cfg["SECRET_NAME"])
 
@@ -662,14 +672,17 @@ def apply_to_cluster(cfg: dict[str, Any], dry_run: bool = False) -> None:
         if aws:
             secret_env.update(aws)
 
-    # Generate manifests (no secrets on disk)
+    # Warn if Google auth is enabled but no credentials
+    if cfg["ENABLE_GOOGLE_AUTH"] and (not secret_env.get("GOOGLE_CLIENT_ID") or not secret_env.get("GOOGLE_CLIENT_SECRET")):
+        log.warning("Google auth is enabled but GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET are missing. Google login will be unavailable.")
+
     generate_manifests(cfg, secret_env, dry_run=dry_run)
 
     if dry_run:
         log.info("Dry-run requested; skipping apply.")
         return
 
-    # Apply secret directly first
+    # Apply secret
     if secret_env:
         try:
             create_namespace_if_missing(cfg["NAMESPACE"])
@@ -691,6 +704,12 @@ def apply_to_cluster(cfg: dict[str, Any], dry_run: bool = False) -> None:
         raise SystemExit(2) from None
 
     log.info("Manifests and secrets applied successfully.")
+    # Print redirect URI hint
+    if cfg.get("FRONTEND_HOSTNAME"):
+        log.info(
+            "Google OAuth redirect URI: https://%s/auth/callback/google",
+            cfg["FRONTEND_HOSTNAME"],
+        )
 
 def apply_secrets_only(cfg: dict[str, Any], dry_run: bool = False) -> int:
     """Apply only the Secret (no manifests)."""
@@ -705,6 +724,9 @@ def apply_secrets_only(cfg: dict[str, Any], dry_run: bool = False) -> int:
         aws = _aws_cred_env()
         if aws:
             secret_env.update(aws)
+
+    if cfg["ENABLE_GOOGLE_AUTH"] and (not secret_env.get("GOOGLE_CLIENT_ID") or not secret_env.get("GOOGLE_CLIENT_SECRET")):
+        log.warning("Google auth is enabled but credentials missing.")
 
     if not secret_env:
         log.warning("No secret values found; nothing to apply.")
@@ -723,7 +745,6 @@ def apply_secrets_only(cfg: dict[str, Any], dry_run: bool = False) -> int:
     return 0
 
 def delete_manifests(cfg: dict[str, Any], delete_secret: bool = False) -> None:
-    """Delete manifests from disk and cluster, optionally the secret."""
     for key in ["serviceaccount", "deployment", "service", "pdb"]:
         path = cfg["FILES"][key]
         if path.exists():
@@ -732,7 +753,6 @@ def delete_manifests(cfg: dict[str, Any], delete_secret: bool = False) -> None:
             except Exception:
                 log.debug("Failed to delete %s", path, exc_info=True)
 
-    # Clean generated files
     try:
         if cfg["MANIFESTS_DIR"].exists():
             for p in sorted(cfg["MANIFESTS_DIR"].glob("*")):
@@ -782,7 +802,6 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.write:
-            # For --write, collect secrets to determine has_secret
             secret_env = collect_user_secrets()
             _auto_generate_missing_keys(secret_env, cfg["NAMESPACE"], cfg["SECRET_NAME"])
             generate_manifests(cfg, secret_env, dry_run=args.dry_run, verbose=args.verbose)

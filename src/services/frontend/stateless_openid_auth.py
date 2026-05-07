@@ -1,4 +1,3 @@
-# stateless_openid_auth.py
 from __future__ import annotations
 
 import html
@@ -52,7 +51,7 @@ from joserfc import jwk, jwt
 from joserfc.errors import ClaimError, ExpiredTokenError, InvalidClaimError, JoseError
 from joserfc.jwk import ECKey
 from joserfc.jwt import JWTClaimsRegistry
-from rate_limits import limiter, limits, _auth_ip_key   # ← CORRECT
+from rate_limits import limiter, limits, _auth_ip_key
 from starlette.middleware.sessions import SessionMiddleware
 
 logger = logging.getLogger(__name__)
@@ -133,50 +132,69 @@ CLAIMS_REQUESTS = _SkewClaimsRegistry(
 
 oauth = OAuth()
 ENABLED_PROVIDERS = enabled_providers_effective()
-_provider_clients: dict[str, Any] = {}  # cache OAuth clients
+_provider_clients: dict[str, Any] = {}
 
+# Graceful registration of providers
 if ENABLE_GOOGLE and "google" in ENABLED_PROVIDERS:
-    oauth.register(
-        name="google",
-        client_id=GOOGLE_CLIENT_ID,
-        client_secret=GOOGLE_CLIENT_SECRET,
-        server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
-        client_kwargs={
-            "scope": "openid email profile",
-            "code_challenge_method": "S256",
-        },
-    )
+    try:
+        oauth.register(
+            name="google",
+            client_id=GOOGLE_CLIENT_ID,
+            client_secret=GOOGLE_CLIENT_SECRET,
+            server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+            client_kwargs={
+                "scope": "openid email profile",
+                "code_challenge_method": "S256",
+            },
+        )
+        logger.info("Google auth provider registered successfully")
+    except Exception as e:
+        logger.error("Failed to register Google auth provider: %s", e)
+        ENABLED_PROVIDERS.remove("google")
 
 if ENABLE_MICROSOFT and "microsoft" in ENABLED_PROVIDERS:
-    microsoft_tenant = MS_TENANT_ID or "common"
-    oauth.register(
-        name="microsoft",
-        client_id=MS_CLIENT_ID,
-        client_secret=MS_CLIENT_SECRET,
-        server_metadata_url=f"https://login.microsoftonline.com/{microsoft_tenant}/v2.0/.well-known/openid-configuration",
-        client_kwargs={
-            "scope": "openid email profile offline_access User.Read",
-            "code_challenge_method": "S256",
-        },
-    )
+    try:
+        microsoft_tenant = MS_TENANT_ID or "common"
+        oauth.register(
+            name="microsoft",
+            client_id=MS_CLIENT_ID,
+            client_secret=MS_CLIENT_SECRET,
+            server_metadata_url=f"https://login.microsoftonline.com/{microsoft_tenant}/v2.0/.well-known/openid-configuration",
+            client_kwargs={
+                "scope": "openid email profile offline_access User.Read",
+                "code_challenge_method": "S256",
+            },
+        )
+        logger.info("Microsoft auth provider registered successfully")
+    except Exception as e:
+        logger.error("Failed to register Microsoft auth provider: %s", e)
+        ENABLED_PROVIDERS.remove("microsoft")
 
 if ENABLE_GITHUB and "github" in ENABLED_PROVIDERS:
-    oauth.register(
-        name="github",
-        client_id=GITHUB_CLIENT_ID,
-        client_secret=GITHUB_CLIENT_SECRET,
-        access_token_url="https://github.com/login/oauth/access_token",
-        authorize_url="https://github.com/login/oauth/authorize",
-        api_base_url="https://api.github.com/",
-        client_kwargs={
-            "scope": "user:email read:org",
-            "code_challenge_method": "S256",
-        },
-    )
+    try:
+        oauth.register(
+            name="github",
+            client_id=GITHUB_CLIENT_ID,
+            client_secret=GITHUB_CLIENT_SECRET,
+            access_token_url="https://github.com/login/oauth/access_token",
+            authorize_url="https://github.com/login/oauth/authorize",
+            api_base_url="https://api.github.com/",
+            client_kwargs={
+                "scope": "user:email read:org",
+                "code_challenge_method": "S256",
+            },
+        )
+        logger.info("GitHub auth provider registered successfully")
+    except Exception as e:
+        logger.error("Failed to register GitHub auth provider: %s", e)
+        ENABLED_PROVIDERS.remove("github")
+
+if not ENABLED_PROVIDERS:
+    logger.warning("No OAuth providers are enabled. Login will not be possible.")
 
 
 def _enabled_providers() -> list[str]:
-    return enabled_providers_effective()
+    return ENABLED_PROVIDERS
 
 
 def _frontend_base() -> str:
@@ -274,7 +292,7 @@ def _render_index(status_html: str = "") -> HTMLResponse:
         )
         provider_html = f"<ul>{buttons}</ul>"
     else:
-        provider_html = "<p>No providers are enabled.</p>"
+        provider_html = "<p>No login providers configured. Contact administrator.</p>"
 
     body = f"""<!doctype html>
 <html>
@@ -295,7 +313,7 @@ async def redirects_page():
     rows = "".join(
         f"<li><strong>{html.escape(p)}</strong>: <code>{html.escape(_redirect_uri(p))}</code></li>"
         for p in providers
-    )
+    ) or "<li>No providers enabled</li>"
     body = f"""<!doctype html>
 <html>
 <head><meta charset="utf-8"><title>Redirect URIs</title></head>
@@ -309,7 +327,7 @@ async def redirects_page():
 
 @app.get("/login", response_class=HTMLResponse)
 @limiter.limit(limits.auth_login, key_func=_auth_ip_key)
-async def login_page(request: Request):          # ← added request parameter
+async def login_page(request: Request):
     return _render_index()
 
 
@@ -506,7 +524,7 @@ window.location.replace({json.dumps(_frontend_base())});
     return HTMLResponse(body)
 
 @app.get("/me")
-@limiter.limit(limits.auth_me)   # uses global user key
+@limiter.limit(limits.auth_me)
 async def me(request: Request):
     token_text = _extract_bearer_token(request)
     try:
@@ -515,11 +533,10 @@ async def me(request: Request):
         raise HTTPException(status_code=401, detail="Token expired")
     except (ClaimError, JoseError):
         raise HTTPException(status_code=401, detail="Invalid token")
-    except Exception as exc:
+    except Exception:
         logger.error("token verification failed")
         raise HTTPException(status_code=401, detail="Invalid token")
 
-    # Return a proper Response so slowapi can add rate‑limit headers
     return JSONResponse({"authenticated": True, "user": claims})
 
 

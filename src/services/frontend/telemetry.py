@@ -1,4 +1,3 @@
-# telemetry.py
 from __future__ import annotations
 
 import json
@@ -148,7 +147,6 @@ class JsonLogger:
         if fields:
             record["fields"] = _jsonable(fields)
         try:
-            # Write without explicit flush; Python line buffering handles it
             sys.stdout.write(json.dumps(record, separators=(",", ":"), ensure_ascii=False) + "\n")
         except Exception:
             try:

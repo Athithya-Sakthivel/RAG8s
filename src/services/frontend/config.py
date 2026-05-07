@@ -1,14 +1,14 @@
-# config.py
 from __future__ import annotations
 
+import logging
 import os
 
+logger = logging.getLogger("frontend.config")
 
 def parse_bool_env(value, default: bool = False) -> bool:
     if value is None:
         return default
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
-
 
 def parse_int_env(value, default: int) -> int:
     if value is None or str(value).strip() == "":
@@ -17,7 +17,6 @@ def parse_int_env(value, default: int) -> int:
         return int(str(value).strip())
     except Exception:
         return default
-
 
 def parse_list_env(value) -> list[str]:
     if not value:
@@ -28,7 +27,6 @@ def parse_list_env(value) -> list[str]:
         if item:
             items.append(item)
     return items
-
 
 def norm_url(value, default: str) -> str:
     if not value:
@@ -45,7 +43,6 @@ def norm_url(value, default: str) -> str:
             s = "https://" + s
     return s
 
-
 def norm_path(value, default: str) -> str:
     s = str(value).strip() if value else ""
     if not s:
@@ -53,7 +50,6 @@ def norm_path(value, default: str) -> str:
     if not s.startswith("/"):
         s = "/" + s
     return s
-
 
 SERVICE_NAME = (os.getenv("SERVICE_NAME") or "frontend").strip()
 ENV = (os.getenv("ENV") or "STAGING").strip().upper()
@@ -67,6 +63,7 @@ else:
         os.getenv("FRONTEND_BASE") or os.getenv("FRONTEND_URL") or DEFAULT_LOCAL,
         DEFAULT_LOCAL,
     )
+logger.info("Resolved EXTERNAL_BASE: %s", EXTERNAL_BASE)
 
 QUERY_URL = norm_url(
     os.getenv("QUERY_URL")
@@ -88,7 +85,7 @@ JWKS_URL = norm_url(
     f"{EXTERNAL_BASE.rstrip('/')}{JWKS_PATH}",
 )
 
-REQUIRE_AUTH = parse_bool_env(os.getenv("REQUIRE_AUTH"), False)
+REQUIRE_AUTH = parse_bool_env(os.getenv("REQUIRE_AUTH"), True)
 DISPLAY_SOURCES_IN_UI = parse_bool_env(os.getenv("DISPLAY_SOURCES_IN_UI"), True)
 DISPLAY_TOPK_IN_UI = parse_bool_env(os.getenv("DISPLAY_TOPK_IN_UI"), True)
 
@@ -144,11 +141,9 @@ JWT_KID = (os.getenv("JWT_KID") or "").strip()
 JWT_PRIVATE_KEY_PEM = (os.getenv("JWT_PRIVATE_KEY_PEM") or "").strip()
 JWT_PRIVATE_KEY_PATH = (os.getenv("JWT_PRIVATE_KEY_PATH") or "").strip()
 
-VALKEY_URL = (os.getenv("VALKEY_URL") or os.getenv("REDIS_URL") or "").strip()
+VALKEY_URL = (os.getenv("VALKEY_URL") or "").strip()
 
-# ---------------------------------------------------------------------------
-# Rate limits – user‑subject only (no IP buckets)
-# ---------------------------------------------------------------------------
+# Rate limits
 RATE_LIMIT_GENERATE_STREAM = (os.getenv("RATE_LIMIT_GENERATE_STREAM") or "5/minute").strip()
 RATE_LIMIT_AUTH_ME          = (os.getenv("RATE_LIMIT_AUTH_ME") or "20/minute").strip()
 RATE_LIMIT_STREAM_CONCURRENCY = parse_int_env(os.getenv("RATE_LIMIT_STREAM_CONCURRENCY"), 2)
@@ -158,15 +153,17 @@ UPSTREAM_PRESIGN_TIMEOUT_SECONDS = parse_int_env(os.getenv("UPSTREAM_PRESIGN_TIM
 
 USE_UVLOOP = parse_bool_env(os.getenv("USE_UVLOOP"), True)
 
-if JWT_TTL_SECONDS <= 0:
-    raise RuntimeError("JWT_TTL_SECONDS must be positive")
+# Graceful Google auth disable if credentials missing
+if ENABLE_GOOGLE and (not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET):
+    logger.warning("Google auth disabled because GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET is missing")
+    ENABLE_GOOGLE = False
 
-if JWT_CLOCK_SKEW_SECONDS < 0:
-    raise RuntimeError("JWT_CLOCK_SKEW_SECONDS must be zero or positive")
+# JWT / session validations
+if REQUIRE_AUTH and not SESSION_SECRET:
+    logger.warning("REQUIRE_AUTH is true but SESSION_SECRET is empty; OAuth flow will fail")
 
-if RATE_LIMIT_STREAM_CONCURRENCY <= 0:
-    raise RuntimeError("RATE_LIMIT_STREAM_CONCURRENCY must be positive")
-
+if REQUIRE_AUTH and not has_jwt_signing_material():
+    logger.warning("REQUIRE_AUTH is true but no JWT signing material is available; tokens cannot be minted")
 
 def get_redirect(provider: str) -> str:
     p = (provider or "").strip().lower()
@@ -183,14 +180,12 @@ def get_redirect(provider: str) -> str:
         return f"{base}/{p}"
     return f"{base}/auth/callback/{p}"
 
-
 def enabled_flags():
     return {
         "google": ENABLE_GOOGLE,
         "microsoft": ENABLE_MICROSOFT,
         "github": ENABLE_GITHUB,
     }
-
 
 def enabled_providers_effective():
     out = []
@@ -201,7 +196,6 @@ def enabled_providers_effective():
     if ENABLE_GITHUB and GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET:
         out.append("github")
     return out
-
 
 def has_jwt_signing_material() -> bool:
     return bool(JWT_PRIVATE_KEY_PEM or JWT_PRIVATE_KEY_PATH)
