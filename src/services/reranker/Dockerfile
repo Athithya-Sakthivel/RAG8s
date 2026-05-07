@@ -30,9 +30,9 @@ RUN mkdir -p /models_cache /app /var/log/reranker \
 
 # Install minimal runtime deps and patch openssl
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates openssl libssl3 curl \
+ && apt-get install -y --no-install-recommends ca-certificates openssl libssl3 \
  && rm -rf /var/lib/apt/lists/*
- 
+
 # Upgrade pip tooling
 RUN python -m pip install --upgrade pip wheel
 
