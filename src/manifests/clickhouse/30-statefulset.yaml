@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: clickhouse
+  namespace: logging
+spec:
+  serviceName: clickhouse
+  replicas: 1
+  selector:
+    matchLabels: &id001
+      app: clickhouse
+  template:
+    metadata:
+      labels: *id001
+      annotations:
+        checksum/users-config: e7361744d230480ce6395df468ee7cd8a919019141a5548dd5ec54178939eb9d
+        checksum/init-sql: faa4bfead08a9493c32d3aeb02a1c101a683d17e68e02ac773ea3be168beed24
+        checksum/image: 68898c62b6b531111eff138f9a0a1093a1b4fbe8e99d089d39e602f1b0c10c07
+    spec:
+      securityContext:
+        fsGroup: 101
+      containers:
+      - name: clickhouse
+        image: clickhouse/clickhouse-server:23.12.6@sha256:05c61b64b223582049b571401ce93c4de1c985f452977de195a6a13acb87ec9c
+        ports:
+        - containerPort: 8123
+          name: http
+        - containerPort: 9000
+          name: tcp
+        - containerPort: 8001
+          name: metrics
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/clickhouse
+        - name: users-config
+          mountPath: /etc/clickhouse-server/users.d
+          readOnly: true
+        resources:
+          requests:
+            cpu: '1'
+            memory: 0.5Gi
+          limits:
+            cpu: '4'
+            memory: 16Gi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 101
+          runAsGroup: 101
+          capabilities:
+            drop:
+            - ALL
+        livenessProbe:
+          exec:
+            command:
+            - bash
+            - -c
+            - clickhouse-client --query 'SELECT 1' || exit 1
+          initialDelaySeconds: 15
+          periodSeconds: 20
+          timeoutSeconds: 5
+        readinessProbe:
+          exec:
+            command:
+            - bash
+            - -c
+            - clickhouse-client --query 'SELECT 1' || exit 1
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+      volumes:
+      - name: users-config
+        configMap:
+          name: clickhouse-users-settings
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: default-storage-class
+      resources:
+        requests:
+          storage: 10Gi

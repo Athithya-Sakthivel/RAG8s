@@ -8,18 +8,25 @@
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
   "remoteUser": "root",
   "forwardPorts": [
-    3000,
-    3001,
-    8000,
-    8001,
-    8080,
-    50051,
-    8005,
-    7000,
-    7001,
-    7002,
-    7003
-  ],
+  3000,    // Frontend UI dev server (optional)
+  3001,    // Frontend UI dev server alternate
+  8000,    // Frontend main service
+  8001,    // Retriever service
+  8080,    // Alternative HTTP port / dashboard
+  50051,   // gRPC (dense/sparse embedding services)
+  8005,    // Reranker service
+  7000,    // Qdrant HTTP API
+  7001,    // Qdrant gRPC API
+  7002,    // Qdrant internal cluster
+  7003,    // Qdrant metrics
+  6379,    // Valkey/Redis
+  2000,    // Cloudflared metrics
+  9153,    // CoreDNS metrics (Prometheus)
+  9090,    // Prometheus (if deployed)
+  30080,   // kind NodePort (configured in your cluster script)
+  443,     // HTTPS (Cloudflare tunnel origin)
+  80       // HTTP (redirect to HTTPS)
+],
   "runArgs": [
     "--privileged",
     "--network=host",
@@ -34,7 +41,7 @@
     "DOCKER_PROXY_HOST": "",
     "DOCKER_PROXY_PORT": ""
   },
-  "postCreateCommand": "bash src/scripts/local/bootstrap.sh",
+  "postCreateCommand": "bash src/scripts/local/bootstrap.sh && bash src/scripts/local/local_cluster.sh",
   "customizations": {
     "vscode": {
       "extensions": [

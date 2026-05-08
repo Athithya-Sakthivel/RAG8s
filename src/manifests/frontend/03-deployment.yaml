@@ -64,6 +64,12 @@ spec:
           value: /metrics
         - name: REQUIRE_AUTH
           value: 'true'
+        - name: ENABLE_GOOGLE_AUTH
+          value: 'true'
+        - name: ENABLE_MICROSOFT_AUTH
+          value: 'false'
+        - name: ENABLE_GITHUB_AUTH
+          value: 'false'
         - name: DISPLAY_SOURCES_IN_UI
           value: 'true'
         - name: DISPLAY_TOPK_IN_UI
@@ -94,12 +100,6 @@ spec:
           value: '90'
         - name: JWT_KID
           value: production-key-1
-        - name: ENABLE_GOOGLE_AUTH
-          value: 'true'
-        - name: ENABLE_MICROSOFT_AUTH
-          value: 'false'
-        - name: ENABLE_GITHUB_AUTH
-          value: 'false'
         - name: GOOGLE_ALLOWED_DOMAINS
           value: ''
         - name: MICROSOFT_ALLOWED_DOMAINS
@@ -143,33 +143,33 @@ spec:
           limits:
             cpu: 500m
             memory: 256Mi
-        readinessProbe:
+        startupProbe:
           httpGet:
-            path: /orchestrator/health
+            path: /health
             port: 8000
             scheme: HTTP
           initialDelaySeconds: 5
-          timeoutSeconds: 3
+          timeoutSeconds: 5
           periodSeconds: 5
-          failureThreshold: 3
+          failureThreshold: 12
           successThreshold: 1
         livenessProbe:
           httpGet:
             path: /health
             port: 8000
             scheme: HTTP
-          initialDelaySeconds: 10
-          timeoutSeconds: 3
-          periodSeconds: 5
-          failureThreshold: 6
+          initialDelaySeconds: 0
+          timeoutSeconds: 5
+          periodSeconds: 10
+          failureThreshold: 3
           successThreshold: 1
-        startupProbe:
+        readinessProbe:
           httpGet:
-            path: /health
+            path: /orchestrator/health
             port: 8000
             scheme: HTTP
-          initialDelaySeconds: 10
-          timeoutSeconds: 3
+          initialDelaySeconds: 0
+          timeoutSeconds: 5
           periodSeconds: 5
-          failureThreshold: 30
+          failureThreshold: 2
           successThreshold: 1

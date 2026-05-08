@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: clickhouse-users-settings
+  namespace: logging
+data:
+  10-settings.xml: "<?xml version=\"1.0\"?>\n<clickhouse>\n  <profiles>\n    <default>\n\
+    \      <max_memory_usage>12Gi</max_memory_usage>\n      <max_memory_usage_for_user>8Gi</max_memory_usage_for_user>\n\
+    \      <max_threads>2</max_threads>\n      <background_pool_size>2</background_pool_size>\n\
+    \    </default>\n  </profiles>\n</clickhouse>"

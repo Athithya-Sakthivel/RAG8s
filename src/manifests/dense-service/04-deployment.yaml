@@ -51,7 +51,7 @@ spec:
         - name: DENSE_CUDA
           value: '0'
         - name: PRELOAD_MODEL
-          value: '0'
+          value: '1'
         livenessProbe:
           httpGet:
             path: /health

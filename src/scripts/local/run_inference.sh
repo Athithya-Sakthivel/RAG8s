@@ -1,0 +1,63 @@
+
+export CLOUDFLARE_ACCOUNT_ID=$CLOUDFLARE_ACCOUNT_I
+export CLOUDFLARE_GLOBAL_API_KEY=$CLOUDFLARE_GLOBAL_API_KEY
+export CLOUDFLARE_EMAIL="athithya651@gmail.com"
+export TF_VAR_account_id="$CLOUDFLARE_ACCOUNT_ID"
+export TF_VAR_domain="athithya.site"
+export TF_VAR_zone_id=$(curl -s -H "X-Auth-Key: $CLOUDFLARE_GLOBAL_API_KEY" -H "X-Auth-Email: $CLOUDFLARE_EMAIL" "https://api.cloudflare.com/client/v4/zones?name=${TF_VAR_domain}" | jq -r '.result[0].id')
+bash src/infra/terraform/cloudflare/run.sh --apply
+# login to cloudflare
+
+
+
+export DENSE_MODEL_NAME=BAAI/bge-small-en-v1.5
+export DENSE_DIM=384
+export DENSE_BATCH_SIZE=16 # upper bound
+python3 src/infra/rag/dense_service.py --rollout
+
+export SPARSE_MODEL_NAME=Qdrant/minicoil-v1
+export SPARSE_BATCH_SIZE=16 # upper bound
+python3 src/infra/rag/sparse_service.py --rollout
+
+export RERANKER_MODEL_NAME=Xenova/ms-marco-MiniLM-L-6-v2
+export RERANKER_MAX_DOCS=20 # upper bound
+python3 src/infra/rag/reranker_service.py --rollout
+
+
+python3 src/infra/rag/qdrant_service.py --rollout
+export PER_POD=true
+export QDRANT_BACKUP_S3_PREFIX=qdrant/backups/
+export BACKUP_S3_BUCKET=$DATA_S3_BUCKET
+bash src/scripts/backups_and_restore.sh restore
+
+
+python3 src/infra/rag/retriever_service.py --apply-secrets
+python3 src/infra/rag/retriever_service.py --write
+kubectl apply -f src/manifests/retriever
+
+kubectl delete -f src/manifests/cloudflared || true
+export CLOUDFLARE_TUNNEL_TOKEN="$(tofu -chdir=src/infra/terraform/cloudflare output -raw cloudflare_tunnel_token)"
+export CLOUDFLARE_TUNNEL_NAME="$(tofu -chdir=src/infra/terraform/cloudflare output -raw cloudflare_tunnel_name)"
+export CLOUDFLARE_SECRET_NAME="cloudflared-token"
+export CLOUDFLARE_SECRET_KEY="token"
+export DOMAIN="athithya.site"
+python3 src/infra/network/cloudflared_setup.py --write
+kubectl apply -f /workspace/src/manifests/cloudflared
+
+
+bash src/infra/core/valkey_service.sh
+export VALKEY_URL="redis://:$(kubectl -n valkey get secret valkey-auth -o jsonpath='{.data.VALKEY_PASSWORD}' | base64 -d)@valkey.valkey.svc.cluster.local:6379"
+export FRONTEND_HOSTNAME=athithya.site
+kubectl delete -f src/manifests/frontend || true
+python3 src/infra/rag/spa_service.py --apply-secrets
+python3 src/infra/rag/spa_service.py --write
+python3 src/infra/rag/spa_service.py --apply
+
+
+sleep 5
+find src/manifests -name "00-namespace.yaml" -delete || true
+sleep 5
+bash src/infra/core/argo_setup.sh --rollout
+kubectl apply -f src/argocd
+git add . && git commit -m "argocd full sync" && git push origin main
+

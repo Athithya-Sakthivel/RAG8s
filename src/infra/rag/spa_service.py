@@ -13,9 +13,7 @@ included when USE_IAM=false.  When USE_IAM=true the service account
 receives an IRSA annotation and the Pod gets an IRSA_ROLE_ARN env var.
 
 """
-
 from __future__ import annotations
-
 import argparse
 import hashlib
 import json
@@ -65,9 +63,9 @@ DEFAULTS: dict[str, Any] = {
     "ALLOW_PRIV_ESC": False,
     "READONLY_ROOTFS": True,
     "SERVICE_TYPE": "ClusterIP",
-    # Probes – tuned for single-node clusters
-    "PROBE_TIMEOUT_SECONDS": 5,          # was 3
-    "STARTUP_FAILURE_THRESHOLD": 12,     # 12 * 5s = 60s grace
+    # Probes – robust for single-node clusters
+    "PROBE_TIMEOUT_SECONDS": 5,
+    "STARTUP_FAILURE_THRESHOLD": 12,     # 60s grace
     "LIVENESS_PERIOD_SECONDS": 10,
     "LIVENESS_FAILURE_THRESHOLD": 3,
     "READINESS_PERIOD_SECONDS": 5,
@@ -77,10 +75,10 @@ DEFAULTS: dict[str, Any] = {
     "PROMETHEUS_PATH": "/metrics",
     "USE_IAM": False,
     "IRSA_ROLE_ARN": "",
-    # Auth & domain
+    # Auth toggles – Google enabled by default, credentials must be supplied
     "ENABLE_GOOGLE_AUTH": True,
     "REQUIRE_AUTH": True,
-    "FRONTEND_HOSTNAME": "athithya.site",
+    "FRONTEND_HOSTNAME": "athithya.site",  # override via env
 }
 
 # Sensitive keys that will be stored in the cluster Secret (never on disk)
@@ -101,6 +99,13 @@ AUTO_GENERATED_KEYS = ("SESSION_SECRET", "JWT_PRIVATE_KEY_PEM")
 
 # AWS credential keys (only included when USE_IAM=false)
 AWS_CRED_KEYS = ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY")
+
+# Map of required secret keys when a provider is enabled
+PROVIDER_REQUIRED_SECRETS = {
+    "google": ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"),
+    "microsoft": ("MS_CLIENT_ID", "MS_CLIENT_SECRET"),
+    "github": ("GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET"),
+}
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -172,10 +177,7 @@ def _auto_generate_missing_keys(
     namespace: str,
     secret_name: str,
 ) -> None:
-    """
-    Ensure SESSION_SECRET and JWT_PRIVATE_KEY_PEM exist.
-    Look up existing cluster secret first; if missing, generate and add.
-    """
+    """Ensure SESSION_SECRET and JWT_PRIVATE_KEY_PEM exist."""
     existing = _get_existing_secret_data(namespace, secret_name) or {}
 
     if "SESSION_SECRET" not in secret_env or not secret_env["SESSION_SECRET"]:
@@ -195,12 +197,45 @@ def _auto_generate_missing_keys(
                 format=serialization.PrivateFormat.TraditionalOpenSSL,
                 encryption_algorithm=serialization.NoEncryption(),
             )
-            pem = pem_bytes.decode("utf-8")  # real newlines
+            pem = pem_bytes.decode("utf-8")
             secret_env["JWT_PRIVATE_KEY_PEM"] = pem
             log.info("Generated new JWT_PRIVATE_KEY_PEM")
 
 # ---------------------------------------------------------------------------
-# Configuration
+# Validation
+# ---------------------------------------------------------------------------
+def _validate_secrets(secret_env: dict[str, str], cfg: dict[str, Any]) -> None:
+    """
+    Check that enabled auth providers have their credentials.
+    Log warnings for missing credentials, and raise an error if
+    Google auth is explicitly enabled but credentials absent.
+    """
+    google_enabled = cfg.get("ENABLE_GOOGLE_AUTH", False)
+    has_google_id = bool(secret_env.get("GOOGLE_CLIENT_ID"))
+    has_google_secret = bool(secret_env.get("GOOGLE_CLIENT_SECRET"))
+
+    if google_enabled and not (has_google_id and has_google_secret):
+        log.error(
+            "Google auth is ENABLED but GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET is missing.\n"
+            "Please export GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET before running --apply-secrets."
+        )
+        # Do not abort; but the login page will show "No providers".
+        log.warning("Google login will NOT be available until credentials are provided.")
+
+    # Also warn for other providers (not blocking)
+    for provider, keys in PROVIDER_REQUIRED_SECRETS.items():
+        if provider == "google":
+            continue
+        # Only warn if the provider is enabled (which we might want to support later)
+        # For now, just check if credentials exist but provider is disabled (possible misconfig)
+        pass
+
+    # Check that VALKEY_URL is set (optional but important for rate limiting)
+    if not secret_env.get("VALKEY_URL"):
+        log.warning("VALKEY_URL is not set. Rate limiting will use in-memory fallback (not production-ready).")
+
+# ---------------------------------------------------------------------------
+# Configuration loading
 # ---------------------------------------------------------------------------
 MANIFESTS_DIR = Path("src/manifests/frontend")
 STATE_DIRNAME = ".state"
@@ -243,12 +278,11 @@ def load_config() -> dict[str, Any]:
     cfg["USE_IAM"] = _env_bool("USE_IAM", DEFAULTS["USE_IAM"])
     cfg["IRSA_ROLE_ARN"] = _env_str("IRSA_ROLE_ARN", DEFAULTS["IRSA_ROLE_ARN"])
 
-    # Auth & domain settings
+    # Auth & domain
     cfg["ENABLE_GOOGLE_AUTH"] = _env_bool("ENABLE_GOOGLE_AUTH", DEFAULTS["ENABLE_GOOGLE_AUTH"])
     cfg["REQUIRE_AUTH"] = _env_bool("REQUIRE_AUTH", DEFAULTS["REQUIRE_AUTH"])
     cfg["FRONTEND_HOSTNAME"] = _env_str("FRONTEND_HOSTNAME", DEFAULTS["FRONTEND_HOSTNAME"])
 
-    # No 02-secret.yaml anymore
     cfg["FILES"] = {
         "serviceaccount": cfg["MANIFESTS_DIR"] / "01-serviceaccount.yaml",
         "deployment": cfg["MANIFESTS_DIR"] / "03-deployment.yaml",
@@ -257,11 +291,10 @@ def load_config() -> dict[str, Any]:
     }
     cfg["UUID_SHORT"] = str(uuid.uuid4())[:8]
     log.info(
-        "Loaded config: namespace=%s deployment=%s replicas=%d image=%s google_auth=%s require_auth=%s frontend_hostname=%s",
+        "Loaded config: namespace=%s deployment=%s replicas=%d google_auth=%s require_auth=%s frontend_hostname=%s",
         cfg["NAMESPACE"],
         cfg["DEPLOYMENT_NAME"],
         cfg["REPLICAS"],
-        cfg["IMAGE"],
         cfg["ENABLE_GOOGLE_AUTH"],
         cfg["REQUIRE_AUTH"],
         cfg["FRONTEND_HOSTNAME"],
@@ -307,7 +340,6 @@ def collect_user_secrets() -> dict[str, str]:
     return env
 
 def _aws_cred_env() -> dict[str, str]:
-    """Return AWS creds if set in the environment."""
     creds = {}
     for key in AWS_CRED_KEYS:
         value = os.getenv(key, "").strip()
@@ -316,7 +348,7 @@ def _aws_cred_env() -> dict[str, str]:
     return creds
 
 # ---------------------------------------------------------------------------
-# Manifest builders (no secret manifest)
+# Manifest builders
 # ---------------------------------------------------------------------------
 def build_service_account_doc(cfg: dict[str, Any]) -> dict[str, Any]:
     metadata = {
@@ -343,12 +375,10 @@ def build_deployment_doc(cfg: dict[str, Any], has_secret: bool) -> dict[str, Any
         {"name": "LOG_LEVEL", "value": "INFO"},
         {"name": "ENABLE_PROMETHEUS", "value": str(cfg["ENABLE_PROMETHEUS"]).lower()},
         {"name": "PROMETHEUS_PATH", "value": cfg["PROMETHEUS_PATH"]},
-        # Auth toggles
         {"name": "REQUIRE_AUTH", "value": str(cfg.get("REQUIRE_AUTH", True)).lower()},
         {"name": "ENABLE_GOOGLE_AUTH", "value": str(cfg.get("ENABLE_GOOGLE_AUTH", True)).lower()},
         {"name": "ENABLE_MICROSOFT_AUTH", "value": "false"},
         {"name": "ENABLE_GITHUB_AUTH", "value": "false"},
-        # UI settings
         {"name": "DISPLAY_SOURCES_IN_UI", "value": "true"},
         {"name": "DISPLAY_TOPK_IN_UI", "value": "true"},
         {"name": "USE_IAM", "value": str(cfg["USE_IAM"]).lower()},
@@ -366,7 +396,7 @@ def build_deployment_doc(cfg: dict[str, Any], has_secret: bool) -> dict[str, Any
         {"name": "JWT_TTL_SECONDS", "value": "900"},
         {"name": "JWT_CLOCK_SKEW_SECONDS", "value": "90"},
         {"name": "JWT_KID", "value": "production-key-1"},
-        # OAuth domain restrictions (empty = allow all)
+        # OAuth domain restrictions
         {"name": "GOOGLE_ALLOWED_DOMAINS", "value": ""},
         {"name": "MICROSOFT_ALLOWED_DOMAINS", "value": ""},
         {"name": "MICROSOFT_ALLOWED_TENANT_IDS", "value": ""},
@@ -377,7 +407,7 @@ def build_deployment_doc(cfg: dict[str, Any], has_secret: bool) -> dict[str, Any
         {"name": "RETRIEVER_URL", "value": "http://retriever.inference.svc.cluster.local:8001"},
         {"name": "GENERATE_STREAM_PATH", "value": "/generate/stream"},
         {"name": "UPSTREAM_TIMEOUT_SECONDS", "value": "60"},
-        # Valkey / Redis
+        # Valkey host/port (actual URL comes from Secret)
         {"name": "VALKEY_SERVICE_HOST", "value": "valkey.valkey.svc.cluster.local"},
         {"name": "VALKEY_SERVICE_PORT", "value": "6379"},
     ]
@@ -407,7 +437,7 @@ def build_deployment_doc(cfg: dict[str, Any], has_secret: bool) -> dict[str, Any
             "requests": {"cpu": cfg["CPU_REQUEST"], "memory": cfg["MEMORY_REQUEST"]},
             "limits": {"cpu": cfg["CPU_LIMIT"], "memory": cfg["MEMORY_LIMIT"]},
         },
-        # Fixed probes – startup, then liveness + readiness
+        # Fixed probes: startup protects liveness/readiness
         "startupProbe": _probe_http(
             "/health",
             cfg["CONTAINER_PORT"],
@@ -479,6 +509,7 @@ def build_service_doc(cfg: dict[str, Any]) -> dict[str, Any]:
             "labels": _base_labels(cfg),
         },
         "spec": {
+            "clusterIP": "None",  # headless — bypasses kube-proxy for direct pod access
             "type": cfg["SERVICE_TYPE"],
             "selector": {
                 "app.kubernetes.io/name": cfg["SERVICE_NAME"],
@@ -495,7 +526,7 @@ def build_service_doc(cfg: dict[str, Any]) -> dict[str, Any]:
             ],
         },
     }
-
+    
 def build_pdb_doc(cfg: dict[str, Any]) -> dict[str, Any] | None:
     if cfg["REPLICAS"] < 2:
         return None
@@ -546,7 +577,6 @@ def create_namespace_if_missing(namespace: str) -> None:
         subprocess.run(["kubectl", "create", "ns", namespace], check=True, capture_output=True)
 
 def apply_secret_direct(cfg: dict[str, Any], secret_data: dict[str, str]) -> None:
-    """Apply secret directly to cluster, preserving JWT_PRIVATE_KEY_PEM newlines."""
     if not secret_data:
         log.info("No secret values; skipping.")
         return
@@ -599,18 +629,15 @@ def generate_manifests(
     dry_run: bool = False,
     verbose: bool = False,
 ) -> str | None:
-    """Write non‑secret manifests to disk."""
     manifests_dir: Path = cfg["MANIFESTS_DIR"]
     ensure_dir(manifests_dir)
 
-    # Determine if we have a secret to mount
     secret_for_yaml = {
         k: v for k, v in secret_env.items()
         if k not in AUTO_GENERATED_KEYS or k == "JWT_PRIVATE_KEY_PEM"
     }
     has_secret = bool(secret_for_yaml)
 
-    # Build manifests
     sa_doc = build_service_account_doc(cfg)
     dep_doc = build_deployment_doc(cfg, has_secret=has_secret)
     svc_doc = build_service_doc(cfg)
@@ -656,14 +683,12 @@ def generate_manifests(
     return inputs_hash
 
 def apply_to_cluster(cfg: dict[str, Any], dry_run: bool = False) -> None:
-    """Write manifests and apply them, plus create the Secret."""
     if not shutil.which("kubectl"):
         log.error("kubectl not found; aborting.")
         raise SystemExit(2)
 
     use_iam = bool(cfg["USE_IAM"])
 
-    # Assemble secrets
     secret_env = collect_user_secrets()
     _auto_generate_missing_keys(secret_env, cfg["NAMESPACE"], cfg["SECRET_NAME"])
 
@@ -672,17 +697,17 @@ def apply_to_cluster(cfg: dict[str, Any], dry_run: bool = False) -> None:
         if aws:
             secret_env.update(aws)
 
-    # Warn if Google auth is enabled but no credentials
-    if cfg["ENABLE_GOOGLE_AUTH"] and (not secret_env.get("GOOGLE_CLIENT_ID") or not secret_env.get("GOOGLE_CLIENT_SECRET")):
-        log.warning("Google auth is enabled but GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET are missing. Google login will be unavailable.")
+    # Validate secrets before proceeding
+    _validate_secrets(secret_env, cfg)
 
+    # Generate manifests
     generate_manifests(cfg, secret_env, dry_run=dry_run)
 
     if dry_run:
         log.info("Dry-run requested; skipping apply.")
         return
 
-    # Apply secret
+    # Apply secret directly
     if secret_env:
         try:
             create_namespace_if_missing(cfg["NAMESPACE"])
@@ -704,15 +729,14 @@ def apply_to_cluster(cfg: dict[str, Any], dry_run: bool = False) -> None:
         raise SystemExit(2) from None
 
     log.info("Manifests and secrets applied successfully.")
-    # Print redirect URI hint
     if cfg.get("FRONTEND_HOSTNAME"):
         log.info(
-            "Google OAuth redirect URI: https://%s/auth/callback/google",
+            "Google OAuth redirect URI (register this in Google Cloud Console):\n"
+            "  https://%s/auth/callback/google",
             cfg["FRONTEND_HOSTNAME"],
         )
 
 def apply_secrets_only(cfg: dict[str, Any], dry_run: bool = False) -> int:
-    """Apply only the Secret (no manifests)."""
     if not shutil.which("kubectl"):
         log.error("kubectl not found.")
         return 2
@@ -725,8 +749,7 @@ def apply_secrets_only(cfg: dict[str, Any], dry_run: bool = False) -> int:
         if aws:
             secret_env.update(aws)
 
-    if cfg["ENABLE_GOOGLE_AUTH"] and (not secret_env.get("GOOGLE_CLIENT_ID") or not secret_env.get("GOOGLE_CLIENT_SECRET")):
-        log.warning("Google auth is enabled but credentials missing.")
+    _validate_secrets(secret_env, cfg)
 
     if not secret_env:
         log.warning("No secret values found; nothing to apply.")

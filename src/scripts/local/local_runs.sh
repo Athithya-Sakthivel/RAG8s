@@ -4,16 +4,6 @@ aws s3 rm s3://s3-temp-bucket-mlsecops-681802563986/ --recursive
 python3 src/scripts/local/force_sync_s3_local_fs.py --upload
 
 
-python3 src/infra/rag/qdrant_service.py --write
-
-export DENSE_MODEL_NAME=BAAI/bge-small-en-v1.5
-export DENSE_DIM=384
-export DENSE_BATCH_SIZE=64 # upper bound
-python3 src/infra/rag/dense_service.py --rollout
-
-export SPARSE_MODEL_NAME=Qdrant/minicoil-v1
-export SPARSE_BATCH_SIZE=64 # upper bound
-python3 src/infra/rag/sparse_service.py --rollout
 
 
 kubectl delete jobs indexing-backup-manual -n indexing || true
@@ -23,17 +13,8 @@ kubectl get jobs -n indexing
 
 sleep 3600
 
-kubectl delete ns qdrant
-python3 src/infra/rag/qdrant_service.py --rollout
-export PER_POD=true
-export QDRANT_BACKUP_S3_PREFIX=qdrant/backups/
-export BACKUP_S3_BUCKET=$DATA_S3_BUCKET
-bash src/scripts/backups_and_restore.sh restore
 
 
-export RERANKER_MODEL_NAME=Xenova/ms-marco-MiniLM-L-6-v2
-export RERANKER_MAX_DOCS=20 # upper bound
-python3 src/infra/rag/reranker_service.py --rollout
 
 kubectl port-forward -n inference svc/dense-svc 8200:8200 &
 kubectl port-forward -n inference svc/sparse-svc 8201:8201 &
@@ -99,25 +80,20 @@ export PER_POD=true
 export QDRANT_BACKUP_S3_PREFIX=qdrant/backups/
 export BACKUP_S3_BUCKET=$DATA_S3_BUCKET
 aws s3 rm s3://s3-temp-bucket-mlsecops-681802563986/postgres_backups --recursive
-export K8S_CLUSTER=kind
-export PG_BACKUPS_S3_BUCKET=s3-temp-bucket-mlsecops-681802563986
-export PG_CLUSTER_ID=cnpg-cluster-kind
-export PG_SERVER_NAME=mlsecops
-make pg-cluster
-bash src/scripts/backups_and_restore.sh restore # restores latest by default
-export SIGNOZ_JWT_SECRET="YourStrongJWTSecretHere"
 
-python3 src/infra/rag/reranker_service.py --write
-python3 src/infra/rag/sparse_service.py --generate
-python3 src/infra/rag/dense_service.py --dry-run
-kubectl apply -f src/manifests/dense-service
-kubectl apply -f src/manifests/sparse-service
-kubectl apply -f src/manifests/reranker-service
+
+
+
+
+
 
 
 python3 src/infra/rag/retriever_service.py --apply-secrets
 python3 src/infra/rag/retriever_service.py --write
 kubectl apply -f src/manifests/retriever
+
+
+
 
 
 kubectl delete -f src/manifests/cloudflared
@@ -129,7 +105,7 @@ export DOMAIN="athithya.site"
 python3 src/infra/network/cloudflared_setup.py --write
 kubectl apply -f /workspace/src/manifests/cloudflared
 
-
+bash src/infra/core/valkey_service.sh
 export VALKEY_URL="redis://:$(kubectl -n valkey get secret valkey-auth -o jsonpath='{.data.VALKEY_PASSWORD}' | base64 -d)@valkey.valkey.svc.cluster.local:6379"
 export FRONTEND_HOSTNAME=athithya.site
 kubectl delete -f src/manifests/frontend || true
@@ -142,7 +118,6 @@ sleep 5
 find src/manifests -name "00-namespace.yaml" -delete || true
 sleep 5
 bash src/infra/core/argo_setup.sh --rollout
-kubectl create ns argocd || true && bash src/infra/core/signoz_setup.sh --apply-secrets
 git add . && git commit -m "new" && git push origin main
 
 # kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d

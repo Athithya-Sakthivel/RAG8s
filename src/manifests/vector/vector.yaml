@@ -1,0 +1,173 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: inference
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vector
+  namespace: inference
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: vector-log-reader
+rules:
+- apiGroups:
+  - ''
+  resources:
+  - pods
+  - pods/log
+  - namespaces
+  - nodes
+  verbs:
+  - get
+  - list
+  - watch
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: vector-log-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: vector-log-reader
+subjects:
+- kind: ServiceAccount
+  name: vector
+  namespace: inference
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vector-config
+  namespace: inference
+data:
+  vector.toml: "    data_dir = \"/var/lib/vector\"\n\n    [api]\n    enabled = true\n\
+    \    address = \"0.0.0.0:8686\"\n    playground = false\n\n    [sources.kube_logs]\n\
+    \    type = \"kubernetes_logs\"\n    auto_partial_merge = true\n\n    [sources.internal_metrics]\n\
+    \    type = \"internal_metrics\"\n\n    [transforms.normalize]\n    type = \"\
+    remap\"\n    inputs = [\"kube_logs\"]\n    source = \"\"\"\n    # Parse the JSON\
+    \ log line emitted by the application\n    parsed = parse_json(.message) ?? {}\n\
+    \n    # --- Timestamp ---\n    if exists(parsed.timestamp) {\n      .ts = parse_timestamp(parsed.timestamp,\
+    \ format: \"%+\") ?? now()\n    } else {\n      .ts = now()\n    }\n\n    # ---\
+    \ Level ---\n    .level = \"INFO\"\n    if exists(parsed.level) && is_string(parsed.level)\
+    \ {\n      lvl = downcase(parsed.level) ?? \"info\"\n      if lvl == \"debug\"\
+    \ { .level = \"DEBUG\" }\n      else if lvl == \"info\"  { .level = \"INFO\" }\n\
+    \      else if lvl == \"warn\" || lvl == \"warning\" { .level = \"WARN\" }\n \
+    \     else if lvl == \"error\" { .level = \"ERROR\" }\n    }\n\n    # --- Message\
+    \ ---\n    if exists(parsed.message) && is_string(parsed.message) {\n      .message\
+    \ = parsed.message\n    } else {\n      .message = .message ?? \"\"\n    }\n\n\
+    \    # --- Service name ---\n    if exists(parsed.service) && is_string(parsed.service)\
+    \ {\n      .service = parsed.service\n    } else if exists(.kubernetes.labels.app)\
+    \ {\n      .service = .kubernetes.labels.app\n    } else {\n      .service = .kubernetes.container_name\
+    \ ?? \"\"\n    }\n\n    # --- Pod & Container ---\n    .pod       = .kubernetes.pod_name\
+    \       ?? \"\"\n    .container = .kubernetes.container_name ?? \"\"\n\n    #\
+    \ --- Namespace ---\n    .namespace = .kubernetes.pod_namespace ?? \"\"\n\n  \
+    \  # --- Trace context (pass through) ---\n    .trace_id = parsed.trace_id ??\
+    \ \"\"\n    .span_id  = parsed.span_id  ?? \"\"\n\n    # --- Extra fields as JSON\
+    \ string ---\n    .fields = encode_json(parsed)\n\n    # --- Drop excluded namespaces\
+    \ ---\n    drop_namespaces = [\"kube-system\", \"cert-manager\", \"monitoring\"\
+    ]\n    if .namespace != \"\" {\n      for_each(drop_namespaces) -> |_, v| {\n\
+    \        if v == .namespace { abort }\n      }\n    }\n\"\"\"\n\n    [sinks.clickhouse]\n\
+    \    type = \"clickhouse\"\n    inputs = [\"normalize\"]\n    endpoint = \"http://clickhouse.inference.svc.cluster.local:8123\"\
+    \n    database = \"logs\"\n    table = \"inference_logs\"\n    format = \"json_each_row\"\
+    \n    compression = \"gzip\"\n    skip_unknown_fields = true\n\n    [sinks.clickhouse.auth]\n\
+    \    strategy = \"basic\"\n    user = \"vector\"\n    password = \"vectorpass\"\
+    \n\n    [sinks.clickhouse.batch]\n    max_events = 200\n    timeout_secs = 2.0\n\
+    \n    [sinks.clickhouse.healthcheck]\n    enabled = true\n\n    [sinks.prometheus_exporter]\n\
+    \    type = \"prometheus_exporter\"\n    inputs = [\"internal_metrics\"]\n   \
+    \ address = \"0.0.0.0:9598\"\n"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vector-metrics
+  namespace: inference
+  labels:
+    app: vector
+spec:
+  selector:
+    app: vector
+  ports:
+  - name: metrics
+    port: 9598
+    targetPort: 9598
+  type: ClusterIP
+
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: vector
+  namespace: inference
+spec:
+  selector:
+    matchLabels:
+      app: vector
+  template:
+    metadata:
+      labels:
+        app: vector
+      annotations:
+        vector/config-checksum: 6682f7b066665bdc3ccbfbcf3199be32aae8b1ee53f33a0ce9c3d4eea1794f93
+    spec:
+      serviceAccountName: vector
+      volumes:
+      - name: config
+        configMap:
+          name: vector-config
+      - name: data
+        hostPath:
+          path: /var/lib/vector
+          type: DirectoryOrCreate
+      - name: pod-logs
+        hostPath:
+          path: /var/log/pods
+          type: DirectoryOrCreate
+      containers:
+      - name: vector
+        image: timberio/vector:0.52.0-distroless-static
+        args:
+        - --config
+        - /etc/vector/vector.toml
+        ports:
+        - name: metrics
+          containerPort: 9598
+        volumeMounts:
+        - name: config
+          mountPath: /etc/vector
+          readOnly: true
+        - name: data
+          mountPath: /var/lib/vector
+        - name: pod-logs
+          mountPath: /var/log/pods
+          readOnly: true
+        env:
+        - name: VECTOR_SELF_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 65534
+          runAsGroup: 65534
+          capabilities:
+            drop:
+            - ALL

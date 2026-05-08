@@ -21,11 +21,11 @@ from typing import Dict, Any, List, Optional
 import yaml
 
 # ── Configuration (environment overrides) ─────────────────
-NAMESPACE         = os.getenv("CH_NAMESPACE", "inference")
+NAMESPACE         = os.getenv("CH_NAMESPACE", "logging")
 SERVICE_NAME      = os.getenv("CLICKHOUSE_SERVICE_NAME", "clickhouse")
 STS_NAME          = os.getenv("CLICKHOUSE_STS_NAME", "clickhouse")
 APP_LABEL         = os.getenv("CLICKHOUSE_APP_LABEL", "clickhouse")
-IMAGE             = os.getenv("CLICKHOUSE_IMAGE", "clickhouse/clickhouse-server:23.12.6")
+IMAGE             = os.getenv("CLICKHOUSE_IMAGE", "clickhouse/clickhouse-server:23.12.6@sha256:05c61b64b223582049b571401ce93c4de1c985f452977de195a6a13acb87ec9c")
 PVC_SIZE          = os.getenv("CLICKHOUSE_PVC_SIZE", "10Gi")
 STORAGE_CLASS     = os.getenv("CLICKHOUSE_STORAGE_CLASS", "default-storage-class")
 DB_NAME           = os.getenv("CLICKHOUSE_DB", "logs")
