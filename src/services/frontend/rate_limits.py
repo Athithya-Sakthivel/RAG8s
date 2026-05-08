@@ -1,3 +1,4 @@
+# rate_limits.py
 from __future__ import annotations
 
 from typing import Any
@@ -12,15 +13,11 @@ from fastapi import FastAPI, Request
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_ipaddr
-import logging
 
-logger = logging.getLogger(__name__)
+from frontend_logger import log
 
 if not VALKEY_URL:
-    logger.warning("VALKEY_URL is not set. Rate limiting will use in-memory fallback (not suitable for multi-replica).")
-
-def _path(request: Request) -> str:
-    return (request.url.path or "").rstrip("/")
+    log.warn("VALKEY_URL is not set. Rate limiting will use in-memory fallback.")
 
 
 def _state_value(request: Request, *names: str) -> Any:
@@ -90,8 +87,8 @@ class limits:
 
     auth_login    = "10/minute"
     auth_start    = "5/minute"
-    auth_callback = "10/minute"
-    auth_logout   = "10/minute"
+    auth_callback = "20/minute"
+    auth_logout   = "20/minute"
 
 
 def generate_stream_concurrency_limit() -> int:

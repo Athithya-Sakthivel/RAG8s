@@ -4,7 +4,7 @@ metadata:
   name: retriever
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "1"   # after qdrant
+    argocd.argoproj.io/sync-wave: "1"   # after qdrant 
 spec:
   project: default
   source:

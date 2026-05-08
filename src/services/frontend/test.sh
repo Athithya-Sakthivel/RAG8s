@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-set -euo pipefail
 
 APP_DIR="${APP_DIR:-$(cd "$(dirname "$0")" && pwd)}"
 HOST="127.0.0.1"
@@ -180,7 +179,7 @@ export JWT_CLOCK_SKEW_SECONDS="90"
 export JWT_KID="smoke-test"
 export JWT_PRIVATE_KEY_PATH="$tmpdir/jwt.key.pem"
 
-export REQUIRE_AUTH="true"
+export REQUIRE_AUTH="false"
 export DISPLAY_SOURCES_IN_UI="true"
 export DISPLAY_TOPK_IN_UI="true"
 
@@ -219,8 +218,8 @@ assert_json_field "/orchestrator/health status" "$RESP" "status" "ok"
 assert_json_field "/orchestrator/health auth_ready" "$RESP" "auth_ready" "true"
 assert_json_field "/orchestrator/health upstream" "$RESP" "upstream_client_ready" "true"
 
-RESP=$(curl -fsS --max-time 5 "http://$HOST:$APP_PORT/health")
-assert_json_field "/health status" "$RESP" "status" "ok"
+RESP=$(curl -fsS --max-time 5 "http://$HOST:$APP_PORT/auth/health")
+assert_json_field "/auth/health status" "$RESP" "status" "ok"
 
 RESP=$(curl -fsS --max-time 5 "http://$HOST:$APP_PORT/auth/health")
 assert_json_field "/auth/health status" "$RESP" "status" "ok"

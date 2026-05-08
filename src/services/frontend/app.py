@@ -1,3 +1,4 @@
+# app.py
 from __future__ import annotations
 
 import asyncio
@@ -29,6 +30,8 @@ from config import (
     USE_UVLOOP,
     has_jwt_signing_material,
     enabled_providers_effective,
+    ENABLE_PRESIGNED_URLS,
+    PRESIGNED_URL_TTL_SECONDS,
 )
 from rate_limits import (
     generate_stream_concurrency_limit,
@@ -37,14 +40,14 @@ from rate_limits import (
     limits,
     verified_subject,
 )
-from telemetry import (
-    install_metrics,
-    log,
+from frontend_logger import log, setup_logging
+from metrics import (
     observe_request,
-    record_upstream_stream_error,
-    set_ready,
     track_active,
     untrack_active,
+    record_upstream_stream_error,
+    set_ready,
+    install_metrics,
 )
 
 SERVICE_NAME = (os.getenv("SERVICE_NAME") or "frontend").strip()
@@ -70,6 +73,8 @@ except Exception as exc:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    setup_logging()
+
     timeout = httpx.Timeout(UPSTREAM_TIMEOUT_SECONDS, connect=10.0, write=10.0, pool=5.0)
     limits_cfg = httpx.Limits(max_connections=100, max_keepalive_connections=20, keepalive_expiry=30.0)
     app.state.http_client = httpx.AsyncClient(
@@ -82,16 +87,7 @@ async def lifespan(app: FastAPI):
     concurrency = max(1, limits.stream_concurrency if limits.stream_concurrency > 2 else 10)
     app.state.stream_semaphore = asyncio.Semaphore(concurrency)
 
-    # Graceful startup validation
-    if REQUIRE_AUTH:
-        if not has_jwt_signing_material():
-            log.warn("REQUIRE_AUTH is true but no JWT signing material; auth will fail")
-        if not SESSION_SECRET:
-            log.warn("REQUIRE_AUTH is true but SESSION_SECRET missing; OAuth flow will break")
-        if not enabled_providers_effective():
-            log.warn("REQUIRE_AUTH is true but no OAuth providers are enabled; users cannot log in")
-
-    set_ready(True, ENV)
+    set_ready(True)
     log.info(
         "service.startup",
         service=SERVICE_NAME,
@@ -108,7 +104,7 @@ async def lifespan(app: FastAPI):
         client = getattr(app.state, "http_client", None)
         if client is not None:
             await client.aclose()
-        set_ready(False, ENV)
+        set_ready(False)
         log.info("service.shutdown", service=SERVICE_NAME, env=ENV)
 
 
@@ -116,7 +112,7 @@ app = FastAPI(title="frontend", lifespan=lifespan, docs_url=None, redoc_url=None
 
 app.mount(STATIC_URL_PREFIX, StaticFiles(directory=str(STATIC_DIR)), name="static")
 app.mount("/auth", auth_mod.app)
-app.include_router(frontend_mod.app.router)
+app.include_router(frontend_mod.router)
 
 install_rate_limits(app)
 install_metrics(app)
@@ -150,6 +146,7 @@ async def auth_middleware(request: Request, call_next):
         path.startswith("/generate/stream")
         or path.startswith("/api/generate/stream")
         or path == "/auth/me"
+        or path == "/presign"
     ):
         auth = request.headers.get("authorization", "")
         if auth.lower().startswith("bearer "):
@@ -288,6 +285,32 @@ async def generate_stream(request: Request):
     sem: asyncio.Semaphore = request.app.state.stream_semaphore
     async with sem:
         return await _proxy_generate_stream(request)
+
+
+@app.post("/presign", include_in_schema=False)
+@limiter.limit("30/minute")
+async def presign_proxy(request: Request):
+    claims = getattr(request.state, "auth_claims", None)
+    if REQUIRE_AUTH and claims is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    target = "http://retriever.inference.svc.cluster.local:8001/presign"
+    headers = {"Content-Type": "application/json"}
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        headers["Authorization"] = auth
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.post(target, json=body, headers=headers)
+        if resp.status_code >= 400:
+            detail = resp.text
+            raise HTTPException(status_code=resp.status_code, detail=detail)
+        return JSONResponse(content=resp.json(), status_code=resp.status_code)
 
 
 @app.get("/.well-known/jwks.json", include_in_schema=False)

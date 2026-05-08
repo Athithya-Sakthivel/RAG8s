@@ -35,7 +35,7 @@ spec:
         emptyDir: {}
       containers:
       - name: retriever
-        image: ghcr.io/athithya-sakthivel/retriever:2026-05-05-21-31--396f167@sha256:5e2286908f064e5482bdc6f0cce2596a78d38c1e28472ac64d030306734b2c10
+        image: ghcr.io/athithya-sakthivel/retriever:2026-05-08-13-23--6141057@sha256:fa056fd6d0233fac2f92308fba1695e550af5d87b0fe53276bf2c0e70b96563b
         imagePullPolicy: Always
         ports:
         - name: http
@@ -68,6 +68,10 @@ spec:
           value: meta.llama3-8b-instruct-v1:0
         - name: COLLECTION_NAME
           value: default_rag_collection1
+        - name: ENABLE_PRESIGNED_URLS
+          value: 'true'
+        - name: PRESIGNED_URL_TTL_SECONDS
+          value: '1800'
         envFrom:
         - secretRef:
             name: retriever-secrets

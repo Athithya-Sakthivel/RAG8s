@@ -17,7 +17,7 @@ import shutil
 import subprocess
 import hashlib
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 import yaml
 
 # ── Configuration (environment overrides) ─────────────────
@@ -41,13 +41,11 @@ BG_POOL_SIZE      = os.getenv("CLICKHOUSE_BG_POOL_SIZE", "2")
 REQ_CPU           = os.getenv("CLICKHOUSE_REQ_CPU", "1")
 REQ_MEM           = os.getenv("CLICKHOUSE_REQ_MEM", "0.5Gi")
 LIMIT_CPU         = os.getenv("CLICKHOUSE_LIMIT_CPU", "4")
-LIMIT_MEM         = os.getenv("CLICKHOUSE_LIMIT_MEM", "16Gi")
+LIMIT_MEM         = os.getenv("CLICKHOUSE_LIMIT_MEM", "2Gi")
 INIT_TIMEOUT      = int(os.getenv("CLICKHOUSE_INIT_TIMEOUT", "300"))
 MANIFESTS_DIR     = os.getenv("CH_MANIFESTS_DIR", "src/manifests/clickhouse")
-STATE_DIR         = os.getenv("STATE_DIR", "infra/state")
 
 RENDER_DIR       = Path(MANIFESTS_DIR).resolve()
-STATE_PATH       = Path(STATE_DIR).resolve() / "clickhouse.json"
 INIT_SQL_PATH    = RENDER_DIR / "init.sql"
 USERS_XML_PATH   = RENDER_DIR / "users-settings.xml"
 
@@ -149,6 +147,7 @@ def build_statefulset() -> Dict[str, Any]:
         ],
         "volumeMounts":[
             {"name":"data","mountPath":"/var/lib/clickhouse"},
+            {"name":"clickhouse-logs","mountPath":"/var/log/clickhouse-server"},
             {"name":"users-config","mountPath":"/etc/clickhouse-server/users.d","readOnly":True},
         ],
         "resources":{
@@ -187,6 +186,7 @@ def build_statefulset() -> Dict[str, Any]:
                     "securityContext":{"fsGroup":101},
                     "containers":[container],
                     "volumes":[
+                        {"name":"clickhouse-logs","emptyDir":{}},
                         {"name":"users-config","configMap":{"name":f"{STS_NAME}-users-settings"}},
                     ],
                 },
@@ -213,8 +213,17 @@ def build_users_configmap() -> Dict[str, Any]:
     }
 
 # ── generate / apply ───────────────────────────────────
+def clean_manifest_dir() -> None:
+    """Remove all existing files in the manifest directory to avoid stale YAML."""
+    if RENDER_DIR.exists():
+        for f in RENDER_DIR.iterdir():
+            if f.is_file():
+                f.unlink()
+                print(f"  removed stale {f}")
+
 def generate_manifests():
     ensure_dir(RENDER_DIR)
+    clean_manifest_dir()
     atomic_write(RENDER_DIR/"00-namespace.yaml", yaml.safe_dump(build_namespace(), sort_keys=False))
     atomic_write(RENDER_DIR/"10-service.yaml", yaml.safe_dump(build_service(), sort_keys=False))
     atomic_write(RENDER_DIR/"20-configmap.yaml", yaml.safe_dump(build_users_configmap(), sort_keys=False))
@@ -232,14 +241,12 @@ def generate_manifests():
     print("[ok] manifests written to", RENDER_DIR)
 
 def apply_manifests():
-    ensure_kubectl = lambda: shutil.which("kubectl") or sys.exit("kubectl not found")
-    ensure_kubectl()
+    if not shutil.which("kubectl"):
+        sys.exit("kubectl not found")
     generate_manifests()
-    # namespace
     run(["kubectl","apply","-f",str(RENDER_DIR/"00-namespace.yaml")])
-    # configmap
     run(["kubectl","apply","-f",str(RENDER_DIR/"20-configmap.yaml")])
-    # secret (create/update)
+    # secret (create/update) – use subprocess list with shell=False
     secret_yaml = f"""apiVersion: v1
 kind: Secret
 metadata:
@@ -249,21 +256,17 @@ type: Opaque
 stringData:
   username: {VECTOR_USER}
   password: {VECTOR_PASS}"""
-    proc = subprocess.run(["kubectl","apply","-f","-"], input=secret_yaml, text=True, capture_output=True)
-    if proc.returncode != 0:
-        print("[warn] secret apply failed:", proc.stderr)
-    # service & statefulset
+    rc = subprocess.run(["kubectl","apply","-f","-"], input=secret_yaml, text=True, capture_output=True)
+    if rc.returncode != 0:
+        print("[warn] secret apply failed:", rc.stderr)
     run(["kubectl","apply","-f",str(RENDER_DIR/"10-service.yaml")])
     run(["kubectl","apply","-f",str(RENDER_DIR/"30-statefulset.yaml")])
-    # wait for rollout
     run(["kubectl","rollout","status",f"statefulset/{STS_NAME}","-n",NAMESPACE,f"--timeout={INIT_TIMEOUT}s"])
-    # get pod name
     rc = run(["kubectl","get","pods","-n",NAMESPACE,"-l",f"app={APP_LABEL}","-o","json"], timeout=10)
     pods = json.loads(rc["out"]).get("items",[])
     if not pods:
         raise SystemExit("no clickhouse pod found")
     pod = pods[0]["metadata"]["name"]
-    # wait for clickhouse to be ready
     for _ in range(INIT_TIMEOUT//2):
         r = run(["kubectl","exec","-n",NAMESPACE,pod,"--","clickhouse-client","--query","SELECT 1"], check=False, timeout=10)
         if r["rc"]==0 and "1" in r["out"]:
@@ -271,7 +274,6 @@ stringData:
         time.sleep(2)
     else:
         raise SystemExit("clickhouse not ready after timeout")
-    # run init SQL
     sql = init_sql().replace("'", "'\\''")
     run(["kubectl","exec","-n",NAMESPACE,pod,"--","bash","-c",f"clickhouse-client --multiquery --query '{sql}'"], timeout=60)
     print("[ok] clickhouse deployed and initialized")
@@ -285,9 +287,7 @@ def delete_manifests(confirm=False):
     run(["kubectl","delete","configmap",f"{STS_NAME}-users-settings","-n",NAMESPACE,"--ignore-not-found"])
     run(["kubectl","delete","secret",SECRET_NAME,"-n",NAMESPACE,"--ignore-not-found"])
     run(["kubectl","delete","namespace",NAMESPACE,"--ignore-not-found"])
-    for f in RENDER_DIR.glob("*"):
-        try: f.unlink()
-        except: pass
+    clean_manifest_dir()
     print("[ok] clickhouse resources deleted")
 
 # ── CLI ────────────────────────────────────────────────

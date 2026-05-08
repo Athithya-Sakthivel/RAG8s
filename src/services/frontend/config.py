@@ -1,3 +1,4 @@
+# config.py
 from __future__ import annotations
 
 import logging
@@ -5,12 +6,10 @@ import os
 
 logger = logging.getLogger("frontend.config")
 
-
 def parse_bool_env(value, default: bool = False) -> bool:
     if value is None:
         return default
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
-
 
 def parse_int_env(value, default: int) -> int:
     if value is None or str(value).strip() == "":
@@ -19,7 +18,6 @@ def parse_int_env(value, default: int) -> int:
         return int(str(value).strip())
     except Exception:
         return default
-
 
 def parse_list_env(value) -> list[str]:
     if not value:
@@ -30,7 +28,6 @@ def parse_list_env(value) -> list[str]:
         if item:
             items.append(item)
     return items
-
 
 def norm_url(value, default: str) -> str:
     if not value:
@@ -47,7 +44,6 @@ def norm_url(value, default: str) -> str:
             s = "https://" + s
     return s
 
-
 def norm_path(value, default: str) -> str:
     s = str(value).strip() if value else ""
     if not s:
@@ -56,9 +52,10 @@ def norm_path(value, default: str) -> str:
         s = "/" + s
     return s
 
-
 SERVICE_NAME = (os.getenv("SERVICE_NAME") or "frontend").strip()
 ENV = (os.getenv("ENV") or "STAGING").strip().upper()
+DEPLOYMENT_ENVIRONMENT = ENV
+LOG_LEVEL = (os.getenv("LOG_LEVEL") or "INFO").strip().upper()
 
 FRONTEND_HOSTNAME = (os.getenv("FRONTEND_HOSTNAME") or "").strip()
 DEFAULT_LOCAL = "http://127.0.0.1:8000"
@@ -149,7 +146,9 @@ JWT_PRIVATE_KEY_PATH = (os.getenv("JWT_PRIVATE_KEY_PATH") or "").strip()
 
 VALKEY_URL = (os.getenv("VALKEY_URL") or "").strip()
 
-# Rate limits
+ENABLE_PRESIGNED_URLS = parse_bool_env(os.getenv("ENABLE_PRESIGNED_URLS"), True)
+PRESIGNED_URL_TTL_SECONDS = parse_int_env(os.getenv("PRESIGNED_URL_TTL_SECONDS"), 3600)
+
 RATE_LIMIT_GENERATE_STREAM = (os.getenv("RATE_LIMIT_GENERATE_STREAM") or "5/minute").strip()
 RATE_LIMIT_AUTH_ME          = (os.getenv("RATE_LIMIT_AUTH_ME") or "20/minute").strip()
 RATE_LIMIT_STREAM_CONCURRENCY = parse_int_env(os.getenv("RATE_LIMIT_STREAM_CONCURRENCY"), 2)
@@ -159,27 +158,22 @@ UPSTREAM_PRESIGN_TIMEOUT_SECONDS = parse_int_env(os.getenv("UPSTREAM_PRESIGN_TIM
 
 USE_UVLOOP = parse_bool_env(os.getenv("USE_UVLOOP"), True)
 
-# Graceful Google auth disable if credentials missing
 if ENABLE_GOOGLE and (not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET):
     logger.warning("Google auth disabled because GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET is missing")
     ENABLE_GOOGLE = False
 
-
 def get_redirect(provider: str) -> str:
     p = (provider or "").strip().lower()
     base = EXTERNAL_BASE.rstrip("/")
-
     if p == "google" and GOOGLE_REDIRECT_URI:
         return GOOGLE_REDIRECT_URI
     if p == "microsoft" and MS_REDIRECT_URI:
         return MS_REDIRECT_URI
     if p == "github" and GITHUB_REDIRECT_URI:
         return GITHUB_REDIRECT_URI
-
     if base.endswith("/auth/callback"):
         return f"{base}/{p}"
     return f"{base}/auth/callback/{p}"
-
 
 def enabled_flags():
     return {
@@ -187,7 +181,6 @@ def enabled_flags():
         "microsoft": ENABLE_MICROSOFT,
         "github": ENABLE_GITHUB,
     }
-
 
 def enabled_providers_effective():
     out = []
@@ -199,14 +192,17 @@ def enabled_providers_effective():
         out.append("github")
     return out
 
-
 def has_jwt_signing_material() -> bool:
     return bool(JWT_PRIVATE_KEY_PEM or JWT_PRIVATE_KEY_PATH)
 
+# Fail-fast validation for production safety
+if REQUIRE_AUTH:
+    if not SESSION_SECRET:
+        raise RuntimeError("REQUIRE_AUTH is true but SESSION_SECRET is empty; cannot run.")
+    if not has_jwt_signing_material():
+        raise RuntimeError("REQUIRE_AUTH is true but no JWT signing material available; cannot run.")
+    if not enabled_providers_effective():
+        raise RuntimeError("REQUIRE_AUTH is true but no OAuth providers are enabled; cannot run.")
 
-# Runtime validations (after all definitions)
-if REQUIRE_AUTH and not SESSION_SECRET:
-    logger.warning("REQUIRE_AUTH is true but SESSION_SECRET is empty; OAuth flow will fail")
-
-if REQUIRE_AUTH and not has_jwt_signing_material():
-    logger.warning("REQUIRE_AUTH is true but no JWT signing material is available; tokens cannot be minted")
+if not VALKEY_URL:
+    raise RuntimeError("VALKEY_URL is required for rate limiting; set VALKEY_URL environment variable.")

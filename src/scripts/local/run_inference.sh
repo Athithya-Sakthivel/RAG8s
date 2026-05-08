@@ -30,10 +30,13 @@ export QDRANT_BACKUP_S3_PREFIX=qdrant/backups/
 export BACKUP_S3_BUCKET=$DATA_S3_BUCKET
 bash src/scripts/backups_and_restore.sh restore
 
-
+kubectl delete -f src/manifests/retriever
+sleep 5
 python3 src/infra/rag/retriever_service.py --apply-secrets
 python3 src/infra/rag/retriever_service.py --write
 kubectl apply -f src/manifests/retriever
+
+
 
 kubectl delete -f src/manifests/cloudflared || true
 export CLOUDFLARE_TUNNEL_TOKEN="$(tofu -chdir=src/infra/terraform/cloudflare output -raw cloudflare_tunnel_token)"
@@ -53,6 +56,14 @@ python3 src/infra/rag/spa_service.py --apply-secrets
 python3 src/infra/rag/spa_service.py --write
 python3 src/infra/rag/spa_service.py --apply
 
+
+python3 src/infra/observability/clickhouse.py --delete --confirm
+python3 src/infra/observability/clickhouse.py --rollout
+
+python3 src/infra/observability/vector.py --delete --confirm
+python3 src/infra/observability/vector.py --rollout
+sleep 5
+kubectl get pods -n logging
 
 sleep 5
 find src/manifests -name "00-namespace.yaml" -delete || true

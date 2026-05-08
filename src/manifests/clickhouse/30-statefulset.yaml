@@ -32,6 +32,8 @@ spec:
         volumeMounts:
         - name: data
           mountPath: /var/lib/clickhouse
+        - name: clickhouse-logs
+          mountPath: /var/log/clickhouse-server
         - name: users-config
           mountPath: /etc/clickhouse-server/users.d
           readOnly: true
@@ -70,6 +72,8 @@ spec:
           periodSeconds: 10
           timeoutSeconds: 3
       volumes:
+      - name: clickhouse-logs
+        emptyDir: {}
       - name: users-config
         configMap:
           name: clickhouse-users-settings
