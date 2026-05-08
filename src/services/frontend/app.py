@@ -328,6 +328,11 @@ async def login_redirect():
     return RedirectResponse(url="/auth/login", status_code=302)
 
 
+@app.get("/health", include_in_schema=False)
+async def health():
+    return {"status": "ok"}
+
+
 @app.get("/orchestrator/health", include_in_schema=False)
 async def orchestrator_health(request: Request):
     client_ready = bool(getattr(request.app.state, "http_client", None))
