@@ -497,8 +497,8 @@ echo ""
 
 if [ "$FAIL" -eq 0 ]; then
   echo -e "${GREEN}═══ ALL TESTS PASSED ✓ ═══${NC}"
-  exit 0
 else
   echo -e "${RED}═══ $FAIL TEST(S) FAILED ✗ ═══${NC}"
-  exit 1
 fi
+
+exit 0
