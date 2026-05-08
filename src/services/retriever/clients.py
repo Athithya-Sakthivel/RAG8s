@@ -15,7 +15,6 @@ import httpx
 import numpy as np
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError, EndpointConnectionError, ReadTimeoutError
-from prometheus_client import Counter, Histogram
 from settings import (
     DENSE_DIM,
     DEPLOYMENT_ENVIRONMENT,
@@ -28,12 +27,24 @@ from settings import (
     RETRY_MAX_DELAY,
     SERVICE_NAME,
 )
-from telemetry import log
+from retriever_logging import log
+from metrics import (
+    circuit_breaker_open,
+    retry_attempts,
+    dependency_errors,
+    dense_embed_requests,
+    dense_embed_duration,
+    sparse_embed_requests,
+    sparse_embed_duration,
+    rerank_requests,
+    rerank_duration,
+    llm_requests,
+    llm_duration,
+    _metric_labels,
+)
 
-logger = logging.getLogger("retrieval.clients")
 T = TypeVar("T")
 
-# Request ID context – set by middleware and propagated to downstream services
 _request_id_ctx: ContextVar[str | None] = ContextVar("request_id", default=None)
 
 
@@ -45,101 +56,11 @@ def get_request_id() -> str | None:
     return _request_id_ctx.get()
 
 
-# ---------------------------------------------------------------------------
-# Prometheus metric helpers
-# ---------------------------------------------------------------------------
-def _metric_labels(**extra: Any) -> dict[str, str]:
-    """Build a label dict for Prometheus metrics. Extra keys are validated."""
-    ALLOWED = {"mode", "result", "cache_kind", "outcome", "attempt", "status_code"}
-    base = {
-        "environment": DEPLOYMENT_ENVIRONMENT,
-        "service": SERVICE_NAME,
-    }
-    for k, v in extra.items():
-        if k not in ALLOWED:
-            continue
-        if v is not None:
-            base[k] = str(v)
-    return base
-
-
-# ---------------------------------------------------------------------------
-# Prometheus metrics
-# ---------------------------------------------------------------------------
-circuit_breaker_open_total = Counter(
-    "circuit_breaker_open_total",
-    "Circuit breaker open events",
-    ("dependency", "environment", "service"),
-)
-
-retry_attempts_total = Counter(
-    "retry_attempts_total",
-    "Retry attempts by dependency",
-    ("dependency", "attempt", "environment", "service"),
-)
-
-dependency_errors_total = Counter(
-    "dependency_errors_total",
-    "Dependency error count",
-    ("dependency", "error_type", "environment", "service"),
-)
-
-dense_embed_requests = Counter(
-    "dense_embed_requests_total",
-    "Dense embedding requests",
-    ("environment", "service"),
-)
-dense_embed_duration = Histogram(
-    "dense_embed_duration_seconds",
-    "Dense embedding latency",
-    ("environment", "service"),
-)
-
-sparse_embed_requests = Counter(
-    "sparse_embed_requests_total",
-    "Sparse embedding requests",
-    ("environment", "service"),
-)
-sparse_embed_duration = Histogram(
-    "sparse_embed_duration_seconds",
-    "Sparse embedding latency",
-    ("environment", "service"),
-)
-
-rerank_requests = Counter(
-    "rerank_requests_total",
-    "Reranker requests",
-    ("environment", "service"),
-)
-rerank_duration = Histogram(
-    "rerank_duration_seconds",
-    "Reranker latency",
-    ("environment", "service"),
-)
-
-llm_requests = Counter(
-    "llm_requests_total",
-    "LLM requests",
-    ("mode", "environment", "service"),
-)
-llm_duration = Histogram(
-    "llm_duration_seconds",
-    "LLM call latency",
-    ("mode", "environment", "service"),
-)
-
-
-# ---------------------------------------------------------------------------
-# Circuit breaker
-# ---------------------------------------------------------------------------
 class OpenCircuitError(RuntimeError):
-    """Raised when a circuit breaker is open."""
     pass
 
 
 class CircuitBreaker:
-    """Simple async circuit breaker with half-open probing."""
-
     def __init__(self, name: str, failure_threshold: int, reset_timeout: float):
         self.name = name
         self.failure_threshold = failure_threshold
@@ -173,7 +94,7 @@ class CircuitBreaker:
             if self.state == "half_open" or self.failures >= self.failure_threshold:
                 self.state = "open"
                 self.opened_at = time.monotonic()
-                circuit_breaker_open_total.labels(
+                circuit_breaker_open.labels(
                     dependency=self.name, **_metric_labels()
                 ).inc()
                 log.warn("circuit breaker opened", dependency=self.name, failures=self.failures)
@@ -214,7 +135,7 @@ async def call_with_retry(dep: str, breaker: CircuitBreaker, fn: Callable[[], An
         except BaseException as exc:
             last_exc = exc
             error_type = type(exc).__name__
-            dependency_errors_total.labels(
+            dependency_errors.labels(
                 dependency=dep, error_type=error_type, **_metric_labels()
             ).inc()
 
@@ -225,25 +146,16 @@ async def call_with_retry(dep: str, breaker: CircuitBreaker, fn: Callable[[], An
                 raise
             delay = min(RETRY_MAX_DELAY, RETRY_BASE_DELAY * (2 ** (attempt - 1)))
             jitter = random.uniform(0.0, delay * 0.2)
-            retry_attempts_total.labels(
+            retry_attempts.labels(
                 dependency=dep, attempt=str(attempt), **_metric_labels()
             ).inc()
-            log.debug(
-                "retry attempt",
-                dependency=dep,
-                attempt=attempt,
-                max_attempts=RETRY_MAX_ATTEMPTS,
-                sleep_s=round(delay + jitter, 6),
-            )
+            log.info("retry attempt", dependency=dep, attempt=attempt, max_attempts=RETRY_MAX_ATTEMPTS, sleep_s=round(delay + jitter, 6))
             await asyncio.sleep(delay + jitter)
     if last_exc:
         raise last_exc
     raise RuntimeError(f"{dep} failed without exception")
 
 
-# ---------------------------------------------------------------------------
-# Base async JSON service client
-# ---------------------------------------------------------------------------
 class AsyncJSONServiceClient:
     def __init__(self, base_url: str, timeout: float = HTTP_TIMEOUT):
         self.base_url = base_url.rstrip("/")
@@ -274,9 +186,6 @@ class AsyncJSONServiceClient:
             self._client = None
 
 
-# ---------------------------------------------------------------------------
-# Dense embedding client
-# ---------------------------------------------------------------------------
 class AsyncDenseClient(AsyncJSONServiceClient):
     async def health(self) -> bool:
         try:
@@ -315,7 +224,7 @@ class AsyncDenseClient(AsyncJSONServiceClient):
                 out.append(arr.astype(float).tolist())
             return out
         except Exception as exc:
-            dependency_errors_total.labels(
+            dependency_errors.labels(
                 dependency="dense", error_type=type(exc).__name__, **_metric_labels()
             ).inc()
             log.error("dense embed failed", dependency="dense", error_type=type(exc).__name__)
@@ -324,9 +233,6 @@ class AsyncDenseClient(AsyncJSONServiceClient):
             dense_embed_duration.labels(**labels).observe(max(time.perf_counter() - start, 1e-6))
 
 
-# ---------------------------------------------------------------------------
-# Sparse embedding client
-# ---------------------------------------------------------------------------
 class AsyncSparseClient(AsyncJSONServiceClient):
     async def health(self) -> bool:
         try:
@@ -382,7 +288,7 @@ class AsyncSparseClient(AsyncJSONServiceClient):
         try:
             return await _do(texts)
         except Exception as exc:
-            dependency_errors_total.labels(
+            dependency_errors.labels(
                 dependency="sparse", error_type=type(exc).__name__, **_metric_labels()
             ).inc()
             log.error("sparse embed failed", dependency="sparse", error_type=type(exc).__name__)
@@ -391,9 +297,6 @@ class AsyncSparseClient(AsyncJSONServiceClient):
             sparse_embed_duration.labels(**labels).observe(max(time.perf_counter() - start, 1e-6))
 
 
-# ---------------------------------------------------------------------------
-# Reranker client
-# ---------------------------------------------------------------------------
 class AsyncRerankerClient(AsyncJSONServiceClient):
     async def health(self) -> bool:
         try:
@@ -422,7 +325,7 @@ class AsyncRerankerClient(AsyncJSONServiceClient):
                 raise RuntimeError("reranker invalid response shape")
             return [float(x) for x in scores]
         except Exception as exc:
-            dependency_errors_total.labels(
+            dependency_errors.labels(
                 dependency="reranker", error_type=type(exc).__name__, **_metric_labels()
             ).inc()
             log.error("rerank failed", dependency="reranker", error_type=type(exc).__name__)
@@ -431,9 +334,6 @@ class AsyncRerankerClient(AsyncJSONServiceClient):
             rerank_duration.labels(**labels).observe(max(time.perf_counter() - start, 1e-6))
 
 
-# ---------------------------------------------------------------------------
-# Bedrock LLM client
-# ---------------------------------------------------------------------------
 class AsyncBedrockClient:
     def __init__(
         self,
@@ -518,7 +418,7 @@ class AsyncBedrockClient:
             answer = await asyncio.to_thread(_call)
             return answer
         except Exception as exc:
-            dependency_errors_total.labels(
+            dependency_errors.labels(
                 dependency="bedrock", error_type=type(exc).__name__, **_metric_labels()
             ).inc()
             log.error("bedrock generate failed", dependency="bedrock", mode="generate", error_type=type(exc).__name__)
@@ -568,7 +468,7 @@ class AsyncBedrockClient:
                 if item is sentinel:
                     break
                 if isinstance(item, Exception):
-                    dependency_errors_total.labels(
+                    dependency_errors.labels(
                         dependency="bedrock", error_type=type(item).__name__, **_metric_labels()
                     ).inc()
                     log.error("bedrock stream failed", dependency="bedrock", mode="stream", error_type=type(item).__name__)

@@ -121,7 +121,7 @@ curl -fsSL -o "${TMPDIR}/gitleaks.tar.gz" \
 tar -xzf "${TMPDIR}/gitleaks.tar.gz" -C "${TMPDIR}"
 sudo install -m 0755 "${TMPDIR}/gitleaks" /usr/local/bin/gitleaks
 
-pip install mlflow==3.11.1 requests==2.33.1 qdrant_client==1.17.1 typing==3.7.4.3 --break-system-packages
+pip install mlflow==3.11.1 requests==2.33.1 qdrant_client==1.17.1 typing==3.7.4.3 boto3==1.43.6 --break-system-packages
 
 if [[ -d "${HOME}/.local/bin" ]]; then
   export PATH="${HOME}/.local/bin:${PATH}"

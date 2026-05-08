@@ -25,7 +25,7 @@ kubectl create ns inference && python3 src/infra/rag/retriever_service.py --roll
 
 unset BEDROCK_GUARDRAIL_IDENTIFIER && unset BEDROCK_GUARDRAIL_VERSION
 curl -X DELETE http://localhost:6333/collections/default_rag_collection1__semantic_cache
-source /workspace/.venv/bin/activate && cd /workspace/src/services/retriever && export PYTHONPATH=$(pwd)
+source .venv/bin/activate && cd src/services/retriever && export PYTHONPATH=$(pwd)
 export DENSE_URL="http://localhost:8200"
 export SPARSE_URL="http://localhost:8201"
 export RERANKER_URL="http://localhost:8202"
@@ -54,17 +54,13 @@ curl -N http://localhost:8203/generate/stream \
   -H "Content-Type: application/json" \
   -d '{"query":"how gaurdrails differs from governance?"}'
 
-
+curl -s -X POST http://localhost:8203/presign \
+  -H "Content-Type: application/json" \
+  -d '{"s3_path": "s3://s3-temp-bucket-mlsecops-681802563986/data/raw/pdfs/ultRAG.pdf"}'
 
 curl -N http://localhost:8203/generate/stream \
   -H "Content-Type: application/json" \
   -d '{"query":"how to build secure Ai agents?"}'
-
-
-curl -N http://localhost:8203/generate/stream \
-  -H "Content-Type: application/json" \
-  -d '{"query":"how to learn RAG?"}'
-
 
 
 curl -N http://localhost:8203/generate/stream \
@@ -87,7 +83,8 @@ aws s3 rm s3://s3-temp-bucket-mlsecops-681802563986/postgres_backups --recursive
 
 
 
-
+kubectl delete -f src/manifests/retriever || true
+rm -rf src/manifests/retriever
 python3 src/infra/rag/retriever_service.py --apply-secrets
 python3 src/infra/rag/retriever_service.py --write
 kubectl apply -f src/manifests/retriever
@@ -103,7 +100,8 @@ export CLOUDFLARE_SECRET_NAME="cloudflared-token"
 export CLOUDFLARE_SECRET_KEY="token"
 export DOMAIN="athithya.site"
 python3 src/infra/network/cloudflared_setup.py --write
-kubectl apply -f /workspace/src/manifests/cloudflared
+kubectl apply -f src/manifests/cloudflared
+
 
 bash src/infra/core/valkey_service.sh
 export VALKEY_URL="redis://:$(kubectl -n valkey get secret valkey-auth -o jsonpath='{.data.VALKEY_PASSWORD}' | base64 -d)@valkey.valkey.svc.cluster.local:6379"
@@ -112,6 +110,7 @@ kubectl delete -f src/manifests/frontend || true
 python3 src/infra/rag/spa_service.py --apply-secrets
 python3 src/infra/rag/spa_service.py --write
 python3 src/infra/rag/spa_service.py --apply
+
 
 
 sleep 5

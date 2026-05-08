@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-
-import asyncio
 import json
+import asyncio
 import logging
 import os
 import time
@@ -23,8 +22,14 @@ from clients import (
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
-from helpers import build_prompt_and_ui_chunks, deterministic_summarize, validate_and_filter_citations
-from prometheus_client import Counter, Gauge, Histogram, generate_latest, CONTENT_TYPE_LATEST
+from citations_helpers import (
+    build_numbered_prompt_and_ui_chunks,
+    deterministic_summarize,
+    validate_and_filter_citations,
+    parse_s3_path,
+    generate_presigned_url_sync,
+)
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from settings import (
     ANSWER_PROMPT_TEMPLATE,
     AWS_REGION,
@@ -58,6 +63,8 @@ from settings import (
     SPARSE_URL,
     TENANT_ID,
     GenerateRequest,
+    ENABLE_PRESIGNED_URLS,
+    PRESIGNED_URL_TTL_SECONDS,
 )
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -65,7 +72,13 @@ from slowapi.util import get_remote_address
 from starlette.background import BackgroundTask
 from starlette.responses import Response as StarletteResponse
 from store import QdrantStore, QdrantStoreConfig
-from telemetry import log, safe_stack, setup_logging
+from retriever_logging import log, safe_stack, setup_logging
+from metrics import (
+    http_request_count,
+    http_request_duration,
+    http_active_requests,
+    http_error_count,
+)
 
 logger = logging.getLogger("retrieval")
 startup_bootstrap_error: str | None = None
@@ -74,34 +87,7 @@ _MAX_TOP_K = 7
 _MIN_FETCH_K = 10
 _MAX_FETCH_K = 50
 
-# ---------------------------------------------------------------------------
-# Prometheus HTTP metrics (initialized early)
-# ---------------------------------------------------------------------------
-_HTTP_REQUEST_COUNT = Counter(
-    "http_requests_total",
-    "Total HTTP requests",
-    ("method", "route", "status_code", "environment", "service"),
-)
-_HTTP_DURATION = Histogram(
-    "http_request_duration_seconds",
-    "HTTP request latency",
-    ("method", "route", "status_code", "environment", "service"),
-)
-_HTTP_ACTIVE_REQUESTS = Gauge(
-    "http_active_requests",
-    "In-flight HTTP requests",
-    ("method", "route", "environment", "service"),
-)
-_HTTP_ERROR_COUNT = Counter(
-    "http_errors_total",
-    "Total HTTP errors",
-    ("method", "route", "status_code", "environment", "service"),
-)
 
-
-# ---------------------------------------------------------------------------
-# Rate limiting (IP-based)
-# ---------------------------------------------------------------------------
 def _rate_limit_key(request: Request) -> str:
     return f"ip:{get_remote_address(request)}"
 
@@ -109,9 +95,6 @@ def _rate_limit_key(request: Request) -> str:
 limiter = Limiter(key_func=_rate_limit_key, default_limits=[])
 
 
-# ---------------------------------------------------------------------------
-# Request ID middleware
-# ---------------------------------------------------------------------------
 class RequestIdMiddleware:
     def __init__(self, app):
         self.app = app
@@ -141,9 +124,6 @@ class RequestIdMiddleware:
         await self.app(scope, receive, send_wrapper)
 
 
-# ---------------------------------------------------------------------------
-# Prometheus metrics endpoint
-# ---------------------------------------------------------------------------
 async def metrics_endpoint():
     return StarletteResponse(
         generate_latest(),
@@ -151,14 +131,10 @@ async def metrics_endpoint():
     )
 
 
-# ---------------------------------------------------------------------------
-# Lifespan (startup/shutdown)
-# ---------------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging(LOG_LEVEL)
 
-    # Initialize service components
     settings = {
         "corpus_version": CORPUS_VERSION,
         "prompt_version": PROMPT_VERSION,
@@ -233,7 +209,14 @@ async def lifespan(app: FastAPI):
     bg_cleanup = asyncio.create_task(_cache_cleanup_loop(state))
     app.state.background_tasks = (bg_health, bg_cleanup)
 
-    log.info("retriever service started successfully")
+    log.info(
+        "retriever service started",
+        dense_url=DENSE_URL,
+        sparse_url=SPARSE_URL,
+        reranker_url=RERANKER_URL,
+        qdrant_url=QDRANT_URL,
+        bedrock_model=BEDROCK_MODEL_ID,
+    )
 
     try:
         yield
@@ -244,7 +227,6 @@ async def lifespan(app: FastAPI):
         except Exception:
             pass
 
-        # Cancel background tasks and wait with timeout
         for task in app.state.background_tasks:
             if not task.done():
                 task.cancel()
@@ -261,43 +243,33 @@ async def lifespan(app: FastAPI):
             try:
                 await client.close()
             except Exception as e:
-                logger.debug("%s client close error: %s", name, e)
+                log.warn("client close error", client_name=name, error=str(e))
 
         try:
             await store.close()
         except Exception as e:
-            logger.debug("store close error: %s", e)
+            log.warn("store close error", error=str(e))
 
         log.info("retriever service shutdown complete")
 
 
-# ---------------------------------------------------------------------------
-# FastAPI app
-# ---------------------------------------------------------------------------
 app = FastAPI(lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(RequestIdMiddleware)
 
-
-# ---------------------------------------------------------------------------
-# Metrics endpoint (served on main HTTP port)
-# ---------------------------------------------------------------------------
 if ENABLE_PROMETHEUS:
     app.add_route(PROMETHEUS_PATH, metrics_endpoint, methods=["GET"])
 
 
-# ---------------------------------------------------------------------------
-# HTTP metrics middleware
-# ---------------------------------------------------------------------------
 @app.middleware("http")
 async def http_metrics_middleware(request: Request, call_next):
     method = request.method
     route = request.url.path
     labels = {"method": method, "route": route, "environment": DEPLOYMENT_ENVIRONMENT, "service": SERVICE_NAME}
 
-    _HTTP_ACTIVE_REQUESTS.labels(**labels).inc()
-    _HTTP_REQUEST_COUNT.labels(**{**labels, "status_code": "0"}).inc()
+    http_active_requests.labels(**labels).inc()
+    http_request_count.labels(**{**labels, "status_code": "0"}).inc()
 
     start = time.perf_counter()
     status_code = 500
@@ -307,17 +279,14 @@ async def http_metrics_middleware(request: Request, call_next):
         return response
     except Exception:
         status_code = 500
-        _HTTP_ERROR_COUNT.labels(**{**labels, "status_code": str(status_code)}).inc()
+        http_error_count.labels(**{**labels, "status_code": str(status_code)}).inc()
         raise
     finally:
         elapsed = max(time.perf_counter() - start, 1e-6)
-        _HTTP_DURATION.labels(**{**labels, "status_code": str(status_code)}).observe(elapsed)
-        _HTTP_ACTIVE_REQUESTS.labels(**labels).dec()
+        http_request_duration.labels(**{**labels, "status_code": str(status_code)}).observe(elapsed)
+        http_active_requests.labels(**labels).dec()
 
 
-# ---------------------------------------------------------------------------
-# Exception handlers
-# ---------------------------------------------------------------------------
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     log.warn("request validation failed", error=str(exc), endpoint=str(request.url.path))
@@ -330,15 +299,12 @@ async def general_exception_handler(request: Request, exc: Exception):
     return JSONResponse(status_code=500, content={"detail": "internal server error"})
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 def _state():
     return app.state.state
 
 
 def _build_bedrock_prompt(query: str, docs_for_llm: list[dict[str, Any]]) -> tuple[str, list[str], list[dict[str, Any]]]:
-    prompt_body, llm_lines, ui_chunks = build_prompt_and_ui_chunks(
+    prompt_body, llm_lines, ui_chunks = build_numbered_prompt_and_ui_chunks(
         docs_for_llm, query, max_content_chars=PROMPT_MAX_CONTENT_CHARS, prefer_snippet_len=400,
     )
     prompt = ANSWER_PROMPT_TEMPLATE.format(question=query, passages=prompt_body)
@@ -356,9 +322,6 @@ def _sse(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False, separators=(',', ':'))}\n\n"
 
 
-# ---------------------------------------------------------------------------
-# Core streaming endpoint
-# ---------------------------------------------------------------------------
 async def _generate_stream_core(request: Request) -> StreamingResponse:
     req = await _load_generate_request(request)
     top_k, fetch_k, max_tokens = _normalize_generation_limits(req)
@@ -529,13 +492,47 @@ async def _load_generate_request(request: Request) -> GenerateRequest:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-# ---------------------------------------------------------------------------
-# Routes
-# ---------------------------------------------------------------------------
 @app.post("/generate/stream")
 @limiter.limit("60/minute")
 async def api_stream(request: Request):
     return await _generate_stream_core(request)
+
+
+@app.post("/presign")
+@limiter.limit("30/minute")
+async def api_presign(request: Request):
+    if not ENABLE_PRESIGNED_URLS:
+        raise HTTPException(status_code=403, detail="Presigned URLs are disabled")
+
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    s3_path = payload.get("s3_path") or payload.get("path")
+    if not s3_path or not isinstance(s3_path, str) or not s3_path.strip().startswith("s3://"):
+        raise HTTPException(status_code=400, detail="Missing or invalid s3_path (must start with s3://)")
+
+    try:
+        bucket, key = parse_s3_path(s3_path.strip())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    try:
+        url = generate_presigned_url_sync(
+            bucket, key,
+            ttl_seconds=PRESIGNED_URL_TTL_SECONDS,
+            region=AWS_REGION,
+        )
+    except Exception as e:
+        log.error("presign.failed", s3_path=s3_path, error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to generate presigned URL")
+
+    log.info("presign.success", s3_path=s3_path)
+    return JSONResponse({
+        "url": url,
+        "expires_in": PRESIGNED_URL_TTL_SECONDS,
+    })
 
 
 @app.get("/healthz")

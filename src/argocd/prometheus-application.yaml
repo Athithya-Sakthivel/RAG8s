@@ -34,6 +34,12 @@ spec:
           value: "$SLACK_WEBHOOK_URL"
         - name: alertmanager.config.receivers[2].pagerduty_configs[0].routing_key
           value: "$PAGERDUTY_ROUTING_KEY"
+        - name: kube-state-metrics.enabled
+          value: "false"
+        - name: prometheus-node-exporter.enabled
+          value: "false"
+        - name: prometheus-pushgateway.enabled
+          value: "false"  
 
       values: |
         global:
@@ -112,15 +118,13 @@ spec:
                       num_resolved: '{{ .Alerts.Resolved | len }}'
             templates: []
 
-        kubeStateMetrics:
+        kube-state-metrics:
           enabled: false
-
-        nodeExporter:
+        prometheus-node-exporter:
           enabled: false
-
-        pushgateway:
+        prometheus-pushgateway:
           enabled: false
-
+          
         server:
           statefulSet:
             enabled: true
@@ -226,12 +230,12 @@ spec:
             metrics_path: /metrics
             static_configs:
               - targets:
-                  - 'clickhouse.inference.svc.cluster.local:8001'
+                  - 'clickhouse.logging.svc.cluster.local:8001'
           - job_name: 'vector'
             scrape_interval: 30s
             static_configs:
               - targets:
-                  - 'vector-metrics.inference.svc.cluster.local:9598'
+                  - 'vector-metrics.logging.svc.cluster.local:9598'
 
         serverFiles:
           alerts:

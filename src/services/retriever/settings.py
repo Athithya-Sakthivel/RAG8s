@@ -107,6 +107,13 @@ ANSWER_PROMPT_TEMPLATE = _env_str(
         "Answer:"
     ),
 )
+
+# ---------------------------------------------------------------------------
+# Presigned URL generation (for citation source retrieval)
+# ---------------------------------------------------------------------------
+ENABLE_PRESIGNED_URLS = _env_bool("ENABLE_PRESIGNED_URLS", True)
+PRESIGNED_URL_TTL_SECONDS = _env_int("PRESIGNED_URL_TTL_SECONDS", 1800)
+
 LLM_MAX_TOKENS = _env_int("LLM_MAX_TOKENS", 400)
 LLM_TEMPERATURE = _env_float("LLM_TEMPERATURE", 0.0)
 

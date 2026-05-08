@@ -21,19 +21,20 @@ from clients import (
 from fastapi import HTTPException
 from helpers import (
     build_cache_key,
-    build_prompt_and_ui_chunks,
     build_retrieval_metadata,
     cache_payload_to_response,
     candidate_to_public_chunk,
     canonicalize_text,
-    deterministic_summarize,
     is_payload_expired,
     normalize_query,
     rrf_fuse,
     stable_uuid_from_text,
+)
+from citations_helpers import (
+    build_numbered_prompt_and_ui_chunks,
+    deterministic_summarize,
     validate_and_filter_citations,
 )
-from prometheus_client import Counter, Gauge, Histogram
 from qdrant_client import models
 from settings import (
     ANSWER_PROMPT_TEMPLATE,
@@ -63,6 +64,19 @@ from settings import (
     SERVICE_NAME,
     TENANT_ID,
 )
+from retriever_logging import log
+from metrics import (
+    pipeline_duration,
+    pipeline_errors,
+    qdrant_query_count,
+    qdrant_query_duration,
+    cache_lookup_count,
+    cache_lookup_duration,
+    cache_write_count,
+    cache_write_duration,
+    service_ready,
+    _metric_labels,
+)
 
 logger = logging.getLogger("retrieval.pipeline")
 
@@ -75,72 +89,6 @@ _background_tasks: set[asyncio.Task[Any]] = set()
 _READY_VALUE = 0
 _METRICS_INITIALIZED = False
 
-# ---------------------------------------------------------------------------
-# Prometheus metrics
-# ---------------------------------------------------------------------------
-_ALLOWED_METRIC_KEYS = {"mode", "result", "cache_kind", "outcome"}
-
-_PIPELINE_DURATION = Histogram(
-    "pipeline_duration_seconds",
-    "Total pipeline duration",
-    ("outcome", "environment", "service"),
-)
-_QDRANT_QUERY_COUNT = Counter(
-    "qdrant_query_total",
-    "Qdrant query count",
-    ("mode", "environment", "service"),
-)
-_QDRANT_QUERY_LATENCY = Histogram(
-    "qdrant_query_duration_seconds",
-    "Qdrant query latency",
-    ("mode", "environment", "service"),
-)
-_CACHE_LOOKUP_COUNT = Counter(
-    "cache_lookup_total",
-    "Cache lookup count",
-    ("result", "environment", "service"),
-)
-_CACHE_LOOKUP_LATENCY = Histogram(
-    "cache_lookup_duration_seconds",
-    "Cache lookup latency",
-    ("result", "environment", "service"),
-)
-_CACHE_WRITE_COUNT = Counter(
-    "cache_write_total",
-    "Cache write count",
-    ("result", "cache_kind", "environment", "service"),
-)
-_CACHE_WRITE_LATENCY = Histogram(
-    "cache_write_duration_seconds",
-    "Cache write latency",
-    ("cache_kind", "environment", "service"),
-)
-_SERVICE_READY = Gauge(
-    "service_ready",
-    "Service readiness (1=ready)",
-    ("environment", "service"),
-)
-
-_PIPELINE_ERRORS = Counter(
-    "pipeline_errors_total",
-    "Pipeline errors by type",
-    ("error_type", "environment", "service"),
-)
-
-
-def _metric_labels(**extra: Any) -> dict[str, str]:
-    """Build Prometheus label dict with validation."""
-    base = {
-        "environment": DEPLOYMENT_ENVIRONMENT,
-        "service": SERVICE_NAME,
-    }
-    for k, v in extra.items():
-        if k not in _ALLOWED_METRIC_KEYS:
-            continue
-        if v is not None:
-            base[k] = str(v)
-    return base
-
 
 def initialize_pipeline_metrics() -> None:
     global _METRICS_INITIALIZED
@@ -150,7 +98,7 @@ def initialize_pipeline_metrics() -> None:
 def _set_ready(value: bool) -> None:
     global _READY_VALUE
     _READY_VALUE = 1 if value else 0
-    _SERVICE_READY.labels(environment=DEPLOYMENT_ENVIRONMENT, service=SERVICE_NAME).set(_READY_VALUE)
+    service_ready.labels(environment=DEPLOYMENT_ENVIRONMENT, service=SERVICE_NAME).set(_READY_VALUE)
 
 
 @dataclass
@@ -350,7 +298,7 @@ async def _rerank_candidates(state: ServiceState, query: str, fused: list[dict[s
     try:
         scores = await call_with_retry("reranker", state.breakers["reranker"], _do)
     except Exception as exc:
-        logger.debug("rerank skipped: %s", exc)
+        log.warn("rerank skipped", error=str(exc))
         for idx, item in enumerate(fused, start=1):
             item["post_rerank_rank"] = idx
         return {"candidates": fused, "enabled": True, "applied": False, "reason": f"reranker_failed:{type(exc).__name__}", "model": state.settings.get("reranker_model"), "count": candidate_count}
@@ -420,7 +368,7 @@ async def _search_docs(
         try:
             dense_results = await call_with_retry("retrieval", state.breakers["retrieval"], _dense)
         except Exception as exc:
-            logger.debug("dense retrieval failed: %s", exc)
+            log.warn("dense retrieval failed", error=str(exc))
         mode = "dense"
     elif sparse_vec is not None:
         async def _sparse():
@@ -428,7 +376,7 @@ async def _search_docs(
         try:
             sparse_results = await call_with_retry("retrieval", state.breakers["retrieval"], _sparse)
         except Exception as exc:
-            logger.debug("sparse retrieval failed: %s", exc)
+            log.warn("sparse retrieval failed", error=str(exc))
         mode = "sparse"
 
     fused = rrf_fuse(dense_results, sparse_results, rrf_k=RRF_K)
@@ -438,8 +386,11 @@ async def _search_docs(
         "fusion_method": "rrf" if fused else "none",
     }
 
-    _QDRANT_QUERY_COUNT.labels(**_metric_labels(mode=mode)).inc()
-    _QDRANT_QUERY_LATENCY.labels(**_metric_labels(mode=mode)).observe(max(time.perf_counter() - start, 1e-6))
+    qdrant_query_count.labels(**_metric_labels(mode=mode)).inc()
+    qdrant_query_duration.labels(**_metric_labels(mode=mode)).observe(max(time.perf_counter() - start, 1e-6))
+
+    if not fused:
+        log.warn("zero search results", mode=mode, dense_count=len(dense_results), sparse_count=len(sparse_results))
 
     return fused, mode, debug
 
@@ -473,12 +424,12 @@ async def _semantic_cache_promote_exact(
 
     try:
         await call_with_retry("cache", state.breakers["cache"], _write)
-        _CACHE_WRITE_COUNT.labels(**_metric_labels(result="ok", cache_kind="promotion")).inc()
+        cache_write_count.labels(**_metric_labels(result="ok", cache_kind="promotion")).inc()
     except Exception:
-        _CACHE_WRITE_COUNT.labels(**_metric_labels(result="fail", cache_kind="promotion")).inc()
+        cache_write_count.labels(**_metric_labels(result="fail", cache_kind="promotion")).inc()
         raise
     finally:
-        _CACHE_WRITE_LATENCY.labels(**_metric_labels(cache_kind="promotion")).observe(max(time.perf_counter() - start, 1e-6))
+        cache_write_duration.labels(**_metric_labels(cache_kind="promotion")).observe(max(time.perf_counter() - start, 1e-6))
 
 
 async def write_stream_cache(
@@ -507,13 +458,13 @@ async def write_stream_cache(
             ttl_seconds=state.store.config.cache_ttl_seconds,
             hit_type=hit_type, cache_score=cache_score,
         )
-        _CACHE_WRITE_COUNT.labels(**_metric_labels(result="ok" if ok else "fail", cache_kind=hit_type)).inc()
+        cache_write_count.labels(**_metric_labels(result="ok" if ok else "fail", cache_kind=hit_type)).inc()
         return ok
     except Exception:
-        _CACHE_WRITE_COUNT.labels(**_metric_labels(result="fail", cache_kind=hit_type)).inc()
+        cache_write_count.labels(**_metric_labels(result="fail", cache_kind=hit_type)).inc()
         return False
     finally:
-        _CACHE_WRITE_LATENCY.labels(**_metric_labels(cache_kind=hit_type)).observe(max(time.perf_counter() - start, 1e-6))
+        cache_write_duration.labels(**_metric_labels(cache_kind=hit_type)).observe(max(time.perf_counter() - start, 1e-6))
 
 
 async def _call_llm(
@@ -522,7 +473,7 @@ async def _call_llm(
     docs_for_llm: list[dict[str, Any]],
     max_tokens: int,
 ) -> tuple[str, list[str], list[dict[str, Any]]]:
-    prompt_body, llm_lines, ui_chunks = build_prompt_and_ui_chunks(
+    prompt_body, llm_lines, ui_chunks = build_numbered_prompt_and_ui_chunks(
         docs_for_llm, query, max_content_chars=PROMPT_MAX_CONTENT_CHARS, prefer_snippet_len=400,
     )
     prompt = ANSWER_PROMPT_TEMPLATE.format(question=query, passages=prompt_body)
@@ -536,7 +487,7 @@ async def _call_llm(
     try:
         answer = await call_with_retry("llm", state.breakers["llm"], _do)
     except Exception as e:
-        logger.warning("bedrock failed, using deterministic fallback: %s", e)
+        log.warn("bedrock failed, using deterministic fallback", error=str(e))
         answer = deterministic_summarize(llm_lines)
     return answer, llm_lines, ui_chunks
 
@@ -578,7 +529,6 @@ async def _build_pipeline_result(
         query_embed_text = canonicalize_text(query)
         cache_ready = _is_cache_ready(state)
 
-        # --- exact cache lookup ---
         if cache_ready and allow_semantic_cache:
             async def _exact_cache():
                 return await state.store.semantic_cache_get_by_id(cache_id)
@@ -590,8 +540,8 @@ async def _build_pipeline_result(
             except Exception:
                 exact = None
 
-            _CACHE_LOOKUP_COUNT.labels(**_metric_labels(result="exact_hit" if exact else "miss")).inc()
-            _CACHE_LOOKUP_LATENCY.labels(**_metric_labels(result="exact")).observe(max(time.perf_counter() - exact_start, 1e-6))
+            cache_lookup_count.labels(**_metric_labels(result="exact_hit" if exact else "miss")).inc()
+            cache_lookup_duration.labels(**_metric_labels(result="exact")).observe(max(time.perf_counter() - exact_start, 1e-6))
 
             if exact and exact.get("payload") and not is_payload_expired(exact["payload"]):
                 pipe = _build_exact_cache_result(
@@ -606,13 +556,12 @@ async def _build_pipeline_result(
                 pipe.retrieval_version = retrieval_version
                 pipe.model_name = model_name
                 pipe.tenant_id = resolved_tenant
-                _PIPELINE_DURATION.labels(**_metric_labels(outcome="cache_hit")).observe(max(time.perf_counter() - start, 1e-6))
+                pipeline_duration.labels(**_metric_labels(outcome="cache_hit")).observe(max(time.perf_counter() - start, 1e-6))
                 return pipe
 
         if not _is_ready_for_retrieval(state):
             raise HTTPException(status_code=503, detail="no retriever backends available")
 
-        # --- embed ---
         dense_task = None
         sparse_task = None
         if state.health.get("dense"):
@@ -632,7 +581,7 @@ async def _build_pipeline_result(
                 dense_res = await dense_task
                 dense_vec = dense_res[0] if dense_res else None
             except Exception as e:
-                logger.debug("dense_embed_failed: %s", e)
+                log.warn("dense embed failed", error=str(e))
                 dense_vec = None
         if sparse_task is not None:
             try:
@@ -644,10 +593,9 @@ async def _build_pipeline_result(
                         values=[float(x) for x in s0.get("values", [])],
                     )
             except Exception as e:
-                logger.debug("sparse_embed_failed: %s", e)
+                log.warn("sparse embed failed", error=str(e))
                 sparse_vec = None
 
-        # --- semantic cache lookup ---
         if cache_ready and allow_semantic_cache and dense_vec is not None:
             strict_threshold, relaxed_threshold = _semantic_cache_thresholds(state)
 
@@ -676,8 +624,8 @@ async def _build_pipeline_result(
                 except Exception:
                     semantic_hit = None
 
-            _CACHE_LOOKUP_COUNT.labels(**_metric_labels(result=semantic_kind if semantic_hit else "miss")).inc()
-            _CACHE_LOOKUP_LATENCY.labels(**_metric_labels(result="semantic")).observe(max(time.perf_counter() - semantic_start, 1e-6))
+            cache_lookup_count.labels(**_metric_labels(result=semantic_kind if semantic_hit else "miss")).inc()
+            cache_lookup_duration.labels(**_metric_labels(result="semantic")).observe(max(time.perf_counter() - semantic_start, 1e-6))
 
             if semantic_hit and semantic_hit.get("payload"):
                 payload = semantic_hit["payload"]
@@ -694,7 +642,6 @@ async def _build_pipeline_result(
                 answer = cache_resp.get("answer") or ""
                 chunks = cache_resp.get("chunks") if isinstance(cache_resp.get("chunks"), list) else []
 
-                # promote exact cache entry in background
                 async def _promote() -> None:
                     try:
                         await _semantic_cache_promote_exact(
@@ -704,7 +651,7 @@ async def _build_pipeline_result(
                             answer=answer, chunks=chunks, cache_score=cache_score, hit_type="semantic",
                         )
                     except Exception as exc:
-                        logger.debug("semantic exact promotion failed: %s", exc)
+                        log.warn("semantic exact promotion failed", error=str(exc))
 
                 task = asyncio.create_task(_promote())
                 _background_tasks.add(task)
@@ -721,10 +668,9 @@ async def _build_pipeline_result(
                     corpus_version=corpus_version, prompt_version=prompt_version,
                     retrieval_version=retrieval_version, model_name=model_name, tenant_id=resolved_tenant,
                 )
-                _PIPELINE_DURATION.labels(**_metric_labels(outcome="cache_hit")).observe(max(time.perf_counter() - start, 1e-6))
+                pipeline_duration.labels(**_metric_labels(outcome="cache_hit")).observe(max(time.perf_counter() - start, 1e-6))
                 return pipe
 
-        # --- retrieval ---
         async with state.semaphore:
             fused, retrieval_mode, retrieval_debug = await _search_docs(state, dense_vec, sparse_vec, fetch_k)
 
@@ -750,7 +696,7 @@ async def _build_pipeline_result(
                     corpus_version=corpus_version, prompt_version=prompt_version,
                     retrieval_version=retrieval_version, model_name=model_name, tenant_id=resolved_tenant,
                 )
-                _PIPELINE_DURATION.labels(**_metric_labels(outcome="no_results")).observe(max(time.perf_counter() - start, 1e-6))
+                pipeline_duration.labels(**_metric_labels(outcome="no_results")).observe(max(time.perf_counter() - start, 1e-6))
                 return pipe
 
             if allow_rerank:
@@ -787,14 +733,14 @@ async def _build_pipeline_result(
                     cache=_safe_cache_object(False, "disabled" if not cache_ready else "miss", None, None),
                     cache_hit=False, cache_score=None,
                     retrieval_mode=retrieval_mode, hybrid_capable=_hybrid_capable(state),
-                    prompt=build_prompt_and_ui_chunks(docs_for_llm, query, max_content_chars=PROMPT_MAX_CONTENT_CHARS)[0],
+                    prompt=build_numbered_prompt_and_ui_chunks(docs_for_llm, query, max_content_chars=PROMPT_MAX_CONTENT_CHARS)[0],
                     llm_lines=[], ui_chunks=chunks, final_candidates=final_candidates,
                     dense_vector=dense_vec, cache_id=cache_id,
                     query_text=query, query_norm=query_norm,
                     corpus_version=corpus_version, prompt_version=prompt_version,
                     retrieval_version=retrieval_version, model_name=model_name, tenant_id=resolved_tenant,
                 )
-                _PIPELINE_DURATION.labels(**_metric_labels(outcome="ok")).observe(max(time.perf_counter() - start, 1e-6))
+                pipeline_duration.labels(**_metric_labels(outcome="ok")).observe(max(time.perf_counter() - start, 1e-6))
                 return pipe
 
             answer, llm_lines, ui_chunks = await _call_llm(state, query, docs_for_llm, max_tokens=max_tokens)
@@ -825,32 +771,32 @@ async def _build_pipeline_result(
 
                     write_start = time.perf_counter()
                     await call_with_retry("cache", state.breakers["cache"], _cache_write)
-                    _CACHE_WRITE_COUNT.labels(**_metric_labels(result="ok", cache_kind="llm")).inc()
-                    _CACHE_WRITE_LATENCY.labels(**_metric_labels(cache_kind="llm")).observe(max(time.perf_counter() - write_start, 1e-6))
+                    cache_write_count.labels(**_metric_labels(result="ok", cache_kind="llm")).inc()
+                    cache_write_duration.labels(**_metric_labels(cache_kind="llm")).observe(max(time.perf_counter() - write_start, 1e-6))
                 except Exception:
-                    _CACHE_WRITE_COUNT.labels(**_metric_labels(result="fail", cache_kind="llm")).inc()
+                    cache_write_count.labels(**_metric_labels(result="fail", cache_kind="llm")).inc()
 
             pipe = PipelineResult(
                 answer=answer, chunks=output_chunks, retrieval=retrieval,
                 cache=_safe_cache_object(False, "miss" if cache_ready else "disabled", None, None),
                 cache_hit=False, cache_score=None,
                 retrieval_mode=retrieval_mode, hybrid_capable=_hybrid_capable(state),
-                prompt=build_prompt_and_ui_chunks(docs_for_llm, query, max_content_chars=PROMPT_MAX_CONTENT_CHARS)[0],
+                prompt=build_numbered_prompt_and_ui_chunks(docs_for_llm, query, max_content_chars=PROMPT_MAX_CONTENT_CHARS)[0],
                 llm_lines=llm_lines, ui_chunks=ui_chunks, final_candidates=final_candidates,
                 dense_vector=dense_vec, cache_id=cache_id,
                 query_text=query, query_norm=query_norm,
                 corpus_version=corpus_version, prompt_version=prompt_version,
                 retrieval_version=retrieval_version, model_name=model_name, tenant_id=resolved_tenant,
             )
-            _PIPELINE_DURATION.labels(**_metric_labels(outcome="ok")).observe(max(time.perf_counter() - start, 1e-6))
+            pipeline_duration.labels(**_metric_labels(outcome="ok")).observe(max(time.perf_counter() - start, 1e-6))
             return pipe
 
     except HTTPException:
         raise
     except Exception as exc:
         outcome = "error"
-        _PIPELINE_ERRORS.labels(error_type=type(exc).__name__, **_metric_labels()).inc()
-        _PIPELINE_DURATION.labels(**_metric_labels(outcome="error")).observe(max(time.perf_counter() - start, 1e-6))
+        pipeline_errors.labels(error_type=type(exc).__name__, **_metric_labels()).inc()
+        pipeline_duration.labels(**_metric_labels(outcome="error")).observe(max(time.perf_counter() - start, 1e-6))
         raise
 
 
@@ -860,10 +806,9 @@ async def _cache_cleanup_loop(state: ServiceState) -> None:
             if state.store.cache_ready:
                 await state.store.cleanup_expired_cache()
         except asyncio.CancelledError:
-            logger.debug("cache cleanup loop cancelled")
             break
         except Exception as e:
-            logger.debug("cache cleanup failed: %s", e)
+            log.warn("cache cleanup failed", error=str(e))
 
         for _ in range(int(CACHE_CLEANUP_INTERVAL_SECONDS * 2)):
             if SHUTDOWN:
@@ -910,10 +855,9 @@ async def _health_loop(state: ServiceState) -> None:
             state.health = snapshot
             _set_ready(snapshot["ready"])
             if snapshot != last_snapshot:
-                logger.debug("dependency health %s", snapshot)
+                log.info("health status changed", health=snapshot)
                 last_snapshot = dict(snapshot)
         except asyncio.CancelledError:
-            logger.debug("health loop cancelled")
             break
         except Exception as e:
             state.health = {
@@ -923,9 +867,8 @@ async def _health_loop(state: ServiceState) -> None:
                 "hybrid_capable": False, "ready": False,
             }
             _set_ready(False)
-            logger.warning("health loop failed: %s", e)
+            log.warn("health loop failed", error=str(e))
 
-        # Sleep in small increments for faster shutdown
         for _ in range(20):
             if SHUTDOWN:
                 break

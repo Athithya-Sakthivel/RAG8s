@@ -19,7 +19,6 @@ def _iso_ts() -> str:
 
 
 def _jsonable(obj: Any) -> Any:
-    """Recursively convert objects to JSON-safe types."""
     if isinstance(obj, dict):
         return {k: _jsonable(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple, set)):
@@ -32,8 +31,6 @@ def _jsonable(obj: Any) -> Any:
 
 
 class JsonFormatter(logging.Formatter):
-    """Log formatter that writes JSON lines matching the required schema."""
-
     _STANDARD_ATTRS = frozenset({
         "name", "msg", "args", "levelname", "levelno", "pathname",
         "filename", "module", "exc_info", "exc_text", "stack_info",
@@ -63,24 +60,16 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, ensure_ascii=False, default=str)
 
 
-class JsonLogger:
-    """Convenience class for structured logging, directly writes to stdout."""
-
+class StructuredLogger:
     def __init__(self) -> None:
-        self._std = logging.getLogger("retrieval.json")
-        self._level_map = {
-            logging.DEBUG: "debug",
-            logging.INFO: "info",
-            logging.WARNING: "warn",
-            logging.ERROR: "error",
-        }
+        self._log = logging.getLogger("retrieval")
         self._instance = os.getenv("POD_NAME", os.getenv("HOSTNAME", "unknown"))
         self._namespace = os.getenv("POD_NAMESPACE", "unknown")
 
-    def _emit(self, level_int: int, message: str, **fields: Any) -> None:
+    def _emit(self, level: str, message: str, **fields: Any) -> None:
         record = {
             "timestamp": _iso_ts(),
-            "level": self._level_map.get(level_int, "info"),
+            "level": level,
             "message": message or "",
             "service": SERVICE_NAME,
             "environment": DEPLOYMENT_ENVIRONMENT,
@@ -98,38 +87,34 @@ class JsonLogger:
             except Exception:
                 pass
 
-    def debug(self, msg: str, **kw: Any) -> None:
-        if self._std.isEnabledFor(logging.DEBUG):
-            self._emit(logging.DEBUG, msg, **kw)
-
     def info(self, msg: str, **kw: Any) -> None:
-        if self._std.isEnabledFor(logging.INFO):
-            self._emit(logging.INFO, msg, **kw)
+        if self._log.isEnabledFor(logging.INFO):
+            self._emit("info", msg, **kw)
 
     def warn(self, msg: str, **kw: Any) -> None:
-        if self._std.isEnabledFor(logging.WARNING):
-            self._emit(logging.WARNING, msg, **kw)
+        if self._log.isEnabledFor(logging.WARNING):
+            self._emit("warn", msg, **kw)
 
     def error(self, msg: str, **kw: Any) -> None:
-        self._emit(logging.ERROR, msg, **kw)
+        self._emit("error", msg, **kw)
 
     def exception(self, msg: str, **kw: Any) -> None:
         kw.setdefault("exc_info", True)
-        self._emit(logging.ERROR, msg, **kw)
+        self._emit("error", msg, **kw)
 
 
-log = JsonLogger()
+log = StructuredLogger()
 
 
 def setup_logging(level: str | None = None) -> str:
     configured = (level or LOG_LEVEL or "INFO").strip().upper()
-    valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+    valid_levels = {"INFO", "WARNING", "ERROR", "CRITICAL"}
     aliases = {"WARN": "WARNING"}
     configured = aliases.get(configured, configured)
     if configured not in valid_levels:
-        configured = "WARNING"
-    log_level = getattr(logging, configured)
+        configured = "INFO"
 
+    log_level = getattr(logging, configured)
     root = logging.getLogger()
     root.setLevel(log_level)
     for h in list(root.handlers):
@@ -149,10 +134,6 @@ def setup_logging(level: str | None = None) -> str:
     return configured
 
 
-def apply_after_uvicorn(level: str | None = None) -> str:
-    return setup_logging(level)
-
-
 def safe_stack(exc: BaseException | None) -> str:
     if exc is None:
         return ""
@@ -162,8 +143,7 @@ def safe_stack(exc: BaseException | None) -> str:
 
 __all__ = [
     "JsonFormatter",
-    "JsonLogger",
-    "apply_after_uvicorn",
+    "StructuredLogger",
     "log",
     "safe_stack",
     "setup_logging",
