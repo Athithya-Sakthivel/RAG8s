@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import json
+
 import asyncio
+import json
 import logging
 import os
 import time
@@ -22,6 +23,10 @@ from clients import (
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
+
+# -------------------------------------------------
+#  New citation helpers
+# -------------------------------------------------
 from citations_helpers import (
     build_numbered_prompt_and_ui_chunks,
     deterministic_summarize,
@@ -29,6 +34,7 @@ from citations_helpers import (
     parse_s3_path,
     generate_presigned_url_sync,
 )
+
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from settings import (
     ANSWER_PROMPT_TEMPLATE,
@@ -42,6 +48,8 @@ from settings import (
     CORPUS_VERSION,
     DENSE_URL,
     DEPLOYMENT_ENVIRONMENT,
+    ENABLE_PRESIGNED_URLS,
+    PRESIGNED_URL_TTL_SECONDS,
     ENABLE_PROMETHEUS,
     ENV,
     FETCH_K,
@@ -63,8 +71,6 @@ from settings import (
     SPARSE_URL,
     TENANT_ID,
     GenerateRequest,
-    ENABLE_PRESIGNED_URLS,
-    PRESIGNED_URL_TTL_SECONDS,
 )
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -72,6 +78,8 @@ from slowapi.util import get_remote_address
 from starlette.background import BackgroundTask
 from starlette.responses import Response as StarletteResponse
 from store import QdrantStore, QdrantStoreConfig
+
+#  Logging & Metrics (split after rename)
 from retriever_logging import log, safe_stack, setup_logging
 from metrics import (
     http_request_count,
@@ -322,6 +330,9 @@ def _sse(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False, separators=(',', ':'))}\n\n"
 
 
+# ---------------------------------------------------------------------------
+# Core streaming endpoint (with corrected chunk source)
+# ---------------------------------------------------------------------------
 async def _generate_stream_core(request: Request) -> StreamingResponse:
     req = await _load_generate_request(request)
     top_k, fetch_k, max_tokens = _normalize_generation_limits(req)
@@ -445,10 +456,11 @@ async def _generate_stream_core(request: Request) -> StreamingResponse:
                 answer = deterministic_summarize(llm_lines)
 
             cache_state["answer"] = answer
-            cache_state["chunks"] = pipeline.chunks if req.return_chunks else []
+            # Use ui_chunks (which contain meta_items) instead of pipeline.chunks
+            cache_state["chunks"] = ui_chunks if req.return_chunks else []
             yield _sse("done", {
                 "answer": answer,
-                "chunks": pipeline.chunks if req.return_chunks else None,
+                "chunks": ui_chunks if req.return_chunks else None,
                 "retrieval": pipeline.retrieval,
                 "cache": pipeline.cache,
                 "cache_hit": pipeline.cache_hit,
@@ -492,6 +504,9 @@ async def _load_generate_request(request: Request) -> GenerateRequest:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
 @app.post("/generate/stream")
 @limiter.limit("60/minute")
 async def api_stream(request: Request):

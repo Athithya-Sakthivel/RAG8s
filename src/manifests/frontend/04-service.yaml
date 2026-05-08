@@ -9,7 +9,6 @@ metadata:
     app.kubernetes.io/managed-by: frontend-manifest-generator
     app.kubernetes.io/component: frontend
 spec:
-  clusterIP: None
   type: ClusterIP
   selector:
     app.kubernetes.io/name: frontend

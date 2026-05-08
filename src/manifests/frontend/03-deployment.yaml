@@ -120,6 +120,10 @@ spec:
           value: valkey.valkey.svc.cluster.local
         - name: VALKEY_SERVICE_PORT
           value: '6379'
+        - name: ENABLE_PRESIGNED_URLS
+          value: 'true'
+        - name: PRESIGNED_URL_TTL_SECONDS
+          value: '3600'
         envFrom:
         - secretRef:
             name: frontend-secrets

@@ -55,7 +55,8 @@ kubectl delete -f src/manifests/frontend || true
 python3 src/infra/rag/spa_service.py --apply-secrets
 python3 src/infra/rag/spa_service.py --write
 python3 src/infra/rag/spa_service.py --apply
-
+sleep 10
+kubectl get pods -A
 
 python3 src/infra/observability/clickhouse.py --delete --confirm
 python3 src/infra/observability/clickhouse.py --rollout
