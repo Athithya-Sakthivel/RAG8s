@@ -45,5 +45,6 @@ while [ -z "$POD" ]; do
   sleep "$WAIT_POLL"
 done
 
+sleep 20
 log "Streaming logs from pod $POD..."
 kubectl logs -n "$NAMESPACE" "$POD" -c indexer --follow --tail=200

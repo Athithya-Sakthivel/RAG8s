@@ -30,7 +30,7 @@ spec:
             emptyDir: {}
           containers:
           - name: indexer
-            image: ghcr.io/athithya-sakthivel/indexing-pipeline:2026-05-09-09-38--403ed30@sha256:e3fb21311e763228c9fdae6cbb3491d274016159a747c5cdf04215d67e2a1462
+            image: ghcr.io/athithya-sakthivel/indexing-pipeline:2026-05-09-16-28--d613be2@sha256:f293916991de710b8d725dfe71aaa74e2148c45913e420d76c77829a5482df69
             imagePullPolicy: IfNotPresent
             command:
             - /opt/venv/bin/python
@@ -54,9 +54,9 @@ spec:
             - name: QDRANT_URL
               value: http://qdrant.qdrant.svc.cluster.local:6333
             - name: DENSE_URL
-              value: http://dense-svc.models.svc.cluster.local:8200
+              value: http://dense-svc.inference.svc.cluster.local:8200
             - name: SPARSE_URL
-              value: http://sparse-svc.models.svc.cluster.local:8201
+              value: http://sparse-svc.inference.svc.cluster.local:8201
             - name: S3_BUCKET
               value: s3-temp-bucket-mlsecops-681802563986
             - name: DATA_S3_BUCKET

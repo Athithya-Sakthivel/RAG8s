@@ -25,7 +25,7 @@ NAMESPACE         = os.getenv("CH_NAMESPACE", "logging")
 SERVICE_NAME      = os.getenv("CLICKHOUSE_SERVICE_NAME", "clickhouse")
 STS_NAME          = os.getenv("CLICKHOUSE_STS_NAME", "clickhouse")
 APP_LABEL         = os.getenv("CLICKHOUSE_APP_LABEL", "clickhouse")
-IMAGE             = os.getenv("CLICKHOUSE_IMAGE", "clickhouse/clickhouse-server:23.12.6@sha256:05c61b64b223582049b571401ce93c4de1c985f452977de195a6a13acb87ec9c")
+IMAGE             = os.getenv("CLICKHOUSE_IMAGE", "docker.io/clickhouse/clickhouse-server:26.4.1@sha256:1688b8976802967d4754307b408d00ee57fe0396b40c6ffc195be228699e4fc2")
 PVC_SIZE          = os.getenv("CLICKHOUSE_PVC_SIZE", "10Gi")
 STORAGE_CLASS     = os.getenv("CLICKHOUSE_STORAGE_CLASS", "default-storage-class")
 DB_NAME           = os.getenv("CLICKHOUSE_DB", "logs")
@@ -47,7 +47,6 @@ MANIFESTS_DIR     = os.getenv("CH_MANIFESTS_DIR", "src/manifests/clickhouse")
 
 RENDER_DIR       = Path(MANIFESTS_DIR).resolve()
 INIT_SQL_PATH    = RENDER_DIR / "init.sql"
-USERS_XML_PATH   = RENDER_DIR / "users-settings.xml"
 
 # ── helpers ────────────────────────────────────────────
 def sha256_str(s: str) -> str:
@@ -74,7 +73,25 @@ def atomic_write(path: Path, content: str) -> None:
     tmp.write_text(content, encoding="utf-8")
     tmp.replace(path)
 
+
+def prometheus_xml() -> str:
+    """Server-level Prometheus exporter configuration (config.d)."""
+    return """<?xml version="1.0"?>
+<clickhouse>
+  <listen_host>::</listen_host>
+  <prometheus>
+    <port>8001</port>
+    <endpoint>/metrics</endpoint>
+    <metrics>true</metrics>
+    <asynchronous_metrics>true</asynchronous_metrics>
+    <events>true</events>
+    <errors>true</errors>
+    <histograms>true</histograms>
+  </prometheus>
+</clickhouse>"""
+
 def users_xml() -> str:
+    """User profile settings (users.d)."""
     return f"""<?xml version="1.0"?>
 <clickhouse>
   <profiles>
@@ -86,6 +103,7 @@ def users_xml() -> str:
     </default>
   </profiles>
 </clickhouse>"""
+
 
 def init_sql() -> str:
     ttl = f" TTL toDateTime(ts) + INTERVAL {TTL_DAYS} DAY" if TTL_DAYS > 0 else ""
@@ -131,6 +149,7 @@ def build_service() -> Dict[str, Any]:
 def build_statefulset() -> Dict[str, Any]:
     labels = {"app": APP_LABEL}
     chests = {
+        "prometheus-config": sha256_str(prometheus_xml()),
         "users-config": sha256_str(users_xml()),
         "init-sql": sha256_str(init_sql()),
         "image": sha256_str(IMAGE),
@@ -148,7 +167,14 @@ def build_statefulset() -> Dict[str, Any]:
         "volumeMounts":[
             {"name":"data","mountPath":"/var/lib/clickhouse"},
             {"name":"clickhouse-logs","mountPath":"/var/log/clickhouse-server"},
-            {"name":"users-config","mountPath":"/etc/clickhouse-server/users.d","readOnly":True},
+            # config.d – Prometheus settings (read-only ConfigMap)
+            {"name":"prometheus-config","mountPath":"/etc/clickhouse-server/config.d","readOnly":True},
+            # users.d – writable emptyDir so entrypoint can write default-user.xml
+            {"name":"users-d","mountPath":"/etc/clickhouse-server/users.d"},
+            # User profile settings – mounted as a single file inside the writable users.d
+            {"name":"users-config","mountPath":"/etc/clickhouse-server/users.d/10-settings.xml","subPath":"10-settings.xml","readOnly":True},
+            # /tmp – required by v26.4.1+ for entrypoint temporary files
+            {"name":"tmp","mountPath":"/tmp"},
         ],
         "resources":{
             "requests":{"cpu":REQ_CPU,"memory":REQ_MEM},
@@ -187,7 +213,10 @@ def build_statefulset() -> Dict[str, Any]:
                     "containers":[container],
                     "volumes":[
                         {"name":"clickhouse-logs","emptyDir":{}},
-                        {"name":"users-config","configMap":{"name":f"{STS_NAME}-users-settings"}},
+                        {"name":"prometheus-config","configMap":{"name":f"{STS_NAME}-prometheus-settings"}},
+                        {"name":"users-d","emptyDir":{}},
+                        {"name":"users-config","configMap":{"name":f"{STS_NAME}-users-settings","items":[{"key":"10-settings.xml","path":"10-settings.xml"}]}},
+                        {"name":"tmp","emptyDir":{}},
                     ],
                 },
             },
@@ -202,6 +231,14 @@ def build_statefulset() -> Dict[str, Any]:
                 }
             ],
         },
+    }
+
+def build_prometheus_configmap() -> Dict[str, Any]:
+    return {
+        "apiVersion":"v1",
+        "kind":"ConfigMap",
+        "metadata":{"name":f"{STS_NAME}-prometheus-settings","namespace":NAMESPACE},
+        "data":{"prometheus.xml":prometheus_xml()},
     }
 
 def build_users_configmap() -> Dict[str, Any]:
@@ -226,14 +263,15 @@ def generate_manifests():
     clean_manifest_dir()
     atomic_write(RENDER_DIR/"00-namespace.yaml", yaml.safe_dump(build_namespace(), sort_keys=False))
     atomic_write(RENDER_DIR/"10-service.yaml", yaml.safe_dump(build_service(), sort_keys=False))
-    atomic_write(RENDER_DIR/"20-configmap.yaml", yaml.safe_dump(build_users_configmap(), sort_keys=False))
+    atomic_write(RENDER_DIR/"20-prometheus-configmap.yaml", yaml.safe_dump(build_prometheus_configmap(), sort_keys=False))
+    atomic_write(RENDER_DIR/"21-users-configmap.yaml", yaml.safe_dump(build_users_configmap(), sort_keys=False))
     atomic_write(RENDER_DIR/"30-statefulset.yaml", yaml.safe_dump(build_statefulset(), sort_keys=False))
     atomic_write(INIT_SQL_PATH, init_sql())
-    atomic_write(USERS_XML_PATH, users_xml())
     # combined
     parts = [
         yaml.safe_dump(build_namespace(), sort_keys=False),
         yaml.safe_dump(build_service(), sort_keys=False),
+        yaml.safe_dump(build_prometheus_configmap(), sort_keys=False),
         yaml.safe_dump(build_users_configmap(), sort_keys=False),
         yaml.safe_dump(build_statefulset(), sort_keys=False),
     ]
@@ -245,8 +283,9 @@ def apply_manifests():
         sys.exit("kubectl not found")
     generate_manifests()
     run(["kubectl","apply","-f",str(RENDER_DIR/"00-namespace.yaml")])
-    run(["kubectl","apply","-f",str(RENDER_DIR/"20-configmap.yaml")])
-    # secret (create/update) – use subprocess list with shell=False
+    run(["kubectl","apply","-f",str(RENDER_DIR/"20-prometheus-configmap.yaml")])
+    run(["kubectl","apply","-f",str(RENDER_DIR/"21-users-configmap.yaml")])
+    # secret (create/update)
     secret_yaml = f"""apiVersion: v1
 kind: Secret
 metadata:
@@ -285,6 +324,7 @@ def delete_manifests(confirm=False):
     run(["kubectl","delete","statefulset",STS_NAME,"-n",NAMESPACE,"--ignore-not-found"])
     run(["kubectl","delete","service",SERVICE_NAME,"-n",NAMESPACE,"--ignore-not-found"])
     run(["kubectl","delete","configmap",f"{STS_NAME}-users-settings","-n",NAMESPACE,"--ignore-not-found"])
+    run(["kubectl","delete","configmap",f"{STS_NAME}-prometheus-settings","-n",NAMESPACE,"--ignore-not-found"])
     run(["kubectl","delete","secret",SECRET_NAME,"-n",NAMESPACE,"--ignore-not-found"])
     run(["kubectl","delete","namespace",NAMESPACE,"--ignore-not-found"])
     clean_manifest_dir()

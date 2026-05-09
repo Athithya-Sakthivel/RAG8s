@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: clickhouse-prometheus-settings
+  namespace: logging
+data:
+  prometheus.xml: "<?xml version=\"1.0\"?>\n<clickhouse>\n  <listen_host>::</listen_host>\n\
+    \  <prometheus>\n    <port>8001</port>\n    <endpoint>/metrics</endpoint>\n  \
+    \  <metrics>true</metrics>\n    <asynchronous_metrics>true</asynchronous_metrics>\n\
+    \    <events>true</events>\n    <errors>true</errors>\n    <histograms>true</histograms>\n\
+    \  </prometheus>\n</clickhouse>"

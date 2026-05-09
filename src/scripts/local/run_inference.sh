@@ -68,6 +68,7 @@ python3 src/infra/observability/vector.py --rollout
 sleep 5
 kubectl get pods -n logging
 
+
 kubectl delete ns monitoring && kubectl apply -f src/argocd/prometheus-application.yaml && sleep 20 && kubectl get pods -n monitoring
 
 sleep 5

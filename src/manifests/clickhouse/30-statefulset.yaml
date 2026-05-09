@@ -13,15 +13,16 @@ spec:
     metadata:
       labels: *id001
       annotations:
+        checksum/prometheus-config: f24406ab4e9dbcf96035d39d545c3071992264ff4ee35f316d58c7cf5464e256
         checksum/users-config: e7361744d230480ce6395df468ee7cd8a919019141a5548dd5ec54178939eb9d
         checksum/init-sql: faa4bfead08a9493c32d3aeb02a1c101a683d17e68e02ac773ea3be168beed24
-        checksum/image: 68898c62b6b531111eff138f9a0a1093a1b4fbe8e99d089d39e602f1b0c10c07
+        checksum/image: a267eee4d3200da3a1e06ffa07ca17ea07e46f1b99640e10142c5ed00fea8435
     spec:
       securityContext:
         fsGroup: 101
       containers:
       - name: clickhouse
-        image: clickhouse/clickhouse-server:23.12.6@sha256:05c61b64b223582049b571401ce93c4de1c985f452977de195a6a13acb87ec9c
+        image: docker.io/clickhouse/clickhouse-server:26.4.1@sha256:1688b8976802967d4754307b408d00ee57fe0396b40c6ffc195be228699e4fc2
         ports:
         - containerPort: 8123
           name: http
@@ -34,9 +35,17 @@ spec:
           mountPath: /var/lib/clickhouse
         - name: clickhouse-logs
           mountPath: /var/log/clickhouse-server
-        - name: users-config
-          mountPath: /etc/clickhouse-server/users.d
+        - name: prometheus-config
+          mountPath: /etc/clickhouse-server/config.d
           readOnly: true
+        - name: users-d
+          mountPath: /etc/clickhouse-server/users.d
+        - name: users-config
+          mountPath: /etc/clickhouse-server/users.d/10-settings.xml
+          subPath: 10-settings.xml
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
         resources:
           requests:
             cpu: '1'
@@ -74,9 +83,19 @@ spec:
       volumes:
       - name: clickhouse-logs
         emptyDir: {}
+      - name: prometheus-config
+        configMap:
+          name: clickhouse-prometheus-settings
+      - name: users-d
+        emptyDir: {}
       - name: users-config
         configMap:
           name: clickhouse-users-settings
+          items:
+          - key: 10-settings.xml
+            path: 10-settings.xml
+      - name: tmp
+        emptyDir: {}
   volumeClaimTemplates:
   - metadata:
       name: data

@@ -22,7 +22,7 @@ DEFAULTS: dict[str, Any] = {
     "SERVICE_NAME": "retriever",
     "SERVICE_ACCOUNT_NAME": "retriever-sa",
     "SECRET_NAME": "retriever-secrets",
-    "IMAGE": "ghcr.io/athithya-sakthivel/retriever:2026-05-08-17-12--f692b28@sha256:47a621658ab824a287ba96bba2cd74d740c432739bb6b802dbf2690c8079b3c2",
+    "IMAGE": "ghcr.io/athithya-sakthivel/retriever:2026-05-09-16-28--d613be2@sha256:407a6b09f24bf44b4aec7430ba83639e1aa6eb47d17be4df9a23e924266e1b88",
     "IMAGE_PULL_POLICY": "Always",
     "REPLICAS": 1,
     "CONTAINER_PORT": 8001,
