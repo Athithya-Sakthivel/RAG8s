@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # validate-observability.sh — Complete observability pipeline health check
 # Dumps all context about Vector, ClickHouse, schema, and log pipeline status.
-set -euo pipefail
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'

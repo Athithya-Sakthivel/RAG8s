@@ -3,11 +3,11 @@ on:
   push:
     branches: [main]
     paths:
-      - src/infra/indexing_pipeline/**
+      - src/indexing_pipeline/**
       - .github/workflows/indexing_runtime_image.yaml
   pull_request:
     paths:
-      - src/infra/indexing_pipeline/**
+      - src/indexing_pipeline/**
 
 permissions:
   contents: read

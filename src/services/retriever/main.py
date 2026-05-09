@@ -131,13 +131,11 @@ class RequestIdMiddleware:
 
         await self.app(scope, receive, send_wrapper)
 
-
-async def metrics_endpoint():
+async def metrics_endpoint(_request: Request):
     return StarletteResponse(
         generate_latest(),
         media_type=CONTENT_TYPE_LATEST,
     )
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

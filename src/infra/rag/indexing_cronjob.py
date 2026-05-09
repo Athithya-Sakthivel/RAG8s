@@ -435,7 +435,7 @@ def apply_secret_direct(name: str, ns: str, data: dict[str, str]) -> None:
     cmd.extend(["--dry-run=client", "-o", "yaml"])
     proc = subprocess.run(cmd, check=True, capture_output=True, text=True)
     subprocess.run(["kubectl", "apply", "-f", "-"], input=proc.stdout, text=True, check=True, capture_output=True)
-    log.info("Applied secret '%s' in '%s'", name, ns)
+    log.info("Applied secret in indexing ns")
 
 def generate_manifests(cfg: dict[str, Any], secret_env: dict[str, str], force: bool = False) -> None:
     manifests_dir = cfg["MANIFESTS_DIR"]
