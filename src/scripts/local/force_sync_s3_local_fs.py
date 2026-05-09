@@ -16,7 +16,6 @@ Deterministic behavior:
  - Dry-run supported
 
 Notes:
- - S3 has no Azure Blob lease-equivalent built-in locking primitive.
  - Change detection uses sha256 metadata first, then size/ETag heuristics.
 """
 

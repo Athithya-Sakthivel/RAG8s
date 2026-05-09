@@ -1,23 +1,9 @@
 
-# Add the repository
-helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 
-# Update repository cache
-helm repo update
 
-# Now deploy
-helm upgrade --install prometheus prometheus-community/prometheus \
-  --version 29.6.0 \
-  --namespace monitoring \
-  --create-namespace \
-  --values src/argocd/prometheus-values.yaml
-  
-
-helm upgrade --install prometheus prometheus-community/prometheus \
-  --version 29.6.0 \
-  --namespace monitoring \
-  --create-namespace \
-  --values src/argocd/prometheus-values.yaml \
-  --set kube-state-metrics.enabled=false \
-  --set prometheus-node-exporter.enabled=false \
-  --set prometheus-pushgateway.enabled=false
+kubectl create secret generic alertmanager-secrets \
+  -n monitoring \
+  --from-literal="slack-api-url=${SLACK_WEBHOOK_URL}" \
+  --from-literal="pagerduty-routing-key=${PAGERDUTY_ROUTING_KEY}" \
+  --dry-run=client -o yaml | kubectl apply -f -
+kubectl apply -f src/argocd/prometheus-application.yaml

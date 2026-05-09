@@ -1,6 +1,6 @@
-# indexing cronjob
-CVE-2023-45853 # Ignore zlib false positive (Debian marks CVE-2023-45853 as `will_not_fix`)
-CVE-2025-7458 # does not process untrusted SQL. CronJob is internal, the attack surface is limited.
+# indexing pipeline - non-sensitive tiktoken model names flagged as secrets
+DS-0031:src/indexing_pipeline/Dockerfile.base:ENV TOKEN_ENCODER
+DS-0031:src/indexing_pipeline/Dockerfile.base:ENV TOKEN_ENCODER_MODEL
 
 # retriever
 KSV-0109 # False positive: `LLM_MAX_TOKENS` is a non-sensitive numeric config, not a secret
@@ -10,3 +10,4 @@ AWS-0132 # Ignores â€œbucket does not encrypt data with a customer managed keyâ€
 
 # fastembed images
 CVE-2026-33845 # Debian GnuTLS DTLS vulnerability - app does not use DTLS, temporary until 3.8.13-1 reaches stable
+

@@ -1,0 +1,433 @@
+RAG PRODUCTION STRATEGY: KNOWLEDGE DISCOVERY & SOURCE MAPPING FIRST
+
+1. Core idea
+
+A production Retrieval-Augmented Generation (RAG) system does not begin with embeddings, chunking, or prompt engineering. It begins with knowledge discovery. The first responsibility is to identify what information actually exists in the organization, where it lives, who owns it, how current it is, and whether it should be trusted for retrieval at all.
+
+This strategy treats the knowledge layer as a governed asset. Instead of assuming every document is equally valid, the system establishes a map of the enterprise knowledge landscape before any indexing pipeline is built. That map becomes the control plane for retrieval. It determines which sources are admitted, which sources are ranked higher, which sources are excluded, and which sources require manual review.
+
+This is valuable because RAG failures are often data-governance failures disguised as model failures. When retrieval returns irrelevant, outdated, contradictory, or unauthorized content, the language model is forced to synthesize an answer from weak evidence. Better retrieval begins with better source understanding.
+
+2. Why this strategy matters
+
+Many teams build RAG systems by starting with a document loader and a vector database. That is useful for a prototype, but it is not enough for a production system with real users, real risk, and real operational demands.
+
+A production environment typically includes:
+- multiple document formats
+- stale and current versions of the same policy
+- distributed ownership across departments
+- content with different confidentiality levels
+- legal, compliance, and audit requirements
+- contradictory sources of truth
+- incomplete or low-quality documents
+- recurring content updates
+
+If those issues are not handled before indexing, the retrieval layer becomes noisy and brittle. The system may appear to work in demos but fail under realistic workloads. The source mapping strategy reduces this risk by forcing the organization to answer foundational questions first.
+
+3. What knowledge discovery means
+
+Knowledge discovery is the structured process of identifying and classifying the information ecosystem that will feed the RAG system.
+
+It includes:
+- inventorying all candidate content sources
+- identifying source owners
+- determining source authority
+- assessing freshness and update frequency
+- defining source purpose
+- marking sensitivity and access restrictions
+- identifying duplicate or overlapping content
+- detecting contradictions between sources
+- deciding whether a source is in scope, out of scope, or conditional
+
+This is not merely data cataloging. It is retrieval readiness assessment. A document can exist in storage and still be unsuitable for RAG if it is obsolete, ambiguous, or untrusted.
+
+4. What source mapping means
+
+Source mapping is the explicit representation of the knowledge landscape in machine-usable form.
+
+A practical source map may include fields such as:
+- source_id
+- source_name
+- source_type
+- owner_team
+- owner_contact
+- last_updated_at
+- review_cycle
+- authority_level
+- trust_score
+- access_policy
+- content_domain
+- language
+- canonical_status
+- duplication_cluster
+- ingestion_priority
+- exclusion_reason
+- retention_policy
+
+This metadata becomes as important as the document text itself. When a query arrives, retrieval can use this map to filter, rank, and explain where the answer came from. In production, that metadata is often what separates reliable systems from brittle ones.
+
+5. Why this comes before embeddings
+
+Embeddings are useful for semantic similarity, but they do not solve governance. A high-dimensional vector index can tell you what is similar, not what is authoritative. It cannot reliably tell you whether the source is current, approved, or appropriate for a given user.
+
+If the organization indexes everything without source mapping, the system may retrieve:
+- archived policies instead of active ones
+- a team wiki instead of the official handbook
+- an email thread instead of the current contract clause
+- a draft document instead of the signed version
+- a local file copy instead of the canonical repository
+
+Those are not model failures. They are source selection failures. Source mapping reduces that risk by encoding source hierarchy before indexing begins.
+
+6. The operating principle
+
+The strategy can be summarized in a single operational principle:
+
+Do not ask the retriever to discover authority. Tell it where authority lives.
+
+That means the organization must define, in advance, which sources are canonical, which are supplementary, and which should not be retrieved at all. Once that classification exists, retrieval can use it as a hard constraint or as a ranking feature.
+
+7. Production pipeline using this strategy
+
+A strong production implementation usually follows this order:
+
+Step 1: Source discovery
+Identify every repository, file share, content management system, knowledge base, help desk article set, policy archive, and external source that could potentially inform answers.
+
+Step 2: Source profiling
+For each source, capture format, ownership, update cadence, access controls, domain relevance, and known quality issues.
+
+Step 3: Source authority assessment
+Classify sources by authority level:
+- canonical
+- approved secondary
+- contextual reference
+- deprecated
+- excluded
+
+Step 4: Source normalization
+Standardize source metadata so that all sources can be compared and filtered consistently.
+
+Step 5: Ingestion policy design
+Decide what to ingest, at what frequency, with what chunking strategy, and under what validation rules.
+
+Step 6: Retrieval policy design
+Define how source metadata affects ranking, filtering, and fallbacks.
+
+Step 7: Answer policy design
+Specify how the system cites sources, handles conflicts, and explains uncertainty.
+
+Step 8: Monitoring and drift detection
+Track how sources evolve and whether trust assumptions remain valid.
+
+8. The trust model
+
+A production RAG system needs a trust model. Trust is not binary. It is graded and contextual.
+
+Examples of trust dimensions:
+- freshness: how recent the source is
+- authority: whether the source is officially approved
+- completeness: whether the source covers the topic fully
+- stability: how often the content changes
+- consistency: whether the source conflicts with other sources
+- accessibility: whether the user is permitted to access it
+- provenance: how the source was created and validated
+
+A strong trust model lets the system differentiate between a policy document, a draft update, a team note, and a stale export. That differentiation directly improves answer quality.
+
+9. Canonical source designation
+
+One of the highest-value parts of source mapping is canonical designation. For each topic area, the organization should know which source owns the truth.
+
+Examples:
+- HR policy -> official HR handbook
+- product pricing -> pricing service or approved pricing sheet
+- legal clauses -> contract repository
+- engineering standards -> architecture decision records
+- customer support procedures -> knowledge base with release control
+- finance data -> reporting system or approved ledger export
+
+Without a canonical source rule, retrieval will often return whatever is semantically closest, not whatever is operationally correct.
+
+10. Handling duplicate content
+
+Most enterprise environments contain duplicated or near-duplicated content. Copies appear in shared drives, email attachments, wiki pages, and exported PDFs. A naive RAG index may treat all of them equally.
+
+Source mapping should detect duplicates and assign one of the following treatments:
+- canonical master
+- mirrored copy
+- archived copy
+- derivative note
+- blocked duplicate
+
+Duplicates create two problems:
+1. They increase retrieval noise.
+2. They create answer inconsistency when different copies diverge.
+
+A duplicate-aware source map allows retrieval to prefer the master version and ignore stale replicas.
+
+11. Handling conflicting sources
+
+Conflict is common in large organizations. Two departments may publish different guidance on the same topic. If the retrieval layer is unaware of conflict, the model may blend incompatible statements into a single answer.
+
+The source mapping strategy requires explicit conflict resolution rules:
+- higher authority source wins
+- more recent approved source wins
+- source with direct domain ownership wins
+- unresolved conflicts are surfaced, not hidden
+
+In cases where conflict cannot be resolved automatically, the answer layer should disclose the conflict rather than invent a synthesis.
+
+12. Freshness and review cadence
+
+Freshness is one of the most important metadata attributes in production RAG. A source that was correct last year may now be misleading.
+
+A source map should include:
+- last_updated_at
+- next_review_due
+- expiry_date if applicable
+- content owner
+- review status
+
+This allows the system to:
+- prefer fresh sources
+- flag stale sources
+- suppress expired content
+- route outdated content for revalidation
+
+Freshness controls are especially important in policy, legal, security, finance, medical, and product documentation contexts.
+
+13. Access control and security
+
+Production RAG cannot ignore authorization. If the system retrieves content that the user should not see, it creates a data leakage risk.
+
+Source mapping should integrate access controls such as:
+- role-based access
+- document-level permissions
+- domain-level restrictions
+- sensitivity labels
+- region-specific compliance constraints
+
+Retrieval should operate only over sources that are authorized for the current user and use case. This makes the source map both a quality tool and a security boundary.
+
+14. Ingestion policy design
+
+Once the source map exists, ingestion can be engineered with purpose.
+
+Instead of ingesting everything equally, the system can define rules such as:
+- canonical sources ingest hourly
+- approved secondary sources ingest daily
+- archived sources ingest only for historical lookup
+- deprecated sources are excluded from live retrieval
+- sensitive sources require additional validation
+
+This reduces index bloat and improves retrieval precision. It also avoids wasting compute on low-value data.
+
+15. Chunking should follow source type
+
+Different source types require different chunking logic. Source mapping helps decide the correct preprocessing strategy.
+
+Examples:
+- policy documents: section-aware chunking
+- manuals: heading-based chunking
+- FAQs: Q&A pair chunking
+- transcripts: speaker-turn chunking
+- spreadsheets: row/column semantic extraction
+- PDFs: layout-aware segmentation
+- code or technical docs: structure-preserving chunking
+
+A generic chunker used everywhere will often produce fragments that are semantically incoherent. Source mapping lets the pipeline choose the right treatment per source class.
+
+16. Retrieval ranking with source metadata
+
+Once the source map is in place, retrieval does not have to rely on semantic similarity alone. It can combine semantic relevance with source metadata.
+
+A ranking model may consider:
+- embedding similarity
+- authority score
+- freshness score
+- user permission score
+- domain match
+- canonical status
+- historical answer success rate
+
+This is much stronger than pure vector similarity. A slightly less similar but authoritative source is often better than a semantically close but unofficial one.
+
+17. Explanation and provenance
+
+A production RAG system should be able to explain not only what answer it produced, but why those sources were used.
+
+Source mapping enables provenance reporting such as:
+- answer used canonical HR handbook section 4.2
+- answer excluded deprecated policy memo from 2023
+- answer selected the latest approved pricing sheet
+- answer found a conflict between two legal drafts and surfaced the discrepancy
+
+This is essential for user trust, auditability, and debugging.
+
+18. Failure modes this strategy prevents
+
+The knowledge discovery and source mapping strategy reduces several common failure modes:
+
+Hallucination amplification
+The model fabricates detail because retrieval returned weak evidence.
+
+Stale answer syndrome
+The system answers from old documents that are still semantically similar.
+
+Shadow source dependence
+A hidden or unofficial source becomes the effective truth.
+
+Permission leakage
+The retrieval layer exposes content the user should not access.
+
+Conflict blending
+The model mixes incompatible statements from competing sources.
+
+Index pollution
+Low-value or duplicate content overwhelms high-value content.
+
+These are systemic issues. They are much easier to prevent at the source layer than to fix after ingestion.
+
+19. Operational governance
+
+Source mapping is not a one-time exercise. It requires governance.
+
+Typical governance workflow:
+- source onboarding
+- periodic review
+- owner reassignment
+- freshness audits
+- deprecation reviews
+- conflict escalation
+- change logging
+
+This means the source map should live as a managed artifact, not a static spreadsheet left behind after implementation. In mature deployments, it becomes part of the knowledge operations process.
+
+20. Metrics that matter
+
+A serious production strategy should track metrics tied to source quality, not just model output quality.
+
+Useful metrics include:
+- canonical source coverage
+- percent of retrievals from approved sources
+- stale source hit rate
+- duplicate hit rate
+- unresolved conflict rate
+- permission-denied retrieval attempts
+- answer citation precision
+- answer citation recall
+- source freshness distribution
+- manual override frequency
+
+These metrics help teams see whether the knowledge layer is healthy.
+
+21. Human-in-the-loop control
+
+Some sources require human approval before they become retrievable. That is especially true for regulated, sensitive, or fast-changing domains.
+
+Human-in-the-loop controls can include:
+- source approval queues
+- content owner sign-off
+- red-team review for sensitive material
+- conflict arbitration
+- periodic re-certification of canonical status
+
+This does not slow the system down unnecessarily. It ensures that the system’s highest-trust sources remain defensible.
+
+22. Why this is a strategic advantage
+
+The organizations that master source mapping gain several advantages:
+- better answer accuracy
+- more stable behavior over time
+- lower risk of factual drift
+- fewer retrieval surprises
+- stronger auditability
+- easier incident investigation
+- clearer ownership of knowledge domains
+
+This turns RAG from a fragile demo into a governed enterprise capability.
+
+23. Implementation pattern
+
+A pragmatic implementation usually begins with a narrow domain.
+
+For example:
+- choose one department
+- enumerate its top source systems
+- identify canonical sources for the most common queries
+- classify all other sources
+- apply metadata tags
+- build retrieval filters
+- validate outcomes against known questions
+
+After that, the pattern can expand to other domains. This incremental approach avoids the failure mode of trying to index the entire enterprise on day one.
+
+24. Example of a source map entry
+
+A source map entry might look conceptually like this:
+
+Source: Employee Handbook
+Type: PDF + CMS page
+Owner: HR Operations
+Authority: Canonical
+Freshness: Updated quarterly
+Access: All employees
+Status: Active
+Notes: Official source for leave, benefits, conduct, and policy rules
+
+Source: HR Policy Draft Folder
+Type: Shared drive
+Owner: HR Operations
+Authority: Draft
+Freshness: Variable
+Access: Restricted
+Status: Excluded from live retrieval
+Notes: Contains in-progress revisions and should not be used for final answers
+
+This distinction prevents accidental retrieval of draft material.
+
+25. How answer quality improves
+
+When source discovery and mapping are done well, answer quality improves in several ways:
+- fewer unsupported claims
+- better factual consistency
+- fewer citations to weak or irrelevant sources
+- more accurate recency handling
+- more defensible answers in regulated contexts
+
+The model is not merely “smarter.” It is better anchored.
+
+26. The deeper lesson
+
+The deeper lesson is that RAG is not just a model architecture. It is an information architecture. The quality of the output depends heavily on the structure of the knowledge system underneath it.
+
+The source mapping strategy accepts that reality and treats knowledge as a managed production asset. That is the difference between a prototype that works in a notebook and a production system that can survive real-world ambiguity.
+
+27. Practical checklist
+
+A team implementing this strategy should be able to answer the following before indexing:
+
+- What are the candidate sources?
+- Which are canonical?
+- Who owns each source?
+- Which sources are stale or deprecated?
+- Which sources overlap?
+- Which sources conflict?
+- Which sources are sensitive?
+- Which sources are user-visible?
+- How often is each source reviewed?
+- What is the fallback if the canonical source is missing?
+- What is the escalation path for ambiguous content?
+
+If these questions are unanswered, the RAG system is likely premature.
+
+28. Conclusion
+
+The most effective production RAG systems do not start by searching for text chunks. They start by establishing source truth.
+
+Knowledge discovery and source mapping create the control layer that makes retrieval trustworthy. They reduce hallucinations indirectly by reducing bad evidence. They improve governance by making authority explicit. They improve security by aligning retrieval with access policy. They improve reliability by ensuring that the model pulls from the right place, not merely the nearest place.
+
+In short, the strategy is simple to describe but powerful in practice: map the knowledge landscape before you index it, and treat source authority as a first-class design object.
+
+END

@@ -19,7 +19,7 @@ import sys
 import time
 import traceback
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import boto3
@@ -37,7 +37,7 @@ except Exception as e:
     print(
         json.dumps(
             {
-                "ts": datetime.now(UTC).isoformat(),
+                "ts": datetime.now(timezone.utc).isoformat(),
                 "level": "error",
                 "event": "startup",
                 "msg": "pyarrow missing",
@@ -121,7 +121,7 @@ logger.propagate = False
 
 
 def now_ts() -> str:
-    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def slog(level: str, event: str, msg: str = "", **extra: Any) -> None:

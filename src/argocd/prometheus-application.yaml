@@ -1,3 +1,4 @@
+# prometheus-application.yaml
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -15,32 +16,6 @@ spec:
     chart: prometheus
     targetRevision: 29.6.0
     helm:
-      parameters:
-        - name: server.statefulSet.replicaCount
-          value: "$PROM_REPLICAS"
-        - name: server.persistentVolume.size
-          value: "${PROM_PVC_SIZE_Gi}Gi"
-        - name: server.resources.requests.cpu
-          value: "$PROM_CPU_REQUEST"
-        - name: server.resources.requests.memory
-          value: "$PROM_MEM_REQUEST"
-        - name: server.resources.limits.cpu
-          value: "$PROM_CPU_LIMIT"
-        - name: server.resources.limits.memory
-          value: "$PROM_MEM_LIMIT"
-        - name: alertmanager.config.global.slack_api_url
-          value: "$SLACK_WEBHOOK_URL"
-        - name: alertmanager.config.receivers[1].slack_configs[0].api_url
-          value: "$SLACK_WEBHOOK_URL"
-        - name: alertmanager.config.receivers[2].pagerduty_configs[0].routing_key
-          value: "$PAGERDUTY_ROUTING_KEY"
-        - name: kube-state-metrics.enabled
-          value: "false"
-        - name: prometheus-node-exporter.enabled
-          value: "false"
-        - name: prometheus-pushgateway.enabled
-          value: "false"  
-
       values: |
         global:
           scrape_interval: 15s
@@ -56,14 +31,19 @@ spec:
             name: ""
 
         alertmanager:
-          enabled: false
+          enabled: true
           replicaCount: 1
           persistentVolume:
             enabled: false
+          # ── Mount the secret so Alertmanager can read the files ──
+          extraSecretMounts:
+            - name: alertmanager-secrets
+              mountPath: /etc/alertmanager/secrets
+              secretName: alertmanager-secrets
+              readOnly: true
           config:
             global:
               resolve_timeout: 5m
-              slack_api_url: ""
             route:
               receiver: 'default-receiver'
               group_by: ['alertname', 'namespace', 'severity']
@@ -93,9 +73,10 @@ spec:
                   - alertname =~ "^(FrontendHighStreamErrorRate|FrontendHighRateLimitHitRate)$"
             receivers:
               - name: 'default-receiver'
+              # Slack – api_url read from mounted secret file
               - name: 'slack-warnings'
                 slack_configs:
-                  - api_url: ""
+                  - api_url_file: /etc/alertmanager/secrets/slack-api-url
                     channel: '#rag-alerts'
                     username: 'RAG-Monitor'
                     icon_emoji: ':warning:'
@@ -107,9 +88,10 @@ spec:
                       *Summary:* {{ .Annotations.summary }}
                       *Description:* {{ .Annotations.description }}
                       {{ end }}
+              # PagerDuty – routing_key read from mounted secret file
               - name: 'pagerduty-critical'
                 pagerduty_configs:
-                  - routing_key: ""
+                  - routing_key_file: /etc/alertmanager/secrets/pagerduty-routing-key
                     severity: '{{ .CommonLabels.severity }}'
                     description: '{{ .CommonAnnotations.summary }}'
                     details:
@@ -124,7 +106,7 @@ spec:
           enabled: false
         prometheus-pushgateway:
           enabled: false
-          
+
         server:
           statefulSet:
             enabled: true
@@ -215,7 +197,7 @@ spec:
                 replacement: /api/v1/nodes/${1}/proxy/metrics/cadvisor
             metric_relabel_configs:
               - source_labels: [namespace]
-                regex: '(inference|monitoring|qdrant|valkey)'
+                regex: '(inference|monitoring|qdrant|valkey|logging)'
                 action: keep
           - job_name: 'qdrant'
             scrape_interval: 30s
@@ -245,229 +227,196 @@ spec:
                   - alert: RetrieverDown
                     expr: absent(up{job="retriever"}) or up{job="retriever"} == 0
                     for: 2m
-                    labels:
-                      severity: critical
+                    labels: {severity: critical}
                     annotations:
                       summary: "Retriever service is down"
                       description: "Retriever at retriever.inference.svc:8001 has been unreachable for 2 minutes."
                   - alert: FrontendDown
                     expr: absent(up{job="frontend-auth"}) or up{job="frontend-auth"} == 0
                     for: 2m
-                    labels:
-                      severity: critical
+                    labels: {severity: critical}
                     annotations:
                       summary: "Frontend/Auth service is down"
                       description: "Frontend at frontend.inference.svc:8000 has been unreachable for 2 minutes."
                   - alert: QdrantDown
                     expr: absent(up{job="qdrant"}) or up{job="qdrant"} == 0
                     for: 2m
-                    labels:
-                      severity: critical
+                    labels: {severity: critical}
                     annotations:
                       summary: "Qdrant peer is down"
                       description: "A Qdrant peer ({{ $labels.instance }}) has been unreachable for 2 minutes."
                   - alert: CloudflaredDown
                     expr: absent(up{job="cloudflared"}) or up{job="cloudflared"} == 0
                     for: 2m
-                    labels:
-                      severity: critical
+                    labels: {severity: critical}
                     annotations:
                       summary: "Cloudflared tunnel is down"
                       description: "The cloudflared metrics endpoint has been unreachable for 2 minutes."
                   - alert: ClickHouseDown
                     expr: absent(up{job="clickhouse"}) or up{job="clickhouse"} == 0
                     for: 2m
-                    labels:
-                      severity: warning
+                    labels: {severity: warning}
                     annotations:
                       summary: "ClickHouse is down"
-                      description: "ClickHouse at clickhouse.inference.svc.cluster.local:8001 is unreachable."
+                      description: "ClickHouse at clickhouse.logging.svc.cluster.local:8001 is unreachable."
                   - alert: VectorDown
                     expr: absent(up{job="vector"}) or up{job="vector"} == 0
                     for: 2m
-                    labels:
-                      severity: warning
+                    labels: {severity: warning}
                     annotations:
                       summary: "Vector agent is down"
-                      description: "Vector metrics endpoint is unreachable."
-
+                      description: "Vector metrics endpoint at vector-metrics.logging.svc.cluster.local:9598 is unreachable."
               - name: retriever_pipeline
                 rules:
                   - alert: RetrieverHighPipelineLatency
                     expr: histogram_quantile(0.95, rate(retrieval_pipeline_duration_seconds_bucket[5m])) > 5
                     for: 5m
-                    labels:
-                      severity: warning
+                    labels: {severity: warning}
                     annotations:
                       summary: "Retriever P95 pipeline latency exceeds 5s"
                       description: "P95 pipeline latency is {{ $value }}s."
                   - alert: RetrieverHighCacheMissRate
                     expr: (sum(rate(retrieval_cache_lookup_total{result="miss"}[5m])) / (sum(rate(retrieval_cache_lookup_total[5m])) + 1)) > 0.9
                     for: 10m
-                    labels:
-                      severity: info
+                    labels: {severity: info}
                     annotations:
                       summary: "Retriever cache miss rate above 90%"
                       description: "Cache miss rate is {{ $value | humanizePercentage }}."
                   - alert: RetrieverDependencyCircuitBreakerOpen
                     expr: rate(retrieval_circuit_breaker_open_total[1m]) > 0
                     for: 1m
-                    labels:
-                      severity: critical
+                    labels: {severity: critical}
                     annotations:
                       summary: "Retriever circuit breaker opened for {{ $labels.dependency }}"
                       description: "Circuit breaker for {{ $labels.dependency }} has opened."
-
               - name: frontend_auth
                 rules:
                   - alert: FrontendHighStreamErrorRate
                     expr: rate(frontend_upstream_stream_errors_total[5m]) / (rate(frontend_requests_total{route="/generate/stream"}[5m]) + 1) > 0.05
                     for: 5m
-                    labels:
-                      severity: warning
+                    labels: {severity: warning}
                     annotations:
                       summary: "Frontend upstream stream error rate above 5%"
                       description: "{{ $value | humanizePercentage }} of stream requests are failing."
                   - alert: FrontendHighRateLimitHitRate
                     expr: rate(frontend_rate_limit_events_total{outcome="limited"}[5m]) > 0.1
                     for: 10m
-                    labels:
-                      severity: info
+                    labels: {severity: info}
                     annotations:
                       summary: "Frontend rate limiting over 0.1 hits/s"
                       description: "Rate limit hits at {{ $value }}/s. Users are being throttled."
-
               - name: qdrant
                 rules:
                   - alert: QdrantDeadReplicas
                     expr: collection_dead_replicas > 0
                     for: 2m
-                    labels:
-                      severity: critical
+                    labels: {severity: critical}
                     annotations:
                       summary: "Qdrant has dead replica(s)"
                       description: "{{ $value }} replica(s) are non‑active."
                   - alert: QdrantRestFailureRate
                     expr: rate(rest_responses_fail_total[5m]) / (rate(rest_responses_total[5m]) + 1) > 0.05
                     for: 5m
-                    labels:
-                      severity: warning
+                    labels: {severity: warning}
                     annotations:
                       summary: "Qdrant REST failure rate above 5%"
                       description: "{{ $value | humanizePercentage }} of REST calls are failing."
                   - alert: QdrantHighMemoryResident
                     expr: memory_resident_bytes / (1024*1024*1024) > container_spec_memory_limit_bytes / (1024*1024*1024) * 0.85 or memory_resident_bytes / (1024*1024*1024) > 4
                     for: 5m
-                    labels:
-                      severity: warning
+                    labels: {severity: warning}
                     annotations:
                       summary: "Qdrant peer memory above 85% of limit"
                       description: "Memory resident is {{ printf \"%.1f\" (query \"memory_resident_bytes / (1024*1024*1024)\") }} GiB."
                   - alert: QdrantConsensusStalled
                     expr: rate(cluster_commit[5m]) == 0 and cluster_enabled == 1
                     for: 5m
-                    labels:
-                      severity: critical
+                    labels: {severity: critical}
                     annotations:
                       summary: "Qdrant Raft consensus stalled"
                       description: "No Raft commits in 5 minutes."
-
               - name: pod_resources
                 rules:
                   - alert: PodCPULimitNearSaturation
                     expr: sum(rate(container_cpu_usage_seconds_total{namespace="inference", container!=""}[5m])) by (pod, container) / sum(container_spec_cpu_quota{namespace="inference", container!=""} / container_spec_cpu_period{namespace="inference", container!=""}) by (pod, container) > 0.9
                     for: 10m
-                    labels:
-                      severity: warning
+                    labels: {severity: warning}
                     annotations:
                       summary: "Pod {{ $labels.pod }}/{{ $labels.container }} CPU above 90% of limit"
                       description: "CPU utilization is {{ $value | humanizePercentage }} of the limit. Throttling likely."
                   - alert: PodHighMemoryUsage
                     expr: container_memory_working_set_bytes{namespace="inference", container!=""} / container_spec_memory_limit_bytes{namespace="inference", container!=""} > 0.85
                     for: 5m
-                    labels:
-                      severity: warning
+                    labels: {severity: warning}
                     annotations:
                       summary: "Pod {{ $labels.pod }}/{{ $labels.container }} memory above 85% of limit"
                       description: "Memory utilization is {{ $value | humanizePercentage }} of the limit. Possible OOM risk."
                   - alert: PodOOMKilled
                     expr: increase(container_oom_events_total{namespace="inference", container!=""}[5m]) > 0
                     for: 0m
-                    labels:
-                      severity: critical
+                    labels: {severity: critical}
                     annotations:
                       summary: "Pod {{ $labels.pod }}/{{ $labels.container }} was OOM‑killed"
                       description: "Container has been OOM‑killed in the last 5 minutes."
-
               - name: cloudflared
                 rules:
                   - alert: CloudflaredTunnelErrors
                     expr: rate(cloudflared_tunnel_request_errors[5m]) > 0
                     for: 2m
-                    labels:
-                      severity: critical
+                    labels: {severity: critical}
                     annotations:
                       summary: "Cloudflared tunnel returning errors to origin"
                       description: "Tunnel is returning errors ({{ $value }}/s)."
                   - alert: CloudflaredHighHeartbeatRetries
                     expr: cloudflared_tunnel_timer_retries > 5
                     for: 5m
-                    labels:
-                      severity: warning
+                    labels: {severity: warning}
                     annotations:
                       summary: "Cloudflared tunnel has high heartbeat retries"
                       description: "Heartbeat retries: {{ $value }}."
-
               - name: clickhouse
                 rules:
                   - alert: ClickHouseHighMemoryUsage
                     expr: clickhouse_memory_tracking{job="clickhouse"} / 1e9 > 12
                     for: 5m
-                    labels:
-                      severity: warning
+                    labels: {severity: warning}
                     annotations:
                       summary: "ClickHouse memory tracking above 12 GB"
                       description: "ClickHouse is using {{ $value }} GB of memory."
                   - alert: ClickHouseReadOnly
                     expr: clickhouse_is_readonly{job="clickhouse"} == 1
                     for: 1m
-                    labels:
-                      severity: critical
+                    labels: {severity: critical}
                     annotations:
                       summary: "ClickHouse is in read-only mode"
                       description: "ClickHouse has entered read-only mode. No inserts possible."
                   - alert: ClickHouseInsertRateDrop
                     expr: rate(clickhouse_inserts_per_query{job="clickhouse"}[10m]) < 0.01
                     for: 10m
-                    labels:
-                      severity: warning
+                    labels: {severity: warning}
                     annotations:
                       summary: "ClickHouse insert rate near zero"
                       description: "No inserts happening. Log pipeline may be stalled."
                   - alert: ClickHouseQueryErrorsHigh
                     expr: rate(clickhouse_query_preempted{job="clickhouse"}[5m]) > 1
                     for: 5m
-                    labels:
-                      severity: warning
+                    labels: {severity: warning}
                     annotations:
                       summary: "ClickHouse query preemptions detected"
                       description: "Queries are being preempted, possibly due to memory pressure."
-
               - name: vector
                 rules:
                   - alert: VectorProcessingErrorsHigh
                     expr: rate(vector_component_errors_total{job="vector"}[5m]) > 0.1
                     for: 5m
-                    labels:
-                      severity: warning
+                    labels: {severity: warning}
                     annotations:
                       summary: "Vector processing errors detected"
                       description: "Vector components are logging errors."
                   - alert: VectorBufferEventsHigh
                     expr: vector_component_buffer_events{job="vector"} > 1000
                     for: 5m
-                    labels:
-                      severity: warning
+                    labels: {severity: warning}
                     annotations:
                       summary: "Vector buffer events accumulating"
                       description: "Vector has {{ $value }} buffered events. Sink may be slow."

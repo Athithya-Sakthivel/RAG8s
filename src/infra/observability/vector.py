@@ -170,6 +170,10 @@ def render_vector_toml(
     lines.append('type = "kubernetes_logs"')
     lines.append("auto_partial_merge = true")
     lines.append('self_node_name = "${VECTOR_SELF_NODE_NAME}"')
+    # Prevent checkpoints from expiring; ensure old files are always eligible
+    lines.append("ignore_older_secs = 1_000_000_000")
+    # Re‑read existing log files from the beginning after a fresh deployment
+    lines.append('read_from = "beginning"')
     lines.append("")
 
     lines.append("[sources.internal_metrics]")
@@ -491,12 +495,13 @@ def build_manifest(
                                 "requests": {"cpu": req_cpu, "memory": req_mem},
                                 "limits": {"cpu": limit_cpu, "memory": limit_mem},
                             },
+                            # Production fix: group 0 allows reading host log files (owned by root:root)
                             "securityContext": {
                                 "allowPrivilegeEscalation": False,
                                 "readOnlyRootFilesystem": True,
                                 "runAsNonRoot": True,
                                 "runAsUser": 65534,
-                                "runAsGroup": 65534,
+                                "runAsGroup": 0,
                                 "capabilities": {"drop": ["ALL"]},
                             },
                         }
