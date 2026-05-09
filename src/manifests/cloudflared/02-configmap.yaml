@@ -11,10 +11,18 @@ data:
     tunnel: default-tunnel-1
     ingress:
     - hostname: athithya.site
+      path: /metrics
+      service: http_status:403
+    - hostname: athithya.site
+      path: /healthz
+      service: http_status:403
+    - hostname: athithya.site
+      path: /readyz
+      service: http_status:403
+    - hostname: athithya.site
       service: http://frontend.inference.svc.cluster.local:8000
       originRequest:
         connectTimeout: 10s
         keepAliveTimeout: 30s
-        noTLSVerify: true
-        disableChunkedEncoding: true
+        disableChunkedEncoding: false
     - service: http_status:404

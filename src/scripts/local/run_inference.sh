@@ -44,7 +44,7 @@ export CLOUDFLARE_TUNNEL_NAME="$(tofu -chdir=src/infra/terraform/cloudflare outp
 export CLOUDFLARE_SECRET_NAME="cloudflared-token"
 export CLOUDFLARE_SECRET_KEY="token"
 export DOMAIN="athithya.site"
-python3 src/infra/network/cloudflared_setup.py --write
+python3 src/infra/core/cloudflared_setup.py --write
 kubectl apply -f /workspace/src/manifests/cloudflared
 
 

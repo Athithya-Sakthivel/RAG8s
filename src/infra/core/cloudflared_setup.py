@@ -1,7 +1,10 @@
 """
 Production Cloudflare Tunnel manifest generator.
+
 Routes everything through a single frontend service with one hostname.
-Now also creates a metric Service for Prometheus scraping.
+Blocks /metrics, /healthz, and /readyz at the Cloudflare edge (403).
+Internal Kubernetes probes still reach the pod directly.
+Creates a metrics Service for in-cluster Prometheus scraping.
 """
 
 from __future__ import annotations
@@ -151,22 +154,26 @@ def frontend_upstream() -> str:
 
 
 def ingress_rules() -> list[dict[str, Any]]:
-    """Single ingress rule pointing to the frontend service."""
+    """Ingress rules with blocked internal endpoints and catch‑all."""
     return [
+        # Block internal probe/metrics paths at the Cloudflare edge
+        {"hostname": DOMAIN, "path": "/metrics",  "service": "http_status:403"},
+        {"hostname": DOMAIN, "path": "/healthz",  "service": "http_status:403"},
+        {"hostname": DOMAIN, "path": "/readyz",   "service": "http_status:403"},
+        # Main tunnel – everything else goes to the frontend
         {
             "hostname": DOMAIN,
             "service": f"http://{frontend_upstream()}",
             "originRequest": {
                 "connectTimeout": "10s",
                 "keepAliveTimeout": "30s",
-                "noTLSVerify": True,
-                "disableChunkedEncoding": True,
+                "disableChunkedEncoding": False,
             },
         },
         # Catch-all 404 for any unmatched hostnames
         {"service": "http_status:404"},
     ]
-
+    
 
 def validate() -> None:
     require(bool(NAMESPACE), "NAMESPACE is required")
@@ -466,7 +473,7 @@ def build() -> tuple[list[dict[str, Any]], dict[str, Any]]:
         configmap,
         render_deployment(checksum),
         render_routes_reference(),
-        render_service(),           # ← New metrics Service
+        render_service(),
     ]
     return docs, secret
 
