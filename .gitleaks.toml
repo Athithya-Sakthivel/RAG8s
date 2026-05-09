@@ -1,0 +1,12 @@
+# Title for the gitleaks configuration
+title = "E2E-RAG-System gitleaks config"
+
+[allowlist]
+description = "False positives from S3 prefix concatenation patterns"
+paths = ["src/indexing_pipeline/parse_chunk/"]
+
+[[rules]]
+id = "generic-api-key"
+description = "Generic API key pattern; allow in chunk parsers"
+regex = '''(?i)generic[-_ ]?api[-_ ]?key'''
+paths = ["src/indexing_pipeline/parse_chunk/"]

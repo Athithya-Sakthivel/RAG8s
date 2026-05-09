@@ -19,7 +19,7 @@ from typing import Any
 DEFAULT_WORKDIR = "/indexing_pipeline"
 ROUTER = "parse_chunk/router.py"
 INDEX = "index.py"
-PRE_CONVERSIONS = "pre_conversions.py"
+PRE_CONVERSIONS = "pre_conversions.sh"
 RUN_PRE_CONVERSIONS_DEFAULT = True
 
 STRICT_MODE = os.getenv("INDEXING_STRICT", "").strip().lower() in ("1", "true", "yes", "y", "on")
@@ -331,6 +331,18 @@ def run_pre_conversions(workdir: str) -> bool:
         timeout = None
 
     log_info("preconversions.start", path=str(script), timeout=timeout)
+
+    # If the pre-conversion script is a shell script, run it with bash.
+    if script.suffix == ".sh":
+        cmd = ["bash", str(script)]
+        rc, out, err = run_cmd(cmd, cwd=workdir, timeout=timeout)
+        if rc != 0:
+            log_warn("preconversions.failed", rc=rc, stdout=(out[-300:] if out else ""), stderr=(err[-300:] if err else ""))
+            return not STRICT_MODE
+        log_info("preconversions.ok", path=str(script))
+        return True
+
+    # Fallback: if it's not a shell script, attempt to run it as a Python script (original behavior).
     rc = run_local_and_stream(script, workdir, timeout=timeout)
     if rc != 0:
         log_warn("preconversions.failed", rc=rc)

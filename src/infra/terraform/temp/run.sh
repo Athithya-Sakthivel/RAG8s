@@ -1,21 +1,31 @@
-cd /workspace/src/infra/terraform/local
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ─── Configuration ───────────────────────────────────────────────
+TF_DIR="$(cd "$(dirname "$0")" && pwd)"
+export TF_VAR_pii_mask_enabled="${TF_VAR_pii_mask_enabled:-true}"
+
+# ─── Deploy ──────────────────────────────────────────────────────
+cd "$TF_DIR"
+
+echo "=== Initialising OpenTofu ==="
 tofu init
+
+echo "=== Planning ==="
 tofu plan
+
+echo "=== Applying ==="
 tofu apply --auto-approve
-export BEDROCK_GUARDRAIL_IDENTIFIER=$(tofu output -raw bedrock_guardrail_arn)
-export BEDROCK_GUARDRAIL_VERSION=$(tofu output -raw bedrock_guardrail_version_id)
-echo $BEDROCK_GUARDRAIL_IDENTIFIER
-echo $BEDROCK_GUARDRAIL_VERSION
-cd -
 
+# ─── Export outputs ──────────────────────────────────────────────
+export BEDROCK_GUARDRAIL_IDENTIFIER="$(tofu output -raw bedrock_guardrail_arn)"
+export BEDROCK_GUARDRAIL_VERSION="$(tofu output -raw bedrock_guardrail_version_id)"
 
-cd /workspace/src/infra/terraform/local && tofu destroy --auto-approve
+echo ""
+echo "=== Guardrail deployed ==="
+echo "ARN:     $BEDROCK_GUARDRAIL_IDENTIFIER"
+echo "Version: $BEDROCK_GUARDRAIL_VERSION"
+echo "PII mask: $TF_VAR_pii_mask_enabled"
 
-
-aws bedrock list-guardrails \
-  --query "guardrails[].arn" \
-  --output text | tr '\t' '\n' | while read arn; do
-    echo "Deleting $arn"
-    aws bedrock delete-guardrail --guardrail-identifier "$arn"
-done
-aws bedrock list-guardrails
+# ─── Optional: destroy (uncomment to use) ────────────────────────
+# cd src/infra/terraform/temp && tofu destroy --auto-approve

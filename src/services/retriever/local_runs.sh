@@ -23,7 +23,8 @@ kubectl port-forward -n qdrant svc/qdrant 6333:6333 &
 
 kubectl create ns inference && python3 src/infra/rag/retriever_service.py --rollout
 
-unset BEDROCK_GUARDRAIL_IDENTIFIER && unset BEDROCK_GUARDRAIL_VERSION
+export BEDROCK_GUARDRAIL_IDENTIFIER=arn:aws:bedrock:ap-south-1:681802563986:guardrail/vm7grwe8wg0n
+export BEDROCK_GUARDRAIL_VERSION=1
 curl -X DELETE http://localhost:6333/collections/default_rag_collection1__semantic_cache
 source .venv/bin/activate && cd src/services/retriever && export PYTHONPATH=$(pwd)
 export DENSE_URL="http://localhost:8200"
@@ -39,10 +40,6 @@ uvicorn main:app \
   --forwarded-allow-ips "*"
 
 kubectl -n inference port-forward svc/retriever 8203:8001
-
-curl -N http://localhost:8203/retrieve \
-  -H "Content-Type: application/json" \
-  -d '{"query":"how to ensure autonomous system is safe?"}' | jq
 
 
 curl -N http://localhost:8203/generate/stream \

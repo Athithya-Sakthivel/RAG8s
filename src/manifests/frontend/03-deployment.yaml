@@ -37,7 +37,7 @@ spec:
         emptyDir: {}
       containers:
       - name: frontend
-        image: ghcr.io/athithya-sakthivel/frontend:staging
+        image: ghcr.io/athithya-sakthivel/frontend:2026-05-08-17-17--061cb31@sha256:b8bf4336427cd2fc0575e2f9630ec18163ca8844e900ed956fe6a7665f267f66
         imagePullPolicy: Always
         ports:
         - name: http
@@ -101,7 +101,7 @@ spec:
         - name: JWT_KID
           value: production-key-1
         - name: GOOGLE_ALLOWED_DOMAINS
-          value: ''
+          value: gmail.com
         - name: MICROSOFT_ALLOWED_DOMAINS
           value: ''
         - name: MICROSOFT_ALLOWED_TENANT_IDS
