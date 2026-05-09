@@ -1,5 +1,4 @@
 name: Runtime indexing image CI
-
 on:
   push:
     branches: [main]

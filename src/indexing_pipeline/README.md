@@ -1,6 +1,6 @@
 # Indexing Pipeline — Multi-Format RAG Ingestion
 
-A Kubernetes CronJob that idempotently ingests raw documents from S3, normalizes them, splits content into semantic chunks, generates dense and sparse embeddings, upserts points into Qdrant, and conditionally backs up collections to S3 when thresholds are met.
+A Kubernetes CronJob that idempotently ingests raw documents from S3, normalizes them, splits content into chunks, generates dense and sparse embeddings, upserts points into Qdrant, and conditionally backs up qdrant collections to S3 when thresholds are met.
 
 ---
 

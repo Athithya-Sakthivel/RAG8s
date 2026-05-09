@@ -85,10 +85,10 @@ jobs:
                 /workspace/src/
 
               echo "[INFO] === Gitleaks Full History Scan ==="
-              if [ -s /workspace/.gitleaks.toml ]; then
+              if [ -s --config .gitleaks.toml ]; then
                 echo "[INFO] Using custom Gitleaks config"
                 gitleaks git \
-                  --config /workspace/.gitleaks.toml \
+                  --config --config .gitleaks.toml \
                   --log-opts="--all --full-history" \
                   --no-banner \
                   --redact \
