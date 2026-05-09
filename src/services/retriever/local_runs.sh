@@ -40,11 +40,6 @@ uvicorn main:app \
 
 kubectl -n inference port-forward svc/retriever 8203:8001
 
-curl -N http://localhost:8203/retrieve \
-  -H "Content-Type: application/json" \
-  -d '{"query":"how to ensure autonomous system is safe?"}' | jq
-
-
 curl -N http://localhost:8203/generate/stream \
   -H "Content-Type: application/json" \
   -d '{"query":"how governance differs from guardrails?"}'

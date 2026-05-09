@@ -23,10 +23,6 @@ from clients import (
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
-
-# -------------------------------------------------
-#  New citation helpers
-# -------------------------------------------------
 from citations_helpers import (
     build_numbered_prompt_and_ui_chunks,
     deterministic_summarize,
@@ -34,7 +30,6 @@ from citations_helpers import (
     parse_s3_path,
     generate_presigned_url_sync,
 )
-
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from settings import (
     ANSWER_PROMPT_TEMPLATE,
@@ -78,8 +73,6 @@ from slowapi.util import get_remote_address
 from starlette.background import BackgroundTask
 from starlette.responses import Response as StarletteResponse
 from store import QdrantStore, QdrantStoreConfig
-
-#  Logging & Metrics (split after rename)
 from retriever_logging import log, safe_stack, setup_logging
 from metrics import (
     http_request_count,
@@ -131,11 +124,13 @@ class RequestIdMiddleware:
 
         await self.app(scope, receive, send_wrapper)
 
+
 async def metrics_endpoint(_request: Request):
     return StarletteResponse(
         generate_latest(),
         media_type=CONTENT_TYPE_LATEST,
     )
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -454,7 +449,6 @@ async def _generate_stream_core(request: Request) -> StreamingResponse:
                 answer = deterministic_summarize(llm_lines)
 
             cache_state["answer"] = answer
-            # Use ui_chunks (which contain meta_items) instead of pipeline.chunks
             cache_state["chunks"] = ui_chunks if req.return_chunks else []
             yield _sse("done", {
                 "answer": answer,

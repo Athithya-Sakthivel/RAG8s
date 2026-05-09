@@ -1,9 +1,9 @@
-
 # src/services/retriever/citations_helpers.py
 from __future__ import annotations
 
 import json
 import logging
+import mimetypes
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -15,7 +15,7 @@ from settings import AWS_REGION, ENABLE_PRESIGNED_URLS, PRESIGNED_URL_TTL_SECOND
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-#  File type detection – only PDF, HTML, MD (others become "txt"/"unknown")
+#  File type detection – recognises all MIME types in the collection
 # ---------------------------------------------------------------------------
 def _detect_type(
     file_type: Optional[str],
@@ -23,35 +23,58 @@ def _detect_type(
     file_name: Optional[str],
     chunk_type: Optional[str],
 ) -> str:
-    if file_type:
-        ft = file_type.lower()
-        if "pdf" in ft:
+    ft = (file_type or "").lower()
+    if ft:
+        if "pdf" in ft:                                    # application/pdf
             return "pdf"
-        if "html" in ft or "xml" in ft:
-            return "html"
+        if "presentation" in ft or "powerpoint" in ft or "pptx" in ft or "ppt" in ft:
+            return "pptx"                                  # application/vnd.openxmlformats-officedocument.presentationml.presentation
+        if ft.startswith("audio/"):
+            return "audio"
+        if ft.startswith("image/"):
+            return "image"
+        if "csv" in ft:
+            return "csv"
+        if "json" in ft and "jsonl" in ft:
+            return "jsonl"
         if "markdown" in ft:
             return "md"
+        if "html" in ft or "xml" in ft:                   # text/html
+            return "html"
         if "text" in ft:
             return "txt"
 
-    ext = (_ext_from_url_or_name(source_url) or _ext_from_url_or_name(file_name)).lower()
-    if ext == "pdf":
+    ext = _ext_from_url_or_name(source_url) or _ext_from_url_or_name(file_name)
+    if ext in ("pdf",):
         return "pdf"
-    if ext in ("html", "htm", "xhtml"):
-        return "html"
+    if ext in ("ppt", "pptx", "pptm", "odp"):
+        return "pptx"
+    if ext in ("mp3", "wav", "m4a", "flac", "aac", "ogg"):
+        return "audio"
+    if ext in ("jpg", "jpeg", "png", "webp", "tiff", "tif", "gif", "bmp"):
+        return "image"
+    if ext in ("csv", "tsv"):
+        return "csv"
+    if ext in ("json", "jsonl", "ndjson"):
+        return "jsonl"
     if ext in ("md", "markdown"):
         return "md"
+    if ext in ("html", "htm", "xhtml"):
+        return "html"
     if ext in ("txt", "text"):
         return "txt"
 
-    chunk_lower = (chunk_type or "").lower()
-    if "pdf" in chunk_lower:
-        return "pdf"
-    if "html" in chunk_lower:
-        return "html"
-    if "markdown" in chunk_lower:
-        return "md"
-    return "txt"  # safe default
+    ct = (chunk_type or "").lower()
+    if "audio" in ct:
+        return "audio"
+    if "slide" in ct or "slides" in ct:
+        return "pptx"
+    if "row" in ct or "csv" in ct:
+        return "csv"
+    if "image" in ct or "frame" in ct:
+        return "image"
+
+    return "unknown"
 
 
 def _ext_from_url_or_name(val: Optional[str]) -> str:
@@ -91,15 +114,22 @@ def _full_text_from_payload(payload: Dict[str, Any]) -> str:
 
 
 # ---------------------------------------------------------------------------
-#  UI metadata fields builder
+#  UI metadata fields builder – now covers all file types
 # ---------------------------------------------------------------------------
 def ui_fields_from_payload(
     payload: Dict[str, Any],
     prefer_snippet_len: Optional[int] = None,
 ) -> List[Tuple[str, Any]]:
     p = payload or {}
-    file_name = p.get("file_name") or (p.get("source_url") or "").split("/")[-1] or None
+
     source_url = p.get("source_url") or p.get("s3_path") or p.get("raw_key") or None
+    raw_file_name = p.get("file_name") or ""
+    if source_url:
+        url_path = source_url.split("?")[0].split("#")[0]
+        file_name = url_path.rstrip("/").split("/")[-1] or raw_file_name or None
+    else:
+        file_name = raw_file_name or None
+
     file_type = p.get("file_type") or None
     chunk_type = p.get("chunk_type") or None
     detected = _detect_type(file_type, source_url, file_name, chunk_type)
@@ -113,8 +143,13 @@ def ui_fields_from_payload(
         ordered.append(("chunk_id", p["chunk_id"]))
     if p.get("chunk_index") is not None:
         ordered.append(("chunk_index", p["chunk_index"]))
+    if p.get("token_count") is not None:
+        try:
+            ordered.append(("token_count", int(p["token_count"])))
+        except Exception:
+            ordered.append(("token_count", p["token_count"]))
 
-    # PDF-specific fields
+    # File‑type‑specific fields (same logic as old query_helpers.py)
     if detected == "pdf":
         if p.get("page_number") is not None:
             ordered.append(("page_number", int(p["page_number"])))
@@ -122,15 +157,66 @@ def ui_fields_from_payload(
             ls = int(p.get("line_start") or 0)
             le = int(p.get("line_end") or 0)
             ordered.append(("line_range", [ls, le]))
-
-    # HTML / MD / TXT
-    elif detected in ("html", "md", "txt"):
+        if p.get("layout_tags"):
+            ordered.append(("layout_tags", p["layout_tags"]))
+        if p.get("figures"):
+            ordered.append(("figures", p["figures"]))
+        if p.get("semantic_region"):
+            ordered.append(("semantic_region", p["semantic_region"]))
+    elif detected == "pptx":
+        if p.get("slide_range"):
+            ordered.append(("slide_range", p["slide_range"]))
+        if p.get("layout"):
+            ordered.append(("layout", p["layout"]))
+        if p.get("semantic_region"):
+            ordered.append(("semantic_region", p["semantic_region"]))
+    elif detected == "audio":
+        if p.get("audio_range"):
+            ordered.append(("audio_range", p["audio_range"]))
+        if p.get("duration"):
+            ordered.append(("duration", p["duration"]))
+    elif detected == "csv":
+        if p.get("row_range"):
+            ordered.append(("row_range", p["row_range"]))
+        if p.get("headings"):
+            ordered.append(("headings", p["headings"]))
+        if p.get("semantic_region"):
+            ordered.append(("semantic_region", p["semantic_region"]))
+    elif detected == "image":
+        if p.get("layout_bbox"):
+            ordered.append(("layout_bbox", p["layout_bbox"]))
+        if p.get("used_ocr") is not None:
+            ordered.append(("used_ocr", bool(p["used_ocr"])))
+        if p.get("semantic_region"):
+            ordered.append(("semantic_region", p["semantic_region"]))
+    elif detected == "html":
         if p.get("headings"):
             ordered.append(("headings", p["headings"]))
         if p.get("line_range"):
             ordered.append(("line_range", p["line_range"]))
+        if p.get("semantic_region"):
+            ordered.append(("semantic_region", p["semantic_region"]))
+    elif detected in ("md", "txt"):
+        if p.get("headings"):
+            ordered.append(("headings", p["headings"]))
+        if p.get("line_range"):
+            ordered.append(("line_range", p["line_range"]))
+        if p.get("semantic_region"):
+            ordered.append(("semantic_region", p["semantic_region"]))
+    elif detected == "jsonl":
+        if p.get("line_range"):
+            ordered.append(("line_range", p["line_range"]))
+        if p.get("semantic_region"):
+            ordered.append(("semantic_region", p["semantic_region"]))
+    else:
+        # unknown – still add common fields if present
+        if p.get("headings"):
+            ordered.append(("headings", p["headings"]))
+        if p.get("line_range"):
+            ordered.append(("line_range", p["line_range"]))
+        if p.get("semantic_region"):
+            ordered.append(("semantic_region", p["semantic_region"]))
 
-    # Common
     if p.get("tags"):
         ordered.append(("tags", p["tags"]))
 
@@ -138,7 +224,7 @@ def ui_fields_from_payload(
 
 
 # ---------------------------------------------------------------------------
-#  Numbered prompt & UI chunks builder
+#  Numbered prompt & UI chunks builder (unchanged)
 # ---------------------------------------------------------------------------
 def build_numbered_prompt_and_ui_chunks(
     results: List[Dict[str, Any]],
@@ -155,13 +241,11 @@ def build_numbered_prompt_and_ui_chunks(
         fields = ui_fields_from_payload(payload, prefer_snippet_len=prefer_snippet_len)
         full_text = _full_text_from_payload(payload)
 
-        # Build UI chunk
         ui_chunk = dict(fields)
         ui_chunk["index"] = idx
         ui_chunk["meta_items"] = [{"k": k, "v": v} for k, v in fields]
         ui_chunks.append(ui_chunk)
 
-        # Build LLM passage block
         heading = None
         for k, v in fields:
             if k == "headings":
@@ -188,31 +272,28 @@ def build_numbered_prompt_and_ui_chunks(
 
 
 # ---------------------------------------------------------------------------
-#  Citation validation & filtering
+#  Citation validation & filtering (unchanged)
 # ---------------------------------------------------------------------------
 def validate_and_filter_citations(answer: str, valid_indexes: List[int]) -> str:
     if not answer:
         return answer
-    # Remove any citation-like tokens that reference metadata
     answer = re.sub(
         r"\[.*?(source_url|page_number|file_name|row_range|token_range|audio_range|headings|chunk_id).*?\]",
         " ",
         answer,
         flags=re.IGNORECASE,
     )
-    # Only keep [n] if n is in the valid list
     def repl(match):
         num = int(match.group(1))
         return f"[{num}]" if num in valid_indexes else ""
     answer = re.sub(r"\[(\d+)\]", repl, answer)
-    # Remove raw URLs
     answer = re.sub(r"https?://\S+", "", answer)
     answer = re.sub(r"\s+", " ", answer).strip()
     return answer
 
 
 # ---------------------------------------------------------------------------
-#  Deterministic fallback summarization
+#  Deterministic fallback summarization (unchanged)
 # ---------------------------------------------------------------------------
 def deterministic_summarize(
     llm_lines: List[str],
@@ -245,19 +326,25 @@ def deterministic_summarize(
 
 
 # ---------------------------------------------------------------------------
-#  Presigned URL generation (synchronous, non-blocking)
+#  Presigned URL generation (with inline content disposition)
 # ---------------------------------------------------------------------------
 def parse_s3_path(path: str) -> Tuple[str, str]:
     if not path.startswith("s3://"):
         raise ValueError("s3_path must start with s3://")
-    path = path[5:]  # remove s3://
+    path = path[5:]
     bucket, key = path.split("/", 1)
-    # Strip fragment or query
     key = key.split("#")[0].split("?")[0]
     return bucket, key
 
 
-def generate_presigned_url_sync(bucket: str, key: str, ttl_seconds: int = 3600, region: str = "us-east-1") -> str:
+def _guess_content_type(key: str) -> str:
+    ctype, _ = mimetypes.guess_type(key)
+    return ctype or "application/octet-stream"
+
+
+def generate_presigned_url_sync(
+    bucket: str, key: str, ttl_seconds: int = 3600, region: str = "us-east-1"
+) -> str:
     if not ENABLE_PRESIGNED_URLS:
         raise RuntimeError("Presigned URLs are disabled")
     s3_client = boto3.client(
@@ -265,9 +352,15 @@ def generate_presigned_url_sync(bucket: str, key: str, ttl_seconds: int = 3600, 
         region_name=region,
         config=Config(signature_version="s3v4"),
     )
+    content_type = _guess_content_type(key)
     return s3_client.generate_presigned_url(
         "get_object",
-        Params={"Bucket": bucket, "Key": key},
+        Params={
+            "Bucket": bucket,
+            "Key": key,
+            "ResponseContentDisposition": "inline",
+            "ResponseContentType": content_type,
+        },
         ExpiresIn=ttl_seconds,
         HttpMethod="GET",
     )

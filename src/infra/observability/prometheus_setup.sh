@@ -1,6 +1,6 @@
 
 
-
+export PAGERDUTY_ROUTING_KEY="placeholder-for-now"
 kubectl create secret generic alertmanager-secrets \
   -n monitoring \
   --from-literal="slack-api-url=${SLACK_WEBHOOK_URL}" \
