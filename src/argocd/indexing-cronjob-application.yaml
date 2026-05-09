@@ -1,0 +1,22 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: indexing-cronjob
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Athithya-Sakthivel/E2E-RAG-System.git
+    targetRevision: main
+    path: src/manifests/indexing-cronjob
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: indexing
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true

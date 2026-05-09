@@ -1,6 +1,5 @@
-# indexing pipeline - non-sensitive tiktoken model names flagged as secrets
-DS-0031:src/indexing_pipeline/Dockerfile.base:ENV TOKEN_ENCODER
-DS-0031:src/indexing_pipeline/Dockerfile.base:ENV TOKEN_ENCODER_MODEL
+# indexing pipeline: TOKEN_* vars are non-sensitive tokenizer identifiers (false positive)
+AVD-DS-0031
 
 # retriever
 KSV-0109 # False positive: `LLM_MAX_TOKENS` is a non-sensitive numeric config, not a secret
@@ -8,6 +7,6 @@ KSV-0109 # False positive: `LLM_MAX_TOKENS` is a non-sensitive numeric config, n
 # terraform
 AWS-0132 # Ignores “bucket does not encrypt data with a customer managed key” rule as its not required.
 
-# fastembed images
+# fastembed docker images
 CVE-2026-33845 # Debian GnuTLS DTLS vulnerability - app does not use DTLS, temporary until 3.8.13-1 reaches stable
 
