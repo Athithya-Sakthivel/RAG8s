@@ -1,0 +1,417 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: grafana
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/grafana/helm-charts
+    chart: grafana
+    targetRevision: 12.3.0   # use the latest stable version
+    helm:
+      values: |
+        # ── Admin credentials (existing secret) ──
+        admin:
+          existingSecret: grafana-admin
+
+        # ── Service ──
+        service:
+          type: ClusterIP
+          port: 80
+
+        # ── Persistence (optional, disabled here for simplicity) ──
+        persistence:
+          enabled: false
+
+        # ── Sidecar for dashboards & datasources ──
+        sidecar:
+          dashboards:
+            enabled: true
+            searchNamespace: grafana
+            label: grafana_dashboard
+          datasources:
+            enabled: true
+            searchNamespace: grafana
+            label: grafana_datasource
+
+        # ── Enable Grafana's own Prometheus metrics ──
+        env:
+          GF_METRICS_ENABLED: "true"
+          GF_SERVER_PROTOCOL: http
+
+        # ── Kubernetes resources created by Helm (extraDeploy) ──
+        extraDeploy:
+          # ── Dashboard ConfigMap ──
+          - apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: grafana-dashboard-observability-health
+              namespace: grafana
+              labels:
+                grafana_dashboard: "1"
+            data:
+              observability-health.json: |
+                {
+                  "uid": "observability-health",
+                  "title": "Observability Health",
+                  "tags": ["observability", "prometheus"],
+                  "timezone": "browser",
+                  "schemaVersion": 39,
+                  "version": 4,
+                  "refresh": "30s",
+                  "editable": true,
+                  "panels": [
+                    {
+                      "type": "stat",
+                      "title": "Prometheus",
+                      "gridPos": {"x": 0, "y": 0, "w": 6, "h": 4},
+                      "fieldConfig": {
+                        "defaults": {
+                          "mappings": [
+                            {"type": "value", "value": "1", "text": "UP"},
+                            {"type": "value", "value": "0", "text": "DOWN"}
+                          ],
+                          "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                              {"color": "red", "value": null},
+                              {"color": "red", "value": 0},
+                              {"color": "green", "value": 1}
+                            ]
+                          },
+                          "color": {"mode": "thresholds"}
+                        }
+                      },
+                      "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "auto"},
+                      "targets": [{"expr": "up{job=\"prometheus\"}", "refId": "A"}]
+                    },
+                    {
+                      "type": "stat",
+                      "title": "Alertmanager",
+                      "gridPos": {"x": 6, "y": 0, "w": 6, "h": 4},
+                      "fieldConfig": {
+                        "defaults": {
+                          "mappings": [
+                            {"type": "value", "value": "1", "text": "UP"},
+                            {"type": "value", "value": "0", "text": "DOWN"}
+                          ],
+                          "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                              {"color": "red", "value": null},
+                              {"color": "red", "value": 0},
+                              {"color": "green", "value": 1}
+                            ]
+                          },
+                          "color": {"mode": "thresholds"}
+                        }
+                      },
+                      "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "auto"},
+                      "targets": [{"expr": "up{job=\"alertmanager\"}", "refId": "A"}]
+                    },
+                    {
+                      "type": "stat",
+                      "title": "ClickHouse",
+                      "gridPos": {"x": 12, "y": 0, "w": 6, "h": 4},
+                      "fieldConfig": {
+                        "defaults": {
+                          "mappings": [
+                            {"type": "value", "value": "1", "text": "UP"},
+                            {"type": "value", "value": "0", "text": "DOWN"}
+                          ],
+                          "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                              {"color": "red", "value": null},
+                              {"color": "red", "value": 0},
+                              {"color": "green", "value": 1}
+                            ]
+                          },
+                          "color": {"mode": "thresholds"}
+                        }
+                      },
+                      "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "auto"},
+                      "targets": [{"expr": "up{job=\"clickhouse\"}", "refId": "A"}]
+                    },
+                    {
+                      "type": "stat",
+                      "title": "Vector",
+                      "gridPos": {"x": 18, "y": 0, "w": 6, "h": 4},
+                      "fieldConfig": {
+                        "defaults": {
+                          "mappings": [
+                            {"type": "value", "value": "1", "text": "UP"},
+                            {"type": "value", "value": "0", "text": "DOWN"}
+                          ],
+                          "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                              {"color": "red", "value": null},
+                              {"color": "red", "value": 0},
+                              {"color": "green", "value": 1}
+                            ]
+                          },
+                          "color": {"mode": "thresholds"}
+                        }
+                      },
+                      "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "auto"},
+                      "targets": [{"expr": "up{job=\"vector\"}", "refId": "A"}]
+                    },
+                    {
+                      "type": "stat",
+                      "title": "ClickHouse Read-Only",
+                      "gridPos": {"x": 0, "y": 4, "w": 6, "h": 4},
+                      "fieldConfig": {
+                        "defaults": {
+                          "mappings": [
+                            {"type": "value", "value": "0", "text": "Writable"},
+                            {"type": "range", "from": "1", "to": "999", "text": "READONLY"}
+                          ],
+                          "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                              {"color": "green", "value": null},
+                              {"color": "red", "value": 1}
+                            ]
+                          },
+                          "color": {"mode": "thresholds"}
+                        }
+                      },
+                      "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "auto"},
+                      "targets": [{"expr": "ClickHouseMetrics_ReadonlyReplica{job=\"clickhouse\"}", "refId": "A"}]
+                    },
+                    {
+                      "type": "stat",
+                      "title": "Prometheus Storage",
+                      "gridPos": {"x": 6, "y": 4, "w": 6, "h": 4},
+                      "fieldConfig": {
+                        "defaults": {
+                          "unit": "bytes",
+                          "decimals": 2,
+                          "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                              {"color": "green", "value": null},
+                              {"color": "orange", "value": 40000000000},
+                              {"color": "red", "value": 50000000000}
+                            ]
+                          },
+                          "color": {"mode": "thresholds"}
+                        }
+                      },
+                      "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "auto"},
+                      "targets": [{"expr": "prometheus_tsdb_storage_blocks_bytes", "refId": "A"}]
+                    },
+                    {
+                      "type": "stat",
+                      "title": "Active Alerts",
+                      "gridPos": {"x": 12, "y": 4, "w": 6, "h": 4},
+                      "fieldConfig": {
+                        "defaults": {
+                          "mappings": [
+                            {"type": "value", "value": "0", "text": "None"},
+                            {"type": "range", "from": "1", "to": "999", "text": "FIRING"}
+                          ],
+                          "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                              {"color": "green", "value": null},
+                              {"color": "red", "value": 1}
+                            ]
+                          },
+                          "color": {"mode": "thresholds"},
+                          "noData": {"text": "0"}
+                        }
+                      },
+                      "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "auto"},
+                      "targets": [{"expr": "sum(ALERTS{alertstate=\"firing\"})", "refId": "A"}]
+                    },
+                    {
+                      "type": "stat",
+                      "title": "ClickHouse Rule Failures",
+                      "gridPos": {"x": 0, "y": 8, "w": 6, "h": 4},
+                      "fieldConfig": {
+                        "defaults": {
+                          "mappings": [
+                            {"type": "value", "value": "0", "text": "OK"},
+                            {"type": "range", "from": "1", "to": "999", "text": "FAIL"}
+                          ],
+                          "thresholds": {"mode": "absolute", "steps": [{"color": "green"}, {"color": "red", "value": 1}]},
+                          "color": {"mode": "thresholds"}
+                        }
+                      },
+                      "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "auto"},
+                      "targets": [{"expr": "prometheus_rule_evaluation_failures_total{rule_group=\"/etc/config/alerts;clickhouse\"}", "refId": "A"}]
+                    },
+                    {
+                      "type": "stat",
+                      "title": "Cloudflared Rule Failures",
+                      "gridPos": {"x": 6, "y": 8, "w": 6, "h": 4},
+                      "fieldConfig": {
+                        "defaults": {
+                          "mappings": [
+                            {"type": "value", "value": "0", "text": "OK"},
+                            {"type": "range", "from": "1", "to": "999", "text": "FAIL"}
+                          ],
+                          "thresholds": {"mode": "absolute", "steps": [{"color": "green"}, {"color": "red", "value": 1}]},
+                          "color": {"mode": "thresholds"}
+                        }
+                      },
+                      "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "auto"},
+                      "targets": [{"expr": "prometheus_rule_evaluation_failures_total{rule_group=\"/etc/config/alerts;cloudflared\"}", "refId": "A"}]
+                    },
+                    {
+                      "type": "stat",
+                      "title": "Frontend Rule Failures",
+                      "gridPos": {"x": 12, "y": 8, "w": 6, "h": 4},
+                      "fieldConfig": {
+                        "defaults": {
+                          "mappings": [
+                            {"type": "value", "value": "0", "text": "OK"},
+                            {"type": "range", "from": "1", "to": "999", "text": "FAIL"}
+                          ],
+                          "thresholds": {"mode": "absolute", "steps": [{"color": "green"}, {"color": "red", "value": 1}]},
+                          "color": {"mode": "thresholds"}
+                        }
+                      },
+                      "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "auto"},
+                      "targets": [{"expr": "prometheus_rule_evaluation_failures_total{rule_group=\"/etc/config/alerts;frontend_auth\"}", "refId": "A"}]
+                    },
+                    {
+                      "type": "stat",
+                      "title": "Pod Resources Rule Failures",
+                      "gridPos": {"x": 18, "y": 8, "w": 6, "h": 4},
+                      "fieldConfig": {
+                        "defaults": {
+                          "mappings": [
+                            {"type": "value", "value": "0", "text": "OK"},
+                            {"type": "range", "from": "1", "to": "999", "text": "FAIL"}
+                          ],
+                          "thresholds": {"mode": "absolute", "steps": [{"color": "green"}, {"color": "red", "value": 1}]},
+                          "color": {"mode": "thresholds"}
+                        }
+                      },
+                      "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "auto"},
+                      "targets": [{"expr": "prometheus_rule_evaluation_failures_total{rule_group=\"/etc/config/alerts;pod_resources\"}", "refId": "A"}]
+                    },
+                    {
+                      "type": "stat",
+                      "title": "Qdrant Rule Failures",
+                      "gridPos": {"x": 0, "y": 12, "w": 6, "h": 4},
+                      "fieldConfig": {
+                        "defaults": {
+                          "mappings": [
+                            {"type": "value", "value": "0", "text": "OK"},
+                            {"type": "range", "from": "1", "to": "999", "text": "FAIL"}
+                          ],
+                          "thresholds": {"mode": "absolute", "steps": [{"color": "green"}, {"color": "red", "value": 1}]},
+                          "color": {"mode": "thresholds"}
+                        }
+                      },
+                      "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "auto"},
+                      "targets": [{"expr": "prometheus_rule_evaluation_failures_total{rule_group=\"/etc/config/alerts;qdrant\"}", "refId": "A"}]
+                    },
+                    {
+                      "type": "stat",
+                      "title": "Retriever Rule Failures",
+                      "gridPos": {"x": 6, "y": 12, "w": 6, "h": 4},
+                      "fieldConfig": {
+                        "defaults": {
+                          "mappings": [
+                            {"type": "value", "value": "0", "text": "OK"},
+                            {"type": "range", "from": "1", "to": "999", "text": "FAIL"}
+                          ],
+                          "thresholds": {"mode": "absolute", "steps": [{"color": "green"}, {"color": "red", "value": 1}]},
+                          "color": {"mode": "thresholds"}
+                        }
+                      },
+                      "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "auto"},
+                      "targets": [{"expr": "prometheus_rule_evaluation_failures_total{rule_group=\"/etc/config/alerts;retriever_pipeline\"}", "refId": "A"}]
+                    },
+                    {
+                      "type": "stat",
+                      "title": "Service Health Rule Failures",
+                      "gridPos": {"x": 12, "y": 12, "w": 6, "h": 4},
+                      "fieldConfig": {
+                        "defaults": {
+                          "mappings": [
+                            {"type": "value", "value": "0", "text": "OK"},
+                            {"type": "range", "from": "1", "to": "999", "text": "FAIL"}
+                          ],
+                          "thresholds": {"mode": "absolute", "steps": [{"color": "green"}, {"color": "red", "value": 1}]},
+                          "color": {"mode": "thresholds"}
+                        }
+                      },
+                      "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "auto"},
+                      "targets": [{"expr": "prometheus_rule_evaluation_failures_total{rule_group=\"/etc/config/alerts;service_health\"}", "refId": "A"}]
+                    },
+                    {
+                      "type": "stat",
+                      "title": "Vector Rule Failures",
+                      "gridPos": {"x": 18, "y": 12, "w": 6, "h": 4},
+                      "fieldConfig": {
+                        "defaults": {
+                          "mappings": [
+                            {"type": "value", "value": "0", "text": "OK"},
+                            {"type": "range", "from": "1", "to": "999", "text": "FAIL"}
+                          ],
+                          "thresholds": {"mode": "absolute", "steps": [{"color": "green"}, {"color": "red", "value": 1}]},
+                          "color": {"mode": "thresholds"}
+                        }
+                      },
+                      "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "auto"},
+                      "targets": [{"expr": "prometheus_rule_evaluation_failures_total{rule_group=\"/etc/config/alerts;vector\"}", "refId": "A"}]
+                    }
+                  ],
+                  "time": {"from": "now-15m", "to": "now"}
+                }
+
+          # ── Datasource ConfigMap ──
+          - apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: grafana-datasource-prometheus
+              namespace: grafana
+              labels:
+                grafana_datasource: "1"
+            data:
+              prometheus.yaml: |
+                apiVersion: 1
+                datasources:
+                  - name: Prometheus
+                    type: prometheus
+                    uid: prometheus
+                    access: proxy
+                    url: http://prometheus-server.monitoring.svc.cluster.local:9090
+                    isDefault: true
+                    editable: false
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: grafana
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+
+  ignoreDifferences:
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+      jsonPointers:
+        - /spec/versions
+    - group: ""
+      kind: ConfigMap
+      jsonPointers:
+        - /data

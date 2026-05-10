@@ -87,4 +87,10 @@ bash src/infra/core/argo_setup.sh --rollout
 git add . && git commit -m "new" && git push origin main
 
 # kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
-# kubectl port-forward service/argocd-server -n argocd 8080:443 argocd 8080:443
+# 
+
+bash src/infra/observability/prometheus_setup.sh
+
+export GRAFANA_ADMIN_PASSWORD=grafana
+bash src/infra/observability/grafana_deploy.sh
+
