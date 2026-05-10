@@ -14,7 +14,7 @@ data:
     \n[sources.internal_metrics]\ntype = \"internal_metrics\"\n\n[transforms.decode_service_schema]\n\
     type = \"remap\"\ninputs = [\"kube_logs\"]\nsource = \"\"\"\nif is_string(.message)\
     \ {\n  parsed, err = parse_json(.message)\n  if err == null && is_object(parsed)\
-    \ {\n    . = merge!(., parsed, true)\n  }\n}\n\"\"\"\n\n[transforms.drop_excluded_namespaces]\n\
+    \ {\n    . = merge!(., parsed!, true)\n  }\n}\n\"\"\"\n\n[transforms.drop_excluded_namespaces]\n\
     type = \"filter\"\ninputs = [\"decode_service_schema\"]\ncondition = \"\"\"\n\
     !is_string(.kubernetes.pod_namespace) || !includes([\"kube-system\", \"cert-manager\"\
     , \"monitoring\"], .kubernetes.pod_namespace)\n\"\"\"\n\n[sinks.clickhouse]\n\
