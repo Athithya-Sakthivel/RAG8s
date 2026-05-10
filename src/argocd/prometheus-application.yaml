@@ -175,11 +175,7 @@ spec:
             static_configs:
               - targets:
                   - 'vector-metrics.logging.svc.cluster.local:9598'
-          - job_name: 'grafana'
-            scrape_interval: 30s
-            static_configs:
-              - targets:
-                  - 'grafana.monitoring.svc.cluster.local:3000'
+                  
           - job_name: 'alertmanager'
             scrape_interval: 30s
             static_configs:
