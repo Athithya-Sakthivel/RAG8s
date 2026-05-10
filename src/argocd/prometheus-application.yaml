@@ -44,19 +44,12 @@ spec:
             global:
               resolve_timeout: 5m
             route:
-              receiver: 'default-receiver'
+              receiver: 'slack-alerts'               # All alerts go to Slack
               group_by: ['alertname', 'namespace', 'severity']
               group_wait: 30s
               group_interval: 5m
               repeat_interval: 12h
-              routes:
-                - receiver: 'pagerduty-critical'
-                  matchers:
-                    - severity = critical
-                  continue: true
-                - receiver: 'slack-warnings'
-                  matchers:
-                    - severity = warning
+              # No separate routes – everything uses the root receiver
             inhibit_rules:
               - source_matchers:
                   - alertname = QdrantDown
@@ -71,8 +64,7 @@ spec:
                 target_matchers:
                   - alertname =~ "^(FrontendHighStreamErrorRate|FrontendHighRateLimitHitRate)$"
             receivers:
-              - name: 'default-receiver'
-              - name: 'slack-warnings'
+              - name: 'slack-alerts'
                 slack_configs:
                   - api_url_file: /etc/alertmanager/secrets/slack-api-url
                     channel: '#rag-alerts'
@@ -86,15 +78,6 @@ spec:
                       *Summary:* {{ .Annotations.summary }}
                       *Description:* {{ .Annotations.description }}
                       {{ end }}
-              - name: 'pagerduty-critical'
-                pagerduty_configs:
-                  - routing_key_file: /etc/alertmanager/secrets/pagerduty-routing-key
-                    severity: '{{ .CommonLabels.severity }}'
-                    description: '{{ .CommonAnnotations.summary }}'
-                    details:
-                      firing: '{{ range .Alerts.Firing }}[{{ .Labels.alertname }}] {{ .Annotations.summary }} {{ end }}'
-                      num_firing: '{{ .Alerts.Firing | len }}'
-                      num_resolved: '{{ .Alerts.Resolved | len }}'
             templates: []
 
         kube-state-metrics:

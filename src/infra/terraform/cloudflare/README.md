@@ -121,7 +121,7 @@ export CLOUDFLARE_SECRET_NAME="cloudflared-token"
 export CLOUDFLARE_SECRET_KEY="token"
 export DOMAIN="athithya.site"
 
-python3 src/infra/network/cloudflared.py --rollout
+python3 src/infra/core/cloudflared.py --rollout
 
 ```
 
