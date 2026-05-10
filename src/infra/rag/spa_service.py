@@ -359,11 +359,11 @@ def build_deployment_doc(cfg: dict[str, Any], has_secret: bool) -> dict[str, Any
         # Auth toggles
         {"name": "REQUIRE_AUTH", "value": str(cfg.get("REQUIRE_AUTH", True)).lower()},
         {"name": "ENABLE_GOOGLE_AUTH", "value": str(cfg.get("ENABLE_GOOGLE_AUTH", True)).lower()},
-        {"name": "ENABLE_MICROSOFT_AUTH", "value": "false"},
+        {"name": "ENABLE_MICROSOFT_AUTH", "value": "true"},
         {"name": "ENABLE_GITHUB_AUTH", "value": "false"},
         # UI settings
         {"name": "DISPLAY_SOURCES_IN_UI", "value": "true"},
-        {"name": "DISPLAY_TOPK_IN_UI", "value": "true"},
+        {"name": "DISPLAY_TOPK_IN_UI", "value": "false"},
         {"name": "USE_IAM", "value": str(cfg["USE_IAM"]).lower()},
         # Rate limits
         {"name": "RATE_LIMIT_GENERATE_STREAM", "value": "10/minute"},

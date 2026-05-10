@@ -49,7 +49,7 @@ kubectl apply -f /workspace/src/manifests/cloudflared
 
 
 bash src/infra/core/valkey_service.sh
-export VALKEY_URL="redis://:$(kubectl -n valkey get secret valkey-auth -o jsonpath='{.data.VALKEY_PASSWORD}' | base64 -d)@valkey.valkey.svc.cluster.local:6379"
+
 export FRONTEND_HOSTNAME=athithya.site
 kubectl delete -f src/manifests/frontend || true
 python3 src/infra/rag/spa_service.py --apply-secrets
@@ -78,3 +78,13 @@ bash src/infra/core/argo_setup.sh --rollout
 kubectl apply -f src/argocd
 git add . && git commit -m "argocd full sync" && git push origin main
 
+
+
+sleep 5
+find src/manifests -name "00-namespace.yaml" -delete || true
+sleep 5
+bash src/infra/core/argo_setup.sh --rollout
+git add . && git commit -m "new" && git push origin main
+
+# kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
+# kubectl port-forward service/argocd-server -n argocd 8080:443 argocd 8080:443

@@ -298,16 +298,6 @@ def generate_manifests():
     atomic_write(RENDER_DIR/"30-statefulset.yaml", yaml.safe_dump(build_statefulset(), sort_keys=False))
     atomic_write(RENDER_DIR/"31-networkpolicy.yaml", yaml.safe_dump(build_networkpolicy(), sort_keys=False))
     atomic_write(INIT_SQL_PATH, init_sql())
-    # combined convenience file
-    parts = [
-        yaml.safe_dump(build_namespace(), sort_keys=False),
-        yaml.safe_dump(build_service(), sort_keys=False),
-        yaml.safe_dump(build_prometheus_configmap(), sort_keys=False),
-        yaml.safe_dump(build_users_configmap(), sort_keys=False),
-        yaml.safe_dump(build_statefulset(), sort_keys=False),
-        yaml.safe_dump(build_networkpolicy(), sort_keys=False),
-    ]
-    atomic_write(RENDER_DIR/"clickhouse.yaml", "\n---\n".join(parts))
     print("[ok] manifests written to", RENDER_DIR)
 
 def apply_manifests():
