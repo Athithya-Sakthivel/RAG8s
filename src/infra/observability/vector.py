@@ -78,9 +78,32 @@ def _labels() -> dict[str, str]:
     return dict(VECTOR_LABELS)
 
 
-# NOTE: No longer generates a namespace manifest.
-# The namespace is expected to already exist (created by ClickHouse generator or manually).
-# Only apply via kubectl if needed (see apply_manifests).
+def _namespace_bootstrap_yaml(namespace: str) -> str:
+    return textwrap.dedent(
+        f"""\
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {namespace}
+"""
+    )
+
+
+def _secret_yaml(namespace: str, secret_name: str, username: str, password: str) -> str:
+    return textwrap.dedent(
+        f"""\
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {secret_name}
+  namespace: {namespace}
+type: Opaque
+stringData:
+  username: {json.dumps(username, ensure_ascii=False)}
+  password: {json.dumps(password, ensure_ascii=False)}
+"""
+    )
+
 
 def run_checked(cmd: list[str], *, input_text: str | None = None) -> None:
     proc = subprocess.run(cmd, input=input_text, text=True, capture_output=True)
@@ -334,8 +357,7 @@ def generate_manifests(
         },
     }
 
-    # No namespace manifest generated here to avoid ownership conflict.
-    # The namespace is expected to be created by clickhouse or manually.
+    # NOTE: intentionally do NOT include a namespace YAML in the generated manifest files.
     manifest_files = {
         "01-serviceaccount.yaml": yaml.safe_dump({"apiVersion": "v1", "kind": "ServiceAccount", "metadata": {"name": "vector", "namespace": namespace, "labels": labels}}, sort_keys=False),
         "02-clusterrole.yaml": yaml.safe_dump({"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "ClusterRole", "metadata": {"name": "vector-log-reader", "labels": labels}, "rules": [{"apiGroups": [""], "resources": ["pods", "namespaces", "nodes"], "verbs": ["list", "watch"]}]}, sort_keys=False),
@@ -372,11 +394,9 @@ def write_manifests(files: dict[str, str]) -> None:
 
 
 def apply_manifests(files: dict[str, str], args: argparse.Namespace) -> None:
-    # Ensure the namespace exists (idempotent)
-    run_checked(["kubectl", "create", "namespace", args.namespace, "--dry-run=client", "-o", "yaml"], input_text=None)
-    run_checked(["kubectl", "apply", "-f", "-"], input_text=f"apiVersion: v1\nkind: Namespace\nmetadata:\n  name: {args.namespace}\n")
-    # Create the secret for ClickHouse credentials (idempotent)
-    run_checked(["kubectl", "apply", "-f", "-"], input_text=f"apiVersion: v1\nkind: Secret\nmetadata:\n  name: {DEFAULT_CLICKHOUSE_SECRET_NAME}\n  namespace: {args.namespace}\ntype: Opaque\nstringData:\n  username: {args.clickhouse_user}\n  password: {args.clickhouse_password}\n")
+    # create namespace and secret via kubectl apply -f - (namespace YAML is not written to disk)
+    run_checked(["kubectl", "apply", "-f", "-"], input_text=_namespace_bootstrap_yaml(args.namespace))
+    run_checked(["kubectl", "apply", "-f", "-"], input_text=_secret_yaml(args.namespace, DEFAULT_CLICKHOUSE_SECRET_NAME, args.clickhouse_user, args.clickhouse_password))
     for _, content in files.items():
         run_checked(["kubectl", "apply", "-f", "-"], input_text=content)
     print("[ok] rollout complete")
