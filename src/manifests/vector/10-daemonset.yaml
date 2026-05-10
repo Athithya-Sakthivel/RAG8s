@@ -19,7 +19,7 @@ spec:
         app.kubernetes.io/component: logging
         app.kubernetes.io/managed-by: vector.py
       annotations:
-        vector/config-checksum: 4c009bb76f59db1094922a1c0e6340182f9067f68658f1fba834b12d81343227
+        vector/config-checksum: 591707827666cf99faba6ef22141e24b9ed1b0f349511bdba5673ca3d426ca73
     spec:
       serviceAccountName: vector
       tolerations:

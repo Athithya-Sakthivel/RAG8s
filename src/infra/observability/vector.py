@@ -101,7 +101,7 @@ def render_vrl() -> str:
         if is_string(.message) {
           parsed, err = parse_json(.message)
           if err == null && is_object(parsed) {
-            . = merge!(., parsed!, true)
+            . = merge!(., parsed, true)
           }
         }
         """
