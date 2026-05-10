@@ -149,7 +149,6 @@ def _env_bool(name: str, default: str = "0") -> bool:
 def load_config() -> dict[str, Any]:
     cfg: dict[str, Any] = {}
 
-    # DEPLOY_ENV precedence: DEPLOY_ENV -> DENSE_ENV -> ENV -> default
     deploy_env = os.environ.get("DEPLOY_ENV") or os.environ.get("DENSE_ENV") or os.environ.get("ENV") or DEFAULTS["DEPLOY_ENV"]
     env = str(deploy_env).upper()
     cfg["DEPLOY_ENV"] = env
@@ -191,7 +190,6 @@ def load_config() -> dict[str, Any]:
     cfg["LIVENESS_INITIAL_DELAY"] = int(os.environ.get("DENSE_LIVENESS_INITIAL_DELAY", str(DEFAULTS["LIVENESS_INITIAL_DELAY"])))
     cfg["PROBE_TIMEOUT_SECONDS"] = int(os.environ.get("DENSE_PROBE_TIMEOUT_SECONDS", str(DEFAULTS["PROBE_TIMEOUT_SECONDS"])))
 
-    # GPU enablement: respect explicit ENABLE flag OR DENSE_CUDA for backward compatibility
     cfg["ENABLE_GPU"] = _env_bool("DENSE_ENABLE_GPU", str(DEFAULTS["ENABLE_GPU"]).lower()) or _env_bool("DENSE_CUDA", str(DEFAULTS["DENSE_CUDA"]).lower())
     cfg["GPU_RESOURCE_NAME"] = os.environ.get("DENSE_GPU_RESOURCE", DEFAULTS["GPU_RESOURCE_NAME"])
     cfg["GPU_COUNT"] = int(os.environ.get("DENSE_GPU_COUNT", str(DEFAULTS["GPU_COUNT"])))
@@ -247,7 +245,8 @@ def load_config() -> dict[str, Any]:
         "rolebinding": manifests_dir / "03-rolebinding.yaml",
         "deployment": manifests_dir / "04-deployment.yaml",
         "service": manifests_dir / "05-service.yaml",
-        "hpa": manifests_dir / "06-hpa.yaml",
+        "networkpolicy": manifests_dir / "06-networkpolicy.yaml",
+        "hpa": manifests_dir / "07-hpa.yaml",
     }
 
     cfg["UUID_SHORT"] = str(uuid.uuid4())[:8]
@@ -304,7 +303,6 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
         "image": cfg["IMAGE"],
         "ports": [{"containerPort": cfg["CONTAINER_PORT"]}],
         "env": [
-            # Provide both ENV (sparse-compatible) and DEPLOY_ENV (backwards-compatible)
             {"name": "ENV", "value": cfg["DEPLOY_ENV"]},
             {"name": "DEPLOY_ENV", "value": cfg["DEPLOY_ENV"]},
             {"name": "DENSE_HOST", "value": str(cfg["HOST"])},
@@ -389,7 +387,6 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
     if pod_sec:
         deployment["spec"]["template"]["spec"]["securityContext"] = pod_sec
 
-    # GPU node selector handling (same behavior as sparse)
     if cfg["ENABLE_GPU"] and cfg["GPU_NODE_SELECTOR"]:
         if "=" in cfg["GPU_NODE_SELECTOR"]:
             k, v = cfg["GPU_NODE_SELECTOR"].split("=", 1)
@@ -397,31 +394,28 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
         else:
             deployment["spec"]["template"]["spec"]["nodeSelector"] = {cfg["GPU_NODE_SELECTOR"]: "true"}
 
-    # Ensure volume mounts and volumes remain intact when READONLY_ROOTFS is enabled
     if cfg.get("READONLY_ROOTFS", True):
         tmp_mounts = [
             {"name": "tmp-writable", "mountPath": "/tmp"},
             {"name": "tmp-writable", "mountPath": "/var/tmp"},
             {"name": "tmp-writable", "mountPath": "/usr/tmp"},
         ]
-        existing_mounts = container.get("volumeMounts", []) or []
-        # Add tmp mounts if missing
+        existing_mounts = container.get("volumeMounts", [])
         for m in tmp_mounts:
             if not any(vm.get("mountPath") == m["mountPath"] for vm in existing_mounts):
                 existing_mounts.append(m)
-        # Add models-cache only if not present
         if not any(vm.get("mountPath") == "/models_cache" for vm in existing_mounts):
             existing_mounts.append({"name": "models-cache", "mountPath": "/models_cache"})
         container["volumeMounts"] = existing_mounts
 
-        vols = deployment["spec"]["template"]["spec"].get("volumes", []) or []
+        vols = deployment["spec"]["template"]["spec"].get("volumes", [])
         if not any(v.get("name") == "tmp-writable" for v in vols):
             vols.append({"name": "tmp-writable", "emptyDir": {}})
         if not any(v.get("name") == "models-cache" for v in vols):
             vols.append({"name": "models-cache", "emptyDir": {}})
         deployment["spec"]["template"]["spec"]["volumes"] = vols
 
-        pod_sc = deployment["spec"]["template"]["spec"].get("securityContext", {}) or {}
+        pod_sc = deployment["spec"]["template"]["spec"].get("securityContext", {})
         if "fsGroup" not in pod_sc and cfg.get("FS_GROUP") is not None:
             try:
                 pod_sc["fsGroup"] = int(cfg.get("FS_GROUP", 1000))
@@ -444,6 +438,35 @@ def render_service(cfg: dict[str, Any]) -> str:
         },
     }
     return yaml.safe_dump(svc, sort_keys=False)
+
+
+def render_networkpolicy(cfg: dict[str, Any]) -> str:
+    policy = {
+        "apiVersion": "networking.k8s.io/v1",
+        "kind": "NetworkPolicy",
+        "metadata": {"name": cfg["SERVICE_NAME"], "namespace": cfg["NAMESPACE"]},
+        "spec": {
+            "podSelector": {"matchLabels": {"app.kubernetes.io/name": cfg["SERVICE_NAME"]}},
+            "policyTypes": ["Ingress", "Egress"],
+            "ingress": [
+                {
+                    "from": [
+                        {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "inference"}}},
+                        {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "indexing"}}},
+                    ],
+                    "ports": [{"port": cfg["CONTAINER_PORT"], "protocol": "TCP"}],
+                }
+            ],
+            "egress": [
+                {
+                    "to": [{"namespaceSelector": {}, "podSelector": {"matchLabels": {"k8s-app": "kube-dns"}}}],
+                    "ports": [{"port": 53, "protocol": "UDP"}, {"port": 53, "protocol": "TCP"}],
+                },
+                {"to": [{"ipBlock": {"cidr": "0.0.0.0/0"}}]},
+            ],
+        },
+    }
+    return yaml.safe_dump(policy, sort_keys=False)
 
 
 def render_hpa(cfg: dict[str, Any]) -> str:
@@ -491,6 +514,7 @@ def generate_manifests(cfg: dict[str, Any], dry_run: bool = False, verbose: bool
     rb_yaml = render_rolebinding(cfg)
     deploy_yaml = render_deployment(cfg, inputs_hash=inputs_hash)
     svc_yaml = render_service(cfg)
+    np_yaml = render_networkpolicy(cfg)
 
     atomic_write(cfg["FILES"]["namespace"], ns_yaml)
     atomic_write(cfg["FILES"]["serviceaccount"], sa_yaml)
@@ -498,6 +522,7 @@ def generate_manifests(cfg: dict[str, Any], dry_run: bool = False, verbose: bool
     atomic_write(cfg["FILES"]["rolebinding"], rb_yaml)
     atomic_write(cfg["FILES"]["deployment"], deploy_yaml)
     atomic_write(cfg["FILES"]["service"], svc_yaml)
+    atomic_write(cfg["FILES"]["networkpolicy"], np_yaml)
     if cfg["HPA_ENABLED"]:
         hpa_yaml = render_hpa(cfg)
         atomic_write(cfg["FILES"]["hpa"], hpa_yaml)
@@ -533,6 +558,7 @@ def apply_to_cluster(cfg: dict[str, Any], dry_run: bool = False, verbose: bool =
         cfg["FILES"]["rolebinding"],
         cfg["FILES"]["deployment"],
         cfg["FILES"]["service"],
+        cfg["FILES"]["networkpolicy"],
     ]
     if cfg["HPA_ENABLED"]:
         files.append(cfg["FILES"]["hpa"])
@@ -586,7 +612,6 @@ def delete_manifests(cfg: dict[str, Any]) -> None:
                     p.unlink()
             except Exception:
                 log.debug("Failed to remove %s", p, exc_info=True)
-        # remove state dir if present
         state_dir = dir_path / state_dirname
         try:
             if state_dir.exists():

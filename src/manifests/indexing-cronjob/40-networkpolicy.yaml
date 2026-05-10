@@ -1,0 +1,49 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: indexing-cronjob-egress
+  namespace: indexing
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: indexing-backup-cronjob
+      app.kubernetes.io/component: indexing
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: qdrant
+    ports:
+    - protocol: TCP
+      port: 6333
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: inference
+    ports:
+    - protocol: TCP
+      port: 8200
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: inference
+    ports:
+    - protocol: TCP
+      port: 8201
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+    ports:
+    - protocol: TCP
+      port: 443

@@ -17,11 +17,11 @@ python3 src/infra/rag/dense_service.py --rollout
 
 export SPARSE_MODEL_NAME=Qdrant/minicoil-v1
 export SPARSE_BATCH_SIZE=16 # upper bound
-python3 src/infra/rag/sparse_service.py --rollout
+python3 src/infra/rag/sparse_service.py --generate
 
 export RERANKER_MODEL_NAME=Xenova/ms-marco-MiniLM-L-6-v2
 export RERANKER_MAX_DOCS=20 # upper bound
-python3 src/infra/rag/reranker_service.py --rollout
+python3 src/infra/rag/reranker_service.py --generate
 
 
 python3 src/infra/rag/qdrant_service.py --rollout

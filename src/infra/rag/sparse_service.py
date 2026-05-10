@@ -19,6 +19,7 @@
 # - Clear validation and early failures
 # - Type hints and robust subprocess handling
 
+
 #!/usr/bin/env python3
 from __future__ import annotations
 
@@ -220,7 +221,8 @@ def load_config() -> dict[str, Any]:
         "rolebinding": manifests_dir / "03-rolebinding.yaml",
         "deployment": manifests_dir / "04-deployment.yaml",
         "service": manifests_dir / "05-service.yaml",
-        "hpa": manifests_dir / "06-hpa.yaml",
+        "networkpolicy": manifests_dir / "06-networkpolicy.yaml",
+        "hpa": manifests_dir / "07-hpa.yaml",
     }
     cfg["UUID_SHORT"] = str(uuid.uuid4())[:8]
     log.info("Loaded config: DEPLOY_ENV=%s replicas=%d image=%s", cfg["DEPLOY_ENV"], cfg["REPLICAS"], cfg["IMAGE"])
@@ -259,6 +261,7 @@ def render_rolebinding(cfg: dict[str, Any]) -> str:
         "roleRef": {"kind": "Role", "name": cfg["ROLE_NAME"], "apiGroup": "rbac.authorization.k8s.io"},
     }
     return yaml.safe_dump(rb, sort_keys=False)
+
 
 def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> str:
     labels = cfg["LABELS"].copy()
@@ -328,7 +331,6 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
                 "rollingUpdate": {"maxUnavailable": cfg["MAX_UNAVAILABLE"], "maxSurge": cfg["MAX_SURGE"]},
             },
             "template": {
-                # annotations intentionally omitted
                 "metadata": {"labels": labels},
                 "spec": {"serviceAccountName": cfg["SA_NAME"], "containers": [container]},
             },
@@ -346,8 +348,6 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
     if pod_sec:
         deployment["spec"]["template"]["spec"]["securityContext"] = pod_sec
 
-    # NOTE: do not add gen-sparse/inputs-hash annotation or prometheus.* annotations
-
     if cfg["ENABLE_GPU"] and cfg["GPU_NODE_SELECTOR"]:
         if "=" in cfg["GPU_NODE_SELECTOR"]:
             k, v = cfg["GPU_NODE_SELECTOR"].split("=", 1)
@@ -355,7 +355,6 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
         else:
             deployment["spec"]["template"]["spec"]["nodeSelector"] = {cfg["GPU_NODE_SELECTOR"]: "true"}
 
-    # Ensure volume mounts and volumes remain intact when READONLY_ROOTFS is enabled
     if cfg.get("READONLY_ROOTFS", True):
         tmp_mounts = [
             {"name": "tmp-writable", "mountPath": "/tmp"},
@@ -387,9 +386,39 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
 
     return yaml.safe_dump(deployment, sort_keys=False)
 
+
 def render_service(cfg: dict[str, Any]) -> str:
     svc = {"apiVersion": "v1", "kind": "Service", "metadata": {"name": f"{cfg['SERVICE_NAME']}-svc", "namespace": cfg["NAMESPACE"], "labels": cfg["LABELS"]}, "spec": {"type": "ClusterIP", "ports": [{"port": cfg["CONTAINER_PORT"], "targetPort": cfg["CONTAINER_PORT"], "protocol": "TCP", "name": "http"}], "selector": {"app.kubernetes.io/name": cfg["SERVICE_NAME"]}}}
     return yaml.safe_dump(svc, sort_keys=False)
+
+
+def render_networkpolicy(cfg: dict[str, Any]) -> str:
+    policy = {
+        "apiVersion": "networking.k8s.io/v1",
+        "kind": "NetworkPolicy",
+        "metadata": {"name": cfg["SERVICE_NAME"], "namespace": cfg["NAMESPACE"]},
+        "spec": {
+            "podSelector": {"matchLabels": {"app.kubernetes.io/name": cfg["SERVICE_NAME"]}},
+            "policyTypes": ["Ingress", "Egress"],
+            "ingress": [
+                {
+                    "from": [
+                        {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "inference"}}},
+                        {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "indexing"}}},
+                    ],
+                    "ports": [{"port": cfg["CONTAINER_PORT"], "protocol": "TCP"}],
+                }
+            ],
+            "egress": [
+                {
+                    "to": [{"namespaceSelector": {}, "podSelector": {"matchLabels": {"k8s-app": "kube-dns"}}}],
+                    "ports": [{"port": 53, "protocol": "UDP"}, {"port": 53, "protocol": "TCP"}],
+                },
+                {"to": [{"ipBlock": {"cidr": "0.0.0.0/0"}}]},
+            ],
+        },
+    }
+    return yaml.safe_dump(policy, sort_keys=False)
 
 
 def render_hpa(cfg: dict[str, Any]) -> str:
@@ -419,12 +448,14 @@ def generate_manifests(cfg: dict[str, Any], dry_run: bool = False, verbose: bool
     rb_yaml = render_rolebinding(cfg)
     deploy_yaml = render_deployment(cfg, inputs_hash=inputs_hash)
     svc_yaml = render_service(cfg)
+    np_yaml = render_networkpolicy(cfg)
     atomic_write(cfg["FILES"]["namespace"], ns_yaml)
     atomic_write(cfg["FILES"]["serviceaccount"], sa_yaml)
     atomic_write(cfg["FILES"]["role"], role_yaml)
     atomic_write(cfg["FILES"]["rolebinding"], rb_yaml)
     atomic_write(cfg["FILES"]["deployment"], deploy_yaml)
     atomic_write(cfg["FILES"]["service"], svc_yaml)
+    atomic_write(cfg["FILES"]["networkpolicy"], np_yaml)
     if cfg["HPA_ENABLED"]:
         hpa_yaml = render_hpa(cfg)
         atomic_write(cfg["FILES"]["hpa"], hpa_yaml)
@@ -448,7 +479,7 @@ def apply_to_cluster(cfg: dict[str, Any], dry_run: bool = False, verbose: bool =
     if inputs_hash is None:
         log.info("No manifest changes; skipping kubectl apply.")
         return
-    files = [cfg["FILES"]["namespace"], cfg["FILES"]["serviceaccount"], cfg["FILES"]["role"], cfg["FILES"]["rolebinding"], cfg["FILES"]["deployment"], cfg["FILES"]["service"]]
+    files = [cfg["FILES"]["namespace"], cfg["FILES"]["serviceaccount"], cfg["FILES"]["role"], cfg["FILES"]["rolebinding"], cfg["FILES"]["deployment"], cfg["FILES"]["service"], cfg["FILES"]["networkpolicy"]]
     if cfg["HPA_ENABLED"]:
         files.append(cfg["FILES"]["hpa"])
     combined = ""

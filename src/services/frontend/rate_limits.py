@@ -1,6 +1,6 @@
-# rate_limits.py
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from config import (
@@ -15,9 +15,6 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_ipaddr
 
 from frontend_logger import log
-
-if not VALKEY_URL:
-    log.warn("VALKEY_URL is not set. Rate limiting will use in-memory fallback.")
 
 
 def _state_value(request: Request, *names: str) -> Any:
@@ -93,3 +90,18 @@ class limits:
 
 def generate_stream_concurrency_limit() -> int:
     return RATE_LIMIT_STREAM_CONCURRENCY
+
+
+async def is_valkey_available() -> bool:
+    """Return True if Valkey is reachable and responds to PING."""
+    if not VALKEY_URL:
+        return False
+    try:
+        import redis.asyncio as redis_asyncio
+        r = redis_asyncio.from_url(VALKEY_URL, socket_connect_timeout=3)
+        # brief timeout, we are just checking connectivity
+        await r.ping()
+        await r.aclose()
+        return True
+    except Exception:
+        return False

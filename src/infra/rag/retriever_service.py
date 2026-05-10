@@ -1,3 +1,4 @@
+# src/infra/rag/retriever_service.py
 from __future__ import annotations
 import argparse
 import hashlib
@@ -11,6 +12,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 import yaml
+
 LOG_LEVEL = os.environ.get("RETRIEVER_GEN_LOGLEVEL", "INFO").upper()
 logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO), format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("gen_retriever")
@@ -22,7 +24,7 @@ DEFAULTS: dict[str, Any] = {
     "SERVICE_NAME": "retriever",
     "SERVICE_ACCOUNT_NAME": "retriever-sa",
     "SECRET_NAME": "retriever-secrets",
-    "IMAGE": "ghcr.io/athithya-sakthivel/retriever:2026-05-09-20-55--a594189@sha256:80ff1888242eddcf0dc9f459db66515565032ff2d4d361a73bfed08bc4ab96d7",
+    "IMAGE": "ghcr.io/athithya-sakthivel/retriever:2026-05-10-07-09--e446eb2@sha256:d537a42c429c94a55bdb0720a1f0b96212a34873ffea9113982acaaf9f301429",
     "IMAGE_PULL_POLICY": "Always",
     "REPLICAS": 1,
     "CONTAINER_PORT": 8001,
@@ -148,6 +150,7 @@ def load_config() -> dict[str, Any]:
         "deployment": cfg["MANIFESTS_DIR"] / "03-deployment.yaml",
         "service": cfg["MANIFESTS_DIR"] / "04-service.yaml",
         "pdb": cfg["MANIFESTS_DIR"] / "05-pdb.yaml",
+        "networkpolicy": cfg["MANIFESTS_DIR"] / "06-networkpolicy.yaml",
     }
     cfg["UUID_SHORT"] = str(uuid.uuid4())[:8]
     log.info("Loaded config: namespace=%s deployment=%s replicas=%d image=%s prometheus=%s", cfg["NAMESPACE"], cfg["DEPLOYMENT_NAME"], cfg["REPLICAS"], cfg["IMAGE"], "enabled" if cfg["ENABLE_PROMETHEUS"] else "disabled")
@@ -226,6 +229,91 @@ def build_pdb_doc(cfg: dict[str, Any]) -> dict[str, Any] | None:
     if cfg["REPLICAS"] < 2:
         return None
     return {"apiVersion": "policy/v1", "kind": "PodDisruptionBudget", "metadata": {"name": f"{cfg['DEPLOYMENT_NAME']}-pdb", "namespace": cfg["NAMESPACE"], "labels": _base_labels(cfg)}, "spec": {"minAvailable": 1, "selector": {"matchLabels": {"app.kubernetes.io/name": cfg["SERVICE_NAME"], "app.kubernetes.io/instance": cfg["DEPLOYMENT_NAME"], "app.kubernetes.io/component": "retriever"}}}}
+def build_networkpolicy_doc(cfg: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "apiVersion": "networking.k8s.io/v1",
+        "kind": "NetworkPolicy",
+        "metadata": {
+            "name": "retriever",
+            "namespace": cfg["NAMESPACE"],
+            "labels": _base_labels(cfg),
+        },
+        "spec": {
+            "podSelector": {
+                "matchLabels": {"app.kubernetes.io/name": cfg["SERVICE_NAME"]}
+            },
+            "policyTypes": ["Ingress", "Egress"],
+            "ingress": [
+                {
+                    "from": [
+                        {"podSelector": {"matchLabels": {"app.kubernetes.io/name": "frontend"}}}
+                    ],
+                    "ports": [{"protocol": "TCP", "port": cfg["CONTAINER_PORT"]}],
+                },
+                {
+                    "from": [
+                        {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "monitoring"}}}
+                    ],
+                    "ports": [{"protocol": "TCP", "port": cfg["CONTAINER_PORT"]}],
+                },
+            ],
+            "egress": [
+                {
+                    "to": [
+                        {
+                            "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "kube-system"}},
+                            "podSelector": {"matchLabels": {"k8s-app": "kube-dns"}},
+                        }
+                    ],
+                    "ports": [
+                        {"protocol": "UDP", "port": 53},
+                        {"protocol": "TCP", "port": 53},
+                    ],
+                },
+                {
+                    "to": [
+                        {
+                            "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "qdrant"}},
+                            "podSelector": {"matchLabels": {"app": "qdrant"}},
+                        }
+                    ],
+                    "ports": [
+                        {"protocol": "TCP", "port": 6333},
+                        {"protocol": "TCP", "port": 6334},
+                    ],
+                },
+                {
+                    "to": [
+                        {"podSelector": {"matchLabels": {"app.kubernetes.io/name": "dense"}}}
+                    ],
+                    "ports": [{"protocol": "TCP", "port": 8200}],
+                },
+                {
+                    "to": [
+                        {"podSelector": {"matchLabels": {"app.kubernetes.io/name": "sparse"}}}
+                    ],
+                    "ports": [{"protocol": "TCP", "port": 8201}],
+                },
+                {
+                    "to": [
+                        {"podSelector": {"matchLabels": {"app.kubernetes.io/name": "reranker"}}}
+                    ],
+                    "ports": [{"protocol": "TCP", "port": 8202}],
+                },
+                {
+                    "to": [
+                        {
+                            "ipBlock": {
+                                "cidr": "0.0.0.0/0",
+                                "except": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"],
+                            }
+                        }
+                    ],
+                    "ports": [{"protocol": "TCP", "port": 443}],
+                },
+            ],
+        },
+    }
 def sha256_secret_keys(secret_env: dict[str, str]) -> str:
     payload = json.dumps(sorted(secret_env.keys()), separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -337,6 +425,7 @@ def generate_manifests(cfg: dict[str, Any], secret_env: dict[str, str], dry_run:
     dep_doc = build_deployment_doc(cfg, has_secret=has_secret)
     svc_doc = build_service_doc(cfg)
     pdb_doc = build_pdb_doc(cfg)
+    netpol_doc = build_networkpolicy_doc(cfg)
     write_yaml_atomic(cfg["FILES"]["serviceaccount"], sa_doc)
     if sec_doc is not None:
         write_yaml_atomic(cfg["FILES"]["secret"], sec_doc)
@@ -354,6 +443,7 @@ def generate_manifests(cfg: dict[str, Any], secret_env: dict[str, str], dry_run:
             cfg["FILES"]["pdb"].unlink()
         except Exception:
             log.debug("Could not remove stale pdb manifest", exc_info=True)
+    write_yaml_atomic(cfg["FILES"]["networkpolicy"], netpol_doc)
     inputs_path.write_text(inputs_hash + "\n", encoding="utf-8")
     log.info("Manifests written to %s (inputs_hash=%s)", str(manifests_dir), inputs_hash)
     return inputs_hash
@@ -391,12 +481,13 @@ def apply_to_cluster(cfg: dict[str, Any], secret_env: dict[str, str], dry_run: b
         apply_yaml(cfg["FILES"]["service"])
         if cfg["FILES"]["pdb"].exists():
             apply_yaml(cfg["FILES"]["pdb"])
+        apply_yaml(cfg["FILES"]["networkpolicy"])
     except subprocess.CalledProcessError as exc:
         log.error("kubectl apply failed: %s", exc)
         raise SystemExit(2) from None
     log.info("Manifests applied.")
 def delete_manifests(cfg: dict[str, Any]) -> None:
-    for path in (cfg["FILES"]["serviceaccount"], cfg["FILES"]["secret"], cfg["FILES"]["deployment"], cfg["FILES"]["service"], cfg["FILES"]["pdb"]):
+    for path in (cfg["FILES"]["serviceaccount"], cfg["FILES"]["secret"], cfg["FILES"]["deployment"], cfg["FILES"]["service"], cfg["FILES"]["pdb"], cfg["FILES"]["networkpolicy"]):
         if path.exists():
             try:
                 delete_yaml(path)

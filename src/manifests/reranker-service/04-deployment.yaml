@@ -23,7 +23,7 @@ spec:
     metadata:
       labels: *id001
       annotations:
-        gen-reranker/inputs-hash: 2f5574a2359575a0a72daf6997cf0af3f395cbb7180f4282e2a684085f62190e
+        gen-reranker/inputs-hash: c685e24e001d45c66a1a0a2ebdb575092e6ec8a2c6dc6a18e8d6db33805ae750
     spec:
       serviceAccountName: reranker-sa
       containers:

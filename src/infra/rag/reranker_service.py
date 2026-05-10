@@ -5,6 +5,8 @@
 # - Atomic writes to disk
 # - No rollout/apply performed (ArgoCD handles sync/rollout)
 # - CLI: --write, --generate, --delete
+
+#!/usr/bin/env python3
 from __future__ import annotations
 
 import hashlib
@@ -181,7 +183,8 @@ def load_config() -> dict[str, Any]:
         "rolebinding": manifests_dir / "03-rolebinding.yaml",
         "deployment": manifests_dir / "04-deployment.yaml",
         "service": manifests_dir / "05-service.yaml",
-        "hpa": manifests_dir / "06-hpa.yaml",
+        "networkpolicy": manifests_dir / "06-networkpolicy.yaml",
+        "hpa": manifests_dir / "07-hpa.yaml",
     }
     cfg["UUID_SHORT"] = str(uuid.uuid4())[:8]
     log.info("Loaded config: DEPLOY_ENV=%s replicas=%d image=%s", cfg["DEPLOY_ENV"], cfg["REPLICAS"], cfg["IMAGE"])
@@ -310,7 +313,7 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
 
     if cfg.get("READONLY_ROOTFS", True):
         tmp_mounts = [{"name": "tmp-writable", "mountPath": "/tmp"}, {"name": "tmp-writable", "mountPath": "/var/tmp"}, {"name": "tmp-writable", "mountPath": "/usr/tmp"}]
-        existing_mounts = container.get("volumeMounts", []) or []
+        existing_mounts = container.get("volumeMounts", [])
         for m in tmp_mounts:
             if not any(vm.get("mountPath") == m["mountPath"] for vm in existing_mounts):
                 existing_mounts.append(m)
@@ -318,14 +321,14 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
             existing_mounts.append({"name": "models-cache", "mountPath": "/models_cache"})
         container["volumeMounts"] = existing_mounts
 
-        vols = deployment["spec"]["template"]["spec"].get("volumes", []) or []
+        vols = deployment["spec"]["template"]["spec"].get("volumes", [])
         if not any(v.get("name") == "tmp-writable" for v in vols):
             vols.append({"name": "tmp-writable", "emptyDir": {}})
         if not any(v.get("name") == "models-cache" for v in vols):
             vols.append({"name": "models-cache", "emptyDir": {}})
         deployment["spec"]["template"]["spec"]["volumes"] = vols
 
-        pod_sc = deployment["spec"]["template"]["spec"].get("securityContext", {}) or {}
+        pod_sc = deployment["spec"]["template"]["spec"].get("securityContext", {})
         if "fsGroup" not in pod_sc and cfg.get("FS_GROUP") is not None:
             try:
                 pod_sc["fsGroup"] = int(cfg.get("FS_GROUP", 1000))
@@ -339,6 +342,35 @@ def render_deployment(cfg: dict[str, Any], inputs_hash: str | None = None) -> st
 def render_service(cfg: dict[str, Any]) -> str:
     svc = {"apiVersion": "v1", "kind": "Service", "metadata": {"name": f"{cfg['SERVICE_NAME']}-svc", "namespace": cfg["NAMESPACE"], "labels": cfg["LABELS"]}, "spec": {"type": "ClusterIP", "ports": [{"port": cfg["CONTAINER_PORT"], "targetPort": cfg["CONTAINER_PORT"], "protocol": "TCP", "name": "http"}], "selector": {"app.kubernetes.io/name": cfg["SERVICE_NAME"]}}}
     return yaml.safe_dump(svc, sort_keys=False)
+
+
+def render_networkpolicy(cfg: dict[str, Any]) -> str:
+    policy = {
+        "apiVersion": "networking.k8s.io/v1",
+        "kind": "NetworkPolicy",
+        "metadata": {"name": cfg["SERVICE_NAME"], "namespace": cfg["NAMESPACE"]},
+        "spec": {
+            "podSelector": {"matchLabels": {"app.kubernetes.io/name": cfg["SERVICE_NAME"]}},
+            "policyTypes": ["Ingress", "Egress"],
+            "ingress": [
+                {
+                    "from": [
+                        {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "inference"}}},
+                        {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "indexing"}}},
+                    ],
+                    "ports": [{"port": cfg["CONTAINER_PORT"], "protocol": "TCP"}],
+                }
+            ],
+            "egress": [
+                {
+                    "to": [{"namespaceSelector": {}, "podSelector": {"matchLabels": {"k8s-app": "kube-dns"}}}],
+                    "ports": [{"port": 53, "protocol": "UDP"}, {"port": 53, "protocol": "TCP"}],
+                },
+                {"to": [{"ipBlock": {"cidr": "0.0.0.0/0"}}]},
+            ],
+        },
+    }
+    return yaml.safe_dump(policy, sort_keys=False)
 
 
 def render_hpa(cfg: dict[str, Any]) -> str:
@@ -369,6 +401,7 @@ def generate_manifests(cfg: dict[str, Any], dry_run: bool = False, verbose: bool
     rb_yaml = render_rolebinding(cfg)
     deploy_yaml = render_deployment(cfg, inputs_hash=inputs_hash)
     svc_yaml = render_service(cfg)
+    np_yaml = render_networkpolicy(cfg)
 
     atomic_write(cfg["FILES"]["namespace"], ns_yaml)
     atomic_write(cfg["FILES"]["serviceaccount"], sa_yaml)
@@ -376,6 +409,7 @@ def generate_manifests(cfg: dict[str, Any], dry_run: bool = False, verbose: bool
     atomic_write(cfg["FILES"]["rolebinding"], rb_yaml)
     atomic_write(cfg["FILES"]["deployment"], deploy_yaml)
     atomic_write(cfg["FILES"]["service"], svc_yaml)
+    atomic_write(cfg["FILES"]["networkpolicy"], np_yaml)
     if cfg["HPA_ENABLED"]:
         hpa_yaml = render_hpa(cfg)
         atomic_write(cfg["FILES"]["hpa"], hpa_yaml)
