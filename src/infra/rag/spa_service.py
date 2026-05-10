@@ -15,11 +15,6 @@ receives an IRSA annotation and the Pod gets an IRSA_ROLE_ARN env var.
 Google OAuth is enabled by default; set the following before running
 --apply-secrets:
 
-  export FRONTEND_HOSTNAME=your-domain.tld
-  export GOOGLE_CLIENT_ID=xxx.apps.googleusercontent.com
-  export GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxx
-  export VALKEY_URL=redis://:<password>@valkey.valkey.svc.cluster.local:6379
-
 Then:
 
   kubectl delete -f src/manifests/frontend || true

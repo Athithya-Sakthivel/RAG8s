@@ -90,7 +90,7 @@ JWKS_URL = norm_url(
 
 REQUIRE_AUTH = parse_bool_env(os.getenv("REQUIRE_AUTH"), True)
 DISPLAY_SOURCES_IN_UI = parse_bool_env(os.getenv("DISPLAY_SOURCES_IN_UI"), True)
-DISPLAY_TOPK_IN_UI = parse_bool_env(os.getenv("DISPLAY_TOPK_IN_UI"), True)
+DISPLAY_TOPK_IN_UI = parse_bool_env(os.getenv("DISPLAY_TOPK_IN_UI"), False)
 
 COOKIE_NAME = (os.getenv("COOKIE_NAME") or "app_session").strip()
 COOKIE_SAMESITE = (os.getenv("COOKIE_SAMESITE") or "lax").strip().lower()
@@ -105,8 +105,8 @@ else:
 
 SESSION_SECRET = (os.getenv("SESSION_SECRET") or "").strip()
 
-ENABLE_GOOGLE = parse_bool_env(os.getenv("ENABLE_GOOGLE_AUTH"), False)
-ENABLE_MICROSOFT = parse_bool_env(os.getenv("ENABLE_MICROSOFT_AUTH"), False)
+ENABLE_GOOGLE = parse_bool_env(os.getenv("ENABLE_GOOGLE_AUTH"), True)
+ENABLE_MICROSOFT = parse_bool_env(os.getenv("ENABLE_MICROSOFT_AUTH"), True)
 ENABLE_GITHUB = parse_bool_env(os.getenv("ENABLE_GITHUB_AUTH"), False)
 
 GOOGLE_CLIENT_ID = (os.getenv("GOOGLE_CLIENT_ID") or "").strip()

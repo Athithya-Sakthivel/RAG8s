@@ -269,6 +269,8 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+            - name: VALKEY_EXTRA_FLAGS
+              value: "--save '' --appendonly no"
             - name: VALKEY_PORT
               value: "${VALKEY_PORT}"
             - name: VALKEY_BUS_PORT
@@ -412,7 +414,6 @@ main() {
   wait_for_rollout
   print_connection_info
   log_success "Valkey deployment complete"
-  log_info "To validate, run: bash src/tests/infra/validate_valkey.sh"
 }
 
 case "${1:-}" in

@@ -162,9 +162,10 @@ if ENABLE_MICROSOFT and "microsoft" in ENABLED_PROVIDERS:
             client_kwargs={"scope": "openid email profile offline_access User.Read", "code_challenge_method": "S256"},
         )
         log.info("Microsoft auth provider registered")
+        _microsoft_available = True
     except Exception as e:
-        log.error("Failed to register Microsoft auth", error=str(e))
-        ENABLED_PROVIDERS.remove("microsoft")
+        log.error("Failed to register Microsoft auth, but keeping UI button", error=str(e))
+        _microsoft_available = False 
 
 if ENABLE_GITHUB and "github" in ENABLED_PROVIDERS:
     try:

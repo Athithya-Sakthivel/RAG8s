@@ -55,6 +55,8 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+            - name: VALKEY_EXTRA_FLAGS
+              value: "--save '' --appendonly no"
             - name: VALKEY_PORT
               value: "6379"
             - name: VALKEY_BUS_PORT
