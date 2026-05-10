@@ -44,12 +44,11 @@ spec:
             global:
               resolve_timeout: 5m
             route:
-              receiver: 'slack-alerts'               # All alerts go to Slack
+              receiver: 'slack-alerts'
               group_by: ['alertname', 'namespace', 'severity']
               group_wait: 30s
               group_interval: 5m
               repeat_interval: 12h
-              # No separate routes – everything uses the root receiver
             inhibit_rules:
               - source_matchers:
                   - alertname = QdrantDown
@@ -181,6 +180,11 @@ spec:
             static_configs:
               - targets:
                   - 'grafana.monitoring.svc.cluster.local:3000'
+          - job_name: 'alertmanager'
+            scrape_interval: 30s
+            static_configs:
+              - targets:
+                  - 'prometheus-alertmanager.monitoring.svc.cluster.local:9093'
 
         serverFiles:
           alerts:
@@ -225,26 +229,24 @@ spec:
                   - alert: FrontendNotReady
                     expr: frontend_service_ready == 0
                     for: 2m
-                    labels:
-                      severity: critical
+                    labels: {severity: critical}
                     annotations:
                       summary: "Frontend service is not ready"
-                      description: "The frontend readiness probe has been failing for 2 minutes. Dependencies (Valkey, JWT material, OAuth providers) may be down."
+                      description: "The frontend readiness probe has been failing for 2 minutes."
                   - alert: RetrieverNotReady
                     expr: service_ready{service="retriever"} == 0
                     for: 2m
-                    labels:
-                      severity: critical
+                    labels: {severity: critical}
                     annotations:
                       summary: "Retriever service is not ready"
-                      description: "Retriever readiness has been failing for 2 minutes. Qdrant, embedding models, reranker, or Bedrock may be down."
+                      description: "Retriever readiness has been failing for 2 minutes."
                   - alert: VectorDown
                     expr: absent(up{job="vector"}) or up{job="vector"} == 0
                     for: 2m
                     labels: {severity: warning}
                     annotations:
                       summary: "Vector agent is down"
-                      description: "Vector metrics endpoint at vector-metrics.logging.svc.cluster.local:9598 is unreachable."
+                      description: "Vector metrics endpoint is unreachable."
               - name: retriever_pipeline
                 rules:
                   - alert: RetrieverHighPipelineLatency
@@ -356,33 +358,19 @@ spec:
               - name: clickhouse
                 rules:
                   - alert: ClickHouseHighMemoryUsage
-                    expr: clickhouse_memory_tracking{job="clickhouse"} / 1e9 > 12
+                    expr: ClickHouseMetrics_MemoryTracking{job="clickhouse"} / 1e9 > 12
                     for: 5m
                     labels: {severity: warning}
                     annotations:
                       summary: "ClickHouse memory tracking above 12 GB"
                       description: "ClickHouse is using {{ $value }} GB of memory."
                   - alert: ClickHouseReadOnly
-                    expr: clickhouse_is_readonly{job="clickhouse"} == 1
+                    expr: ClickHouseMetrics_ReadonlyReplica{job="clickhouse"} > 0
                     for: 1m
                     labels: {severity: critical}
                     annotations:
                       summary: "ClickHouse is in read-only mode"
-                      description: "ClickHouse has entered read-only mode. No inserts possible."
-                  - alert: ClickHouseInsertRateDrop
-                    expr: rate(clickhouse_inserts_per_query{job="clickhouse"}[10m]) < 0.01
-                    for: 10m
-                    labels: {severity: warning}
-                    annotations:
-                      summary: "ClickHouse insert rate near zero"
-                      description: "No inserts happening. Log pipeline may be stalled."
-                  - alert: ClickHouseQueryErrorsHigh
-                    expr: rate(clickhouse_query_preempted{job="clickhouse"}[5m]) > 1
-                    for: 5m
-                    labels: {severity: warning}
-                    annotations:
-                      summary: "ClickHouse query preemptions detected"
-                      description: "Queries are being preempted, possibly due to memory pressure."
+                      description: "ClickHouse has read-only replicas. No inserts possible."
               - name: vector
                 rules:
                   - alert: VectorProcessingErrorsHigh
