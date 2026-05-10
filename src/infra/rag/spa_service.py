@@ -27,7 +27,6 @@ Then:
   python3 src/infra/rag/spa_service.py --write
   python3 src/infra/rag/spa_service.py --apply
 """
-
 from __future__ import annotations
 
 import argparse
@@ -64,7 +63,7 @@ DEFAULTS: dict[str, Any] = {
     "SERVICE_NAME": "frontend",
     "SERVICE_ACCOUNT_NAME": "frontend-sa",
     "SECRET_NAME": "frontend-secrets",
-    "IMAGE": "ghcr.io/athithya-sakthivel/frontend:2026-05-09-20-55--a594189@sha256:5650c705f9e8972d893916bb52ebaca6e353e906dd3bb5e502bb021cfa0371b5",
+    "IMAGE": "ghcr.io/athithya-sakthivel/frontend:2026-05-10-07-58--555589c@sha256:fbf19a43737583c18ecc24a34279a119772ae011f9b4e2f7b2aa336c249562c1",
     "IMAGE_PULL_POLICY": "Always",
     "REPLICAS": 1,
     "CONTAINER_PORT": 8000,
@@ -100,9 +99,9 @@ DEFAULTS: dict[str, Any] = {
 }
 
 # Sensitive keys that will be stored in the cluster Secret (never on disk)
+# VALKEY_URL is now hardcoded in config.py, so removed from secrets.
 SECRET_KEYS = (
     "SESSION_SECRET",
-    "VALKEY_URL",
     "GOOGLE_CLIENT_ID",
     "GOOGLE_CLIENT_SECRET",
     "MS_CLIENT_ID",
@@ -272,6 +271,7 @@ def load_config() -> dict[str, Any]:
         "deployment": cfg["MANIFESTS_DIR"] / "03-deployment.yaml",
         "service": cfg["MANIFESTS_DIR"] / "04-service.yaml",
         "pdb": cfg["MANIFESTS_DIR"] / "05-pdb.yaml",
+        "networkpolicy": cfg["MANIFESTS_DIR"] / "06-networkpolicy.yaml",
     }
     cfg["UUID_SHORT"] = str(uuid.uuid4())[:8]
     log.info(
@@ -540,6 +540,77 @@ def build_pdb_doc(cfg: dict[str, Any]) -> dict[str, Any] | None:
         },
     }
 
+def build_networkpolicy_doc(cfg: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "apiVersion": "networking.k8s.io/v1",
+        "kind": "NetworkPolicy",
+        "metadata": {
+            "name": "frontend",
+            "namespace": cfg["NAMESPACE"],
+            "labels": _base_labels(cfg),
+        },
+        "spec": {
+            "podSelector": {
+                "matchLabels": {"app.kubernetes.io/name": cfg["SERVICE_NAME"]}
+            },
+            "policyTypes": ["Ingress", "Egress"],
+            "ingress": [
+                {
+                    "from": [
+                        {"podSelector": {"matchLabels": {"app.kubernetes.io/name": "cloudflared"}}}
+                    ],
+                    "ports": [{"protocol": "TCP", "port": cfg["CONTAINER_PORT"]}],
+                },
+                {
+                    "from": [
+                        {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "monitoring"}}}
+                    ],
+                    "ports": [{"protocol": "TCP", "port": cfg["CONTAINER_PORT"]}],
+                },
+            ],
+            "egress": [
+                {
+                    "to": [
+                        {
+                            "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "kube-system"}},
+                            "podSelector": {"matchLabels": {"k8s-app": "kube-dns"}},
+                        }
+                    ],
+                    "ports": [
+                        {"protocol": "UDP", "port": 53},
+                        {"protocol": "TCP", "port": 53},
+                    ],
+                },
+                {
+                    "to": [
+                        {
+                            "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "valkey"}},
+                            "podSelector": {"matchLabels": {"app": "valkey"}},
+                        }
+                    ],
+                    "ports": [{"protocol": "TCP", "port": 6379}],
+                },
+                {
+                    "to": [
+                        {"podSelector": {"matchLabels": {"app.kubernetes.io/name": "retriever"}}}
+                    ],
+                    "ports": [{"protocol": "TCP", "port": 8001}],
+                },
+                {
+                    "to": [
+                        {
+                            "ipBlock": {
+                                "cidr": "0.0.0.0/0",
+                                "except": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"],
+                            }
+                        }
+                    ],
+                    "ports": [{"protocol": "TCP", "port": 443}],
+                },
+            ],
+        },
+    }
+
 # ---------------------------------------------------------------------------
 # File & kubectl helpers
 # ---------------------------------------------------------------------------
@@ -636,6 +707,7 @@ def generate_manifests(
     dep_doc = build_deployment_doc(cfg, has_secret=has_secret)
     svc_doc = build_service_doc(cfg)
     pdb_doc = build_pdb_doc(cfg)
+    netpol_doc = build_networkpolicy_doc(cfg)
 
     docs_for_hash = [
         {"serviceaccount": cfg["SERVICE_ACCOUNT_NAME"], "namespace": cfg["NAMESPACE"]},
@@ -669,6 +741,7 @@ def generate_manifests(
             cfg["FILES"]["pdb"].unlink()
         except Exception:
             pass
+    write_yaml_atomic(cfg["FILES"]["networkpolicy"], netpol_doc)
 
     inputs_path.write_text(inputs_hash + "\n", encoding="utf-8")
     log.info("Manifests written to %s (inputs_hash=%s)", str(manifests_dir), inputs_hash)
@@ -715,7 +788,7 @@ def apply_to_cluster(cfg: dict[str, Any], dry_run: bool = False) -> None:
     # Apply manifests
     try:
         create_namespace_if_missing(cfg["NAMESPACE"])
-        for key in ["serviceaccount", "deployment", "service"]:
+        for key in ["serviceaccount", "deployment", "service", "networkpolicy"]:
             apply_yaml(cfg["FILES"][key])
         pdb_file = cfg["FILES"]["pdb"]
         if pdb_file.exists():
@@ -766,7 +839,7 @@ def apply_secrets_only(cfg: dict[str, Any], dry_run: bool = False) -> int:
     return 0
 
 def delete_manifests(cfg: dict[str, Any], delete_secret: bool = False) -> None:
-    for key in ["serviceaccount", "deployment", "service", "pdb"]:
+    for key in ["serviceaccount", "deployment", "service", "pdb", "networkpolicy"]:
         path = cfg["FILES"][key]
         if path.exists():
             try:

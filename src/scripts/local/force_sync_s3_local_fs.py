@@ -2,7 +2,7 @@
 """
 force_sync_s3_and_local_fs.py
 
-Mirror local <-> Amazon S3.
+Mirror data/ local <-> Amazon S3.
 
 Modes:
   --upload         mirror local -> S3 (delete remote orphans)

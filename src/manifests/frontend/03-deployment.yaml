@@ -37,7 +37,7 @@ spec:
         emptyDir: {}
       containers:
       - name: frontend
-        image: ghcr.io/athithya-sakthivel/frontend:2026-05-09-20-55--a594189@sha256:5650c705f9e8972d893916bb52ebaca6e353e906dd3bb5e502bb021cfa0371b5
+        image: ghcr.io/athithya-sakthivel/frontend:2026-05-10-07-58--555589c@sha256:fbf19a43737583c18ecc24a34279a119772ae011f9b4e2f7b2aa336c249562c1
         imagePullPolicy: Always
         ports:
         - name: http
