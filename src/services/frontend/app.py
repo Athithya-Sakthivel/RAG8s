@@ -1,3 +1,4 @@
+# app.py
 from __future__ import annotations
 
 import asyncio
@@ -38,6 +39,7 @@ from rate_limits import (
     limiter,
     limits,
     verified_subject,
+    is_valkey_available,          # new – Valkey health check
 )
 from frontend_logger import log, setup_logging
 from metrics import (
@@ -70,6 +72,24 @@ except Exception as exc:
     raise
 
 
+async def _monitor_valkey_health(app: FastAPI, interval: float = 30):
+    """Periodically checks Valkey and updates the readiness metric."""
+    while True:
+        try:
+            reachable = await is_valkey_available()
+            if reachable:
+                set_ready(True)
+            else:
+                set_ready(False)
+                log.warn("valkey_unreachable", detail="Rate limiting is using in‑memory fallback.")
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            log.exception("valkey_health_check_failed")
+            set_ready(False)        # assume degraded on error
+        await asyncio.sleep(interval)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
@@ -86,6 +106,9 @@ async def lifespan(app: FastAPI):
     concurrency = max(1, limits.stream_concurrency if limits.stream_concurrency > 2 else 10)
     app.state.stream_semaphore = asyncio.Semaphore(concurrency)
 
+    # start Valkey health monitor (updates the readiness gauge)
+    health_task = asyncio.create_task(_monitor_valkey_health(app))
+
     set_ready(True)
     log.info(
         "service.startup",
@@ -100,6 +123,10 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        health_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await health_task
+
         client = getattr(app.state, "http_client", None)
         if client is not None:
             await client.aclose()
@@ -107,6 +134,7 @@ async def lifespan(app: FastAPI):
         log.info("service.shutdown", service=SERVICE_NAME, env=ENV)
 
 
+import contextlib
 app = FastAPI(title="frontend", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
 app.mount(STATIC_URL_PREFIX, StaticFiles(directory=str(STATIC_DIR)), name="static")

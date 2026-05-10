@@ -144,7 +144,8 @@ JWT_KID = (os.getenv("JWT_KID") or "").strip()
 JWT_PRIVATE_KEY_PEM = (os.getenv("JWT_PRIVATE_KEY_PEM") or "").strip()
 JWT_PRIVATE_KEY_PATH = (os.getenv("JWT_PRIVATE_KEY_PATH") or "").strip()
 
-VALKEY_URL = (os.getenv("VALKEY_URL") or "").strip()
+# Valkey is configured without authentication; access is controlled via NetworkPolicies
+VALKEY_URL = "redis://valkey.valkey.svc.cluster.local:6379"
 
 ENABLE_PRESIGNED_URLS = parse_bool_env(os.getenv("ENABLE_PRESIGNED_URLS"), True)
 PRESIGNED_URL_TTL_SECONDS = parse_int_env(os.getenv("PRESIGNED_URL_TTL_SECONDS"), 3600)

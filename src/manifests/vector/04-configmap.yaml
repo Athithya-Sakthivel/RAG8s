@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vector-config
+  namespace: logging
+  labels:
+    app.kubernetes.io/name: vector
+    app.kubernetes.io/component: logging
+    app.kubernetes.io/managed-by: vector.py
+data:
+  vector.toml: "data_dir = \"/var/lib/vector\"\n\n[api]\nenabled = true\naddress =\
+    \ \"0.0.0.0:8686\"\n\n[sources.kube_logs]\ntype = \"kubernetes_logs\"\nauto_partial_merge\
+    \ = true\nself_node_name = \"${VECTOR_SELF_NODE_NAME}\"\nignore_older_secs = 1_000_000_000\n\
+    \n[sources.internal_metrics]\ntype = \"internal_metrics\"\n\n[transforms.decode_service_schema]\n\
+    type = \"remap\"\ninputs = [\"kube_logs\"]\nsource = \"\"\"\nif is_string(.message)\
+    \ {\n  parsed, err = parse_json(.message)\n  if err == null && is_object(parsed)\
+    \ {\n    . = merge!(., parsed, true)\n  }\n}\n\"\"\"\n\n[transforms.drop_excluded_namespaces]\n\
+    type = \"filter\"\ninputs = [\"decode_service_schema\"]\ncondition = \"\"\"\n\
+    !is_string(.kubernetes.pod_namespace) || !includes([\"kube-system\", \"cert-manager\"\
+    , \"monitoring\"], .kubernetes.pod_namespace)\n\"\"\"\n\n[sinks.clickhouse]\n\
+    type = \"clickhouse\"\ninputs = [\"drop_excluded_namespaces\"]\nendpoint = \"\
+    http://clickhouse.logging.svc.cluster.local:8123\"\ndatabase = \"logs\"\ntable\
+    \ = \"inference_logs\"\nformat = \"json_each_row\"\ncompression = \"gzip\"\nskip_unknown_fields\
+    \ = true\n\n[sinks.clickhouse.auth]\nstrategy = \"basic\"\nuser = \"${CLICKHOUSE_USER}\"\
+    \npassword = \"${CLICKHOUSE_PASSWORD}\"\n\n[sinks.clickhouse.batch]\nmax_events\
+    \ = 200\ntimeout_secs = 2.0\n\n[sinks.clickhouse.healthcheck]\nenabled = true\n\
+    \n[sinks.prometheus_exporter]\ntype = \"prometheus_exporter\"\ninputs = [\"internal_metrics\"\
+    ]\naddress = \"0.0.0.0:9598\"\n"

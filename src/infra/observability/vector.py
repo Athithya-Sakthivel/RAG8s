@@ -46,7 +46,6 @@ DEFAULT_ENABLE_METRICS_EXPORTER = (
 )
 
 DEFAULT_MANIFEST_DIR = Path(os.getenv("VECTOR_MANIFEST_DIR", "src/manifests/vector"))
-DEFAULT_MANIFEST_FILE = Path(os.getenv("VECTOR_MANIFEST_FILE", str(DEFAULT_MANIFEST_DIR / "vector.yaml")))
 
 VECTOR_LABELS = {
     "app.kubernetes.io/name": "vector",
@@ -170,10 +169,7 @@ def render_vector_toml(
     lines.append('type = "kubernetes_logs"')
     lines.append("auto_partial_merge = true")
     lines.append('self_node_name = "${VECTOR_SELF_NODE_NAME}"')
-    # Prevent checkpoints from expiring; ensures old files are always eligible even after restarts.
     lines.append("ignore_older_secs = 1_000_000_000")
-    # read_from defaults to "end", which is the correct production setting.
-    # No read_from line is added intentionally to avoid log duplication on restart.
     lines.append("")
 
     lines.append("[sources.internal_metrics]")
@@ -237,7 +233,39 @@ def validate_vector_toml(toml_text: str) -> None:
     tomllib.loads(toml_text)
 
 
-def build_manifest(
+def build_network_policy(namespace: str) -> dict:
+    return {
+        "apiVersion": "networking.k8s.io/v1",
+        "kind": "NetworkPolicy",
+        "metadata": {"name": "vector", "namespace": namespace, "labels": _labels()},
+        "spec": {
+            "podSelector": {"matchLabels": {"app": "vector"}},
+            "policyTypes": ["Ingress", "Egress"],
+            "ingress": [
+                {
+                    "from": [
+                        {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "monitoring"}},
+                         "podSelector": {"matchLabels": {"app.kubernetes.io/name": "prometheus"}}}
+                    ],
+                    "ports": [{"port": DEFAULT_VECTOR_METRICS_PORT, "protocol": "TCP"}]
+                }
+            ],
+            "egress": [
+                {"to": [{"namespaceSelector": {}, "podSelector": {"matchLabels": {"k8s-app": "kube-dns"}}}],
+                 "ports": [{"port": 53, "protocol": "UDP"}, {"port": 53, "protocol": "TCP"}]},
+                {"to": [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": DEFAULT_CLICKHOUSE_NAMESPACE}},
+                         "podSelector": {"matchLabels": {"app": DEFAULT_CLICKHOUSE_SERVICE}}}],
+                 "ports": [{"port": DEFAULT_CLICKHOUSE_PORT, "protocol": "TCP"}]},
+                {"to": [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "default"}},
+                         "podSelector": {"matchLabels": {"component": "apiserver"}}}],
+                 "ports": [{"port": 443, "protocol": "TCP"}]},
+                {"to": [{"ipBlock": {"cidr": "0.0.0.0/0", "except": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]}}]}
+            ]
+        }
+    }
+
+
+def generate_manifests(
     *,
     namespace: str = DEFAULT_NAMESPACE,
     clickhouse_namespace: str = DEFAULT_CLICKHOUSE_NAMESPACE,
@@ -256,7 +284,7 @@ def build_manifest(
     limit_mem: str = DEFAULT_LIMIT_MEM,
     drop_namespaces: list[str] | None = None,
     enable_metrics_exporter: bool = DEFAULT_ENABLE_METRICS_EXPORTER,
-) -> str:
+) -> dict[str, str]:
     drop_namespaces = drop_namespaces or []
     vector_toml = render_vector_toml(
         clickhouse_namespace=clickhouse_namespace,
@@ -270,116 +298,19 @@ def build_manifest(
         enable_metrics_exporter=enable_metrics_exporter,
     )
     validate_vector_toml(vector_toml)
-
     cfg_checksum = _sha256(vector_toml)
     labels = _labels()
 
-    docs: list[dict[str, Any]] = [
-        {
-            "apiVersion": "v1",
-            "kind": "ServiceAccount",
-            "metadata": {
-                "name": "vector",
-                "namespace": namespace,
-                "labels": labels,
-            },
-        },
-        {
-            "apiVersion": "rbac.authorization.k8s.io/v1",
-            "kind": "ClusterRole",
-            "metadata": {
-                "name": "vector-log-reader",
-                "labels": labels,
-            },
-            "rules": [
-                {
-                    "apiGroups": [""],
-                    "resources": ["pods", "namespaces", "nodes"],
-                    "verbs": ["list", "watch"],
-                }
-            ],
-        },
-        {
-            "apiVersion": "rbac.authorization.k8s.io/v1",
-            "kind": "ClusterRoleBinding",
-            "metadata": {
-                "name": "vector-log-reader",
-                "labels": labels,
-            },
-            "roleRef": {
-                "apiGroup": "rbac.authorization.k8s.io",
-                "kind": "ClusterRole",
-                "name": "vector-log-reader",
-            },
-            "subjects": [
-                {
-                    "kind": "ServiceAccount",
-                    "name": "vector",
-                    "namespace": namespace,
-                }
-            ],
-        },
-        {
-            "apiVersion": "v1",
-            "kind": "ConfigMap",
-            "metadata": {
-                "name": "vector-config",
-                "namespace": namespace,
-                "labels": labels,
-            },
-            "data": {
-                "vector.toml": vector_toml,
-            },
-        },
-    ]
-
-    if enable_metrics_exporter:
-        docs.append(
-            {
-                "apiVersion": "v1",
-                "kind": "Service",
-                "metadata": {
-                    "name": "vector-metrics",
-                    "namespace": namespace,
-                    "labels": labels,
-                },
-                "spec": {
-                    "selector": {"app": "vector"},
-                    "ports": [
-                        {
-                            "name": "metrics",
-                            "port": metrics_port,
-                            "targetPort": metrics_port,
-                        }
-                    ],
-                    "type": "ClusterIP",
-                },
-            }
-        )
-
-    daemonset_doc: dict[str, Any] = {
+    daemonset_doc = {
         "apiVersion": "apps/v1",
         "kind": "DaemonSet",
-        "metadata": {
-            "name": "vector",
-            "namespace": namespace,
-            "labels": labels,
-        },
+        "metadata": {"name": "vector", "namespace": namespace, "labels": labels},
         "spec": {
-            "selector": {
-                "matchLabels": {
-                    "app": "vector",
-                }
-            },
+            "selector": {"matchLabels": {"app": "vector"}},
             "template": {
                 "metadata": {
-                    "labels": {
-                        "app": "vector",
-                        **labels,
-                    },
-                    "annotations": {
-                        "vector/config-checksum": cfg_checksum,
-                    },
+                    "labels": {"app": "vector", **labels},
+                    "annotations": {"vector/config-checksum": cfg_checksum},
                 },
                 "spec": {
                     "serviceAccountName": "vector",
@@ -388,121 +319,36 @@ def build_manifest(
                         {
                             "name": "fix-data-dir-permissions",
                             "image": busybox_image,
-                            "command": [
-                                "sh",
-                                "-c",
-                                f"mkdir -p {vector_data_dir} && chown -R 65534:65534 {vector_data_dir}",
-                            ],
-                            "volumeMounts": [
-                                {
-                                    "name": "data-dir",
-                                    "mountPath": vector_data_dir,
-                                }
-                            ],
-                            "securityContext": {
-                                "runAsUser": 0,
-                                "runAsNonRoot": False,
-                                "allowPrivilegeEscalation": False,
-                            },
+                            "command": ["sh", "-c", f"mkdir -p {vector_data_dir} && chown -R 65534:65534 {vector_data_dir}"],
+                            "volumeMounts": [{"name": "data-dir", "mountPath": vector_data_dir}],
+                            "securityContext": {"runAsUser": 0, "runAsNonRoot": False, "allowPrivilegeEscalation": False},
                         }
                     ],
                     "volumes": [
-                        {
-                            "name": "vector-config",
-                            "configMap": {
-                                "name": "vector-config",
-                                "items": [{"key": "vector.toml", "path": "vector.toml"}],
-                            },
-                        },
-                        {
-                            "name": "data-dir",
-                            "hostPath": {
-                                "path": vector_data_dir,
-                                "type": "DirectoryOrCreate",
-                            },
-                        },
-                        {
-                            "name": "pod-logs",
-                            "hostPath": {
-                                "path": "/var/log/pods",
-                                "type": "Directory",
-                            },
-                        },
+                        {"name": "vector-config", "configMap": {"name": "vector-config", "items": [{"key": "vector.toml", "path": "vector.toml"}]}},
+                        {"name": "data-dir", "hostPath": {"path": vector_data_dir, "type": "DirectoryOrCreate"}},
+                        {"name": "pod-logs", "hostPath": {"path": "/var/log/pods", "type": "Directory"}},
                     ],
                     "containers": [
                         {
                             "name": "vector",
                             "image": f"{vector_image_repo}:{vector_image_tag}",
                             "args": ["-c", "/etc/vector/vector.toml"],
-                            **(
-                                {
-                                    "ports": [
-                                        {
-                                            "name": "metrics",
-                                            "containerPort": metrics_port,
-                                        }
-                                    ]
-                                }
-                                if enable_metrics_exporter
-                                else {}
-                            ),
+                            **({"ports": [{"name": "metrics", "containerPort": metrics_port}]} if enable_metrics_exporter else {}),
                             "env": [
-                                {
-                                    "name": "CLICKHOUSE_USER",
-                                    "valueFrom": {
-                                        "secretKeyRef": {
-                                            "name": DEFAULT_CLICKHOUSE_SECRET_NAME,
-                                            "key": "username",
-                                        }
-                                    },
-                                },
-                                {
-                                    "name": "CLICKHOUSE_PASSWORD",
-                                    "valueFrom": {
-                                        "secretKeyRef": {
-                                            "name": DEFAULT_CLICKHOUSE_SECRET_NAME,
-                                            "key": "password",
-                                        }
-                                    },
-                                },
-                                {
-                                    "name": "VECTOR_SELF_NODE_NAME",
-                                    "valueFrom": {
-                                        "fieldRef": {
-                                            "fieldPath": "spec.nodeName",
-                                        }
-                                    },
-                                },
+                                {"name": "CLICKHOUSE_USER", "valueFrom": {"secretKeyRef": {"name": DEFAULT_CLICKHOUSE_SECRET_NAME, "key": "username"}}},
+                                {"name": "CLICKHOUSE_PASSWORD", "valueFrom": {"secretKeyRef": {"name": DEFAULT_CLICKHOUSE_SECRET_NAME, "key": "password"}}},
+                                {"name": "VECTOR_SELF_NODE_NAME", "valueFrom": {"fieldRef": {"fieldPath": "spec.nodeName"}}},
                             ],
                             "volumeMounts": [
-                                {
-                                    "name": "vector-config",
-                                    "mountPath": "/etc/vector/vector.toml",
-                                    "subPath": "vector.toml",
-                                    "readOnly": True,
-                                },
-                                {
-                                    "name": "data-dir",
-                                    "mountPath": vector_data_dir,
-                                },
-                                {
-                                    "name": "pod-logs",
-                                    "mountPath": "/var/log/pods",
-                                    "readOnly": True,
-                                },
+                                {"name": "vector-config", "mountPath": "/etc/vector/vector.toml", "subPath": "vector.toml", "readOnly": True},
+                                {"name": "data-dir", "mountPath": vector_data_dir},
+                                {"name": "pod-logs", "mountPath": "/var/log/pods", "readOnly": True},
                             ],
-                            "resources": {
-                                "requests": {"cpu": req_cpu, "memory": req_mem},
-                                "limits": {"cpu": limit_cpu, "memory": limit_mem},
-                            },
-                            # Production fix: group 0 allows reading host log files (owned by root:root)
+                            "resources": {"requests": {"cpu": req_cpu, "memory": req_mem}, "limits": {"cpu": limit_cpu, "memory": limit_mem}},
                             "securityContext": {
-                                "allowPrivilegeEscalation": False,
-                                "readOnlyRootFilesystem": True,
-                                "runAsNonRoot": True,
-                                "runAsUser": 65534,
-                                "runAsGroup": 0,
-                                "capabilities": {"drop": ["ALL"]},
+                                "allowPrivilegeEscalation": False, "readOnlyRootFilesystem": True,
+                                "runAsNonRoot": True, "runAsUser": 65534, "runAsGroup": 0, "capabilities": {"drop": ["ALL"]},
                             },
                         }
                     ],
@@ -510,13 +356,19 @@ def build_manifest(
             },
         },
     }
-    docs.append(daemonset_doc)
 
-    return "\n---\n".join(yaml.safe_dump(doc, sort_keys=False, default_flow_style=False).rstrip() for doc in docs) + "\n"
-
-
-def validate_manifest(manifest_text: str) -> None:
-    list(yaml.safe_load_all(manifest_text))
+    manifest_files = {
+        "00-namespace.yaml": yaml.safe_dump({"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": namespace}}, sort_keys=False),
+        "01-serviceaccount.yaml": yaml.safe_dump({"apiVersion": "v1", "kind": "ServiceAccount", "metadata": {"name": "vector", "namespace": namespace, "labels": labels}}, sort_keys=False),
+        "02-clusterrole.yaml": yaml.safe_dump({"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "ClusterRole", "metadata": {"name": "vector-log-reader", "labels": labels}, "rules": [{"apiGroups": [""], "resources": ["pods", "namespaces", "nodes"], "verbs": ["list", "watch"]}]}, sort_keys=False),
+        "03-clusterrolebinding.yaml": yaml.safe_dump({"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "ClusterRoleBinding", "metadata": {"name": "vector-log-reader", "labels": labels}, "roleRef": {"apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole", "name": "vector-log-reader"}, "subjects": [{"kind": "ServiceAccount", "name": "vector", "namespace": namespace}]}, sort_keys=False),
+        "04-configmap.yaml": yaml.safe_dump({"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "vector-config", "namespace": namespace, "labels": labels}, "data": {"vector.toml": vector_toml}}, sort_keys=False),
+    }
+    if enable_metrics_exporter:
+        manifest_files["05-service.yaml"] = yaml.safe_dump({"apiVersion": "v1", "kind": "Service", "metadata": {"name": "vector-metrics", "namespace": namespace, "labels": labels}, "spec": {"selector": {"app": "vector"}, "ports": [{"name": "metrics", "port": metrics_port, "targetPort": metrics_port}], "type": "ClusterIP"}}, sort_keys=False)
+    manifest_files["10-daemonset.yaml"] = yaml.safe_dump(daemonset_doc, sort_keys=False)
+    manifest_files["11-networkpolicy.yaml"] = yaml.safe_dump(build_network_policy(namespace), sort_keys=False)
+    return manifest_files
 
 
 def atomic_write(path: Path, content: str) -> None:
@@ -526,11 +378,36 @@ def atomic_write(path: Path, content: str) -> None:
     tmp.replace(path)
 
 
-def clean_legacy_artifacts(output_path: Path) -> None:
-    for name in {"vector.toml", "vector.yml", "vector.json"}:
-        legacy_path = output_path.parent / name
-        if legacy_path.exists() and legacy_path != output_path:
-            legacy_path.unlink()
+def clean_manifest_dir() -> None:
+    if DEFAULT_MANIFEST_DIR.exists():
+        for f in DEFAULT_MANIFEST_DIR.iterdir():
+            if f.is_file():
+                f.unlink()
+                print(f"  removed stale {f}")
+
+
+def write_manifests(files: dict[str, str]) -> None:
+    clean_manifest_dir()
+    for filename, content in files.items():
+        atomic_write(DEFAULT_MANIFEST_DIR / filename, content)
+    print(f"[ok] manifests written to {DEFAULT_MANIFEST_DIR}")
+
+
+def apply_manifests(files: dict[str, str], args: argparse.Namespace) -> None:
+    run_checked(["kubectl", "apply", "-f", "-"], input_text=_namespace_bootstrap_yaml(args.namespace))
+    run_checked(["kubectl", "apply", "-f", "-"], input_text=_secret_yaml(args.namespace, DEFAULT_CLICKHOUSE_SECRET_NAME, args.clickhouse_user, args.clickhouse_password))
+    for _, content in files.items():
+        run_checked(["kubectl", "apply", "-f", "-"], input_text=content)
+    print("[ok] rollout complete")
+
+
+def delete_manifests() -> None:
+    if DEFAULT_MANIFEST_DIR.exists():
+        for f in sorted(DEFAULT_MANIFEST_DIR.glob("*.yaml")):
+            run_checked(["kubectl", "delete", "-f", str(f), "--ignore-not-found=true"])
+            f.unlink(missing_ok=True)
+    run_checked(["kubectl", "-n", DEFAULT_NAMESPACE, "delete", "secret", DEFAULT_CLICKHOUSE_SECRET_NAME, "--ignore-not-found=true"])
+    print("[ok] deleted vector resources")
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -540,13 +417,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     action.add_argument("--rollout", action="store_true", help="Render, write, and apply the manifests.")
     action.add_argument("--delete", action="store_true", help="Delete only the resources created by this generator.")
     parser.add_argument("--confirm", action="store_true", help="Confirm deletion for --delete.")
-    parser.add_argument("--stdout", action="store_true", help="Print the rendered Vector TOML and manifest to stdout.")
-    parser.add_argument(
-        "--output",
-        type=Path,
-        default=DEFAULT_MANIFEST_FILE,
-        help=f"Manifest output path (default: {DEFAULT_MANIFEST_FILE})",
-    )
     parser.add_argument("--namespace", default=DEFAULT_NAMESPACE)
     parser.add_argument("--clickhouse-namespace", default=DEFAULT_CLICKHOUSE_NAMESPACE)
     parser.add_argument("--clickhouse-service", default=DEFAULT_CLICKHOUSE_SERVICE)
@@ -569,23 +439,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _render_all(args: argparse.Namespace) -> tuple[str, str]:
+def main(argv: list[str] | None = None) -> int:
+    parser = build_arg_parser()
+    args = parser.parse_args(argv)
+
     drop_namespaces = _parse_csv(args.drop_namespaces)
-
-    vector_toml = render_vector_toml(
-        clickhouse_namespace=args.clickhouse_namespace,
-        clickhouse_service=args.clickhouse_service,
-        clickhouse_port=args.clickhouse_port,
-        clickhouse_db=args.clickhouse_db,
-        clickhouse_table=args.clickhouse_table,
-        vector_data_dir=args.vector_data_dir,
-        metrics_port=args.vector_metrics_port,
-        drop_namespaces=drop_namespaces,
-        enable_metrics_exporter=not args.no_metrics_exporter,
-    )
-    validate_vector_toml(vector_toml)
-
-    manifest_text = build_manifest(
+    files = generate_manifests(
         namespace=args.namespace,
         clickhouse_namespace=args.clickhouse_namespace,
         clickhouse_service=args.clickhouse_service,
@@ -604,91 +463,19 @@ def _render_all(args: argparse.Namespace) -> tuple[str, str]:
         drop_namespaces=drop_namespaces,
         enable_metrics_exporter=not args.no_metrics_exporter,
     )
-    validate_manifest(manifest_text)
-    return vector_toml, manifest_text
-
-
-def generate(args: argparse.Namespace) -> int:
-    vector_toml, manifest_text = _render_all(args)
-    clean_legacy_artifacts(args.output)
-    atomic_write(args.output, manifest_text)
-
-    if args.stdout:
-        sys.stdout.write("=== Vector TOML ===\n")
-        sys.stdout.write(vector_toml)
-        sys.stdout.write("=== End Vector TOML ===\n")
-        sys.stdout.write("=== Manifest ===\n")
-        sys.stdout.write(manifest_text)
-        sys.stdout.write("=== End Manifest ===\n")
-    else:
-        print(f"[ok] wrote {args.output}")
-
-    return 0
-
-
-def rollout(args: argparse.Namespace) -> int:
-    vector_toml, manifest_text = _render_all(args)
-    clean_legacy_artifacts(args.output)
-    atomic_write(args.output, manifest_text)
-
-    if args.stdout:
-        sys.stdout.write("=== Vector TOML ===\n")
-        sys.stdout.write(vector_toml)
-        sys.stdout.write("=== End Vector TOML ===\n")
-        sys.stdout.write("=== Manifest ===\n")
-        sys.stdout.write(manifest_text)
-        sys.stdout.write("=== End Manifest ===\n")
-
-    run_checked(["kubectl", "apply", "-f", "-"], input_text=_namespace_bootstrap_yaml(args.namespace))
-    run_checked(
-        ["kubectl", "apply", "-f", "-"],
-        input_text=_secret_yaml(
-            args.namespace,
-            DEFAULT_CLICKHOUSE_SECRET_NAME,
-            args.clickhouse_user,
-            args.clickhouse_password,
-        ),
-    )
-    run_checked(["kubectl", "apply", "-f", str(args.output)])
-
-    print("[ok] rollout complete")
-    return 0
-
-
-def delete(args: argparse.Namespace) -> int:
-    if not args.confirm:
-        raise SystemExit("--confirm is required for --delete")
-
-    if args.output.exists():
-        run_checked(["kubectl", "delete", "-f", str(args.output), "--ignore-not-found=true"])
-        args.output.unlink(missing_ok=True)
-
-    run_checked(
-        [
-            "kubectl",
-            "-n",
-            args.namespace,
-            "delete",
-            "secret",
-            DEFAULT_CLICKHOUSE_SECRET_NAME,
-            "--ignore-not-found=true",
-        ]
-    )
-
-    print("[ok] deleted vector resources")
-    return 0
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = build_arg_parser()
-    args = parser.parse_args(argv)
 
     if args.generate:
-        return generate(args)
+        write_manifests(files)
+        return 0
     if args.rollout:
-        return rollout(args)
+        write_manifests(files)
+        apply_manifests(files, args)
+        return 0
     if args.delete:
-        return delete(args)
+        if not args.confirm:
+            raise SystemExit("--confirm is required for --delete")
+        delete_manifests()
+        return 0
 
     return 0
 

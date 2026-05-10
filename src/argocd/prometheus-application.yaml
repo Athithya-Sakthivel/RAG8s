@@ -234,6 +234,22 @@ spec:
                     annotations:
                       summary: "ClickHouse is down"
                       description: "ClickHouse at clickhouse.logging.svc.cluster.local:8001 is unreachable."
+                  - alert: FrontendNotReady
+                    expr: frontend_service_ready == 0
+                    for: 2m
+                    labels:
+                      severity: critical
+                    annotations:
+                      summary: "Frontend service is not ready"
+                      description: "The frontend readiness probe has been failing for 2 minutes. Dependencies (Valkey, JWT material, OAuth providers) may be down."
+                  - alert: RetrieverNotReady
+                    expr: service_ready{service="retriever"} == 0
+                    for: 2m
+                    labels:
+                      severity: critical
+                    annotations:
+                      summary: "Retriever service is not ready"
+                      description: "Retriever readiness has been failing for 2 minutes. Qdrant, embedding models, reranker, or Bedrock may be down."
                   - alert: VectorDown
                     expr: absent(up{job="vector"}) or up{job="vector"} == 0
                     for: 2m
@@ -288,7 +304,7 @@ spec:
                     labels: {severity: critical}
                     annotations:
                       summary: "Qdrant has dead replica(s)"
-                      description: "{{ $value }} replica(s) are non‑active."
+                      description: "{{ $value }} replica(s) are non-active."
                   - alert: QdrantRestFailureRate
                     expr: rate(rest_responses_fail_total[5m]) / (rate(rest_responses_total[5m]) + 1) > 0.05
                     for: 5m
@@ -331,8 +347,8 @@ spec:
                     for: 0m
                     labels: {severity: critical}
                     annotations:
-                      summary: "Pod {{ $labels.pod }}/{{ $labels.container }} was OOM‑killed"
-                      description: "Container has been OOM‑killed in the last 5 minutes."
+                      summary: "Pod {{ $labels.pod }}/{{ $labels.container }} was OOM-killed"
+                      description: "Container has been OOM-killed in the last 5 minutes."
               - name: cloudflared
                 rules:
                   - alert: CloudflaredTunnelErrors

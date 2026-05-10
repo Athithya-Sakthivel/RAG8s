@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-clickhouse.py – minimal ClickHouse manifest generator for RAG stack.
-Native metrics at :8001/metrics, non‑root, default‑storage‑class.
+clickhouse.py – production-ready ClickHouse manifest generator for RAG stack.
+Native metrics at :8001/metrics, non‑root, default‑storage‑class, network policies.
 Usage:
   --generate   -> write YAML files to src/manifests/clickhouse
   --rollout    -> generate + apply to cluster (kubectl)
@@ -75,7 +75,6 @@ def atomic_write(path: Path, content: str) -> None:
 
 
 def prometheus_xml() -> str:
-    """Server-level Prometheus exporter configuration (config.d)."""
     return """<?xml version="1.0"?>
 <clickhouse>
   <listen_host>::</listen_host>
@@ -91,7 +90,6 @@ def prometheus_xml() -> str:
 </clickhouse>"""
 
 def users_xml() -> str:
-    """User profile settings (users.d)."""
     return f"""<?xml version="1.0"?>
 <clickhouse>
   <profiles>
@@ -103,7 +101,6 @@ def users_xml() -> str:
     </default>
   </profiles>
 </clickhouse>"""
-
 
 def init_sql() -> str:
     ttl = f" TTL toDateTime(ts) + INTERVAL {TTL_DAYS} DAY" if TTL_DAYS > 0 else ""
@@ -146,6 +143,44 @@ def build_service() -> Dict[str, Any]:
         }
     }
 
+def build_networkpolicy() -> Dict[str, Any]:
+    return {
+        "apiVersion":"networking.k8s.io/v1",
+        "kind":"NetworkPolicy",
+        "metadata":{"name":"clickhouse","namespace":NAMESPACE},
+        "spec":{
+            "podSelector":{"matchLabels":{"app":APP_LABEL}},
+            "policyTypes":["Ingress","Egress"],
+            "ingress":[
+                {
+                    "from":[
+                        {"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":NAMESPACE}},
+                         "podSelector":{"matchLabels":{"app":"vector"}}}
+                    ],
+                    "ports":[{"port":8123,"protocol":"TCP"}]
+                },
+                {
+                    "from":[
+                        {"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"monitoring"}},
+                         "podSelector":{"matchLabels":{"app.kubernetes.io/name":"prometheus"}}}
+                    ],
+                    "ports":[{"port":8001,"protocol":"TCP"}]
+                }
+            ],
+            "egress":[
+                {
+                    "to":[
+                        {"namespaceSelector":{},"podSelector":{"matchLabels":{"k8s-app":"kube-dns"}}}
+                    ],
+                    "ports":[{"port":53,"protocol":"UDP"},{"port":53,"protocol":"TCP"}]
+                },
+                {
+                    "to":[{"podSelector":{"matchLabels":{"app":APP_LABEL}}}]
+                }
+            ]
+        }
+    }
+
 def build_statefulset() -> Dict[str, Any]:
     labels = {"app": APP_LABEL}
     chests = {
@@ -167,13 +202,9 @@ def build_statefulset() -> Dict[str, Any]:
         "volumeMounts":[
             {"name":"data","mountPath":"/var/lib/clickhouse"},
             {"name":"clickhouse-logs","mountPath":"/var/log/clickhouse-server"},
-            # config.d – Prometheus settings (read-only ConfigMap)
             {"name":"prometheus-config","mountPath":"/etc/clickhouse-server/config.d","readOnly":True},
-            # users.d – writable emptyDir so entrypoint can write default-user.xml
             {"name":"users-d","mountPath":"/etc/clickhouse-server/users.d"},
-            # User profile settings – mounted as a single file inside the writable users.d
             {"name":"users-config","mountPath":"/etc/clickhouse-server/users.d/10-settings.xml","subPath":"10-settings.xml","readOnly":True},
-            # /tmp – required by v26.4.1+ for entrypoint temporary files
             {"name":"tmp","mountPath":"/tmp"},
         ],
         "resources":{
@@ -251,7 +282,6 @@ def build_users_configmap() -> Dict[str, Any]:
 
 # ── generate / apply ───────────────────────────────────
 def clean_manifest_dir() -> None:
-    """Remove all existing files in the manifest directory to avoid stale YAML."""
     if RENDER_DIR.exists():
         for f in RENDER_DIR.iterdir():
             if f.is_file():
@@ -266,14 +296,16 @@ def generate_manifests():
     atomic_write(RENDER_DIR/"20-prometheus-configmap.yaml", yaml.safe_dump(build_prometheus_configmap(), sort_keys=False))
     atomic_write(RENDER_DIR/"21-users-configmap.yaml", yaml.safe_dump(build_users_configmap(), sort_keys=False))
     atomic_write(RENDER_DIR/"30-statefulset.yaml", yaml.safe_dump(build_statefulset(), sort_keys=False))
+    atomic_write(RENDER_DIR/"31-networkpolicy.yaml", yaml.safe_dump(build_networkpolicy(), sort_keys=False))
     atomic_write(INIT_SQL_PATH, init_sql())
-    # combined
+    # combined convenience file
     parts = [
         yaml.safe_dump(build_namespace(), sort_keys=False),
         yaml.safe_dump(build_service(), sort_keys=False),
         yaml.safe_dump(build_prometheus_configmap(), sort_keys=False),
         yaml.safe_dump(build_users_configmap(), sort_keys=False),
         yaml.safe_dump(build_statefulset(), sort_keys=False),
+        yaml.safe_dump(build_networkpolicy(), sort_keys=False),
     ]
     atomic_write(RENDER_DIR/"clickhouse.yaml", "\n---\n".join(parts))
     print("[ok] manifests written to", RENDER_DIR)
@@ -285,7 +317,6 @@ def apply_manifests():
     run(["kubectl","apply","-f",str(RENDER_DIR/"00-namespace.yaml")])
     run(["kubectl","apply","-f",str(RENDER_DIR/"20-prometheus-configmap.yaml")])
     run(["kubectl","apply","-f",str(RENDER_DIR/"21-users-configmap.yaml")])
-    # secret (create/update)
     secret_yaml = f"""apiVersion: v1
 kind: Secret
 metadata:
@@ -300,6 +331,7 @@ stringData:
         print("[warn] secret apply failed:", rc.stderr)
     run(["kubectl","apply","-f",str(RENDER_DIR/"10-service.yaml")])
     run(["kubectl","apply","-f",str(RENDER_DIR/"30-statefulset.yaml")])
+    run(["kubectl","apply","-f",str(RENDER_DIR/"31-networkpolicy.yaml")])
     run(["kubectl","rollout","status",f"statefulset/{STS_NAME}","-n",NAMESPACE,f"--timeout={INIT_TIMEOUT}s"])
     rc = run(["kubectl","get","pods","-n",NAMESPACE,"-l",f"app={APP_LABEL}","-o","json"], timeout=10)
     pods = json.loads(rc["out"]).get("items",[])
@@ -323,6 +355,7 @@ def delete_manifests(confirm=False):
         sys.exit(2)
     run(["kubectl","delete","statefulset",STS_NAME,"-n",NAMESPACE,"--ignore-not-found"])
     run(["kubectl","delete","service",SERVICE_NAME,"-n",NAMESPACE,"--ignore-not-found"])
+    run(["kubectl","delete","networkpolicy","clickhouse","-n",NAMESPACE,"--ignore-not-found"])
     run(["kubectl","delete","configmap",f"{STS_NAME}-users-settings","-n",NAMESPACE,"--ignore-not-found"])
     run(["kubectl","delete","configmap",f"{STS_NAME}-prometheus-settings","-n",NAMESPACE,"--ignore-not-found"])
     run(["kubectl","delete","secret",SECRET_NAME,"-n",NAMESPACE,"--ignore-not-found"])

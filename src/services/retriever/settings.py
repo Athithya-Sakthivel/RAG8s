@@ -98,7 +98,7 @@ RERANKER_URL = (_env_str("RERANKER_URL", "http://reranker-svc.inference.svc.clus
 ANSWER_PROMPT_TEMPLATE = _env_str(
     "LLM_PROMPT_TEMPLATE",
     (
-        "You are a knowledge assistant who must explain explicitly to an end-user by referring ONLY to the provided passages below.\n"
+        "You are a knowledge assistant who must explain concretely to an end-user by referring ONLY to the provided passages below.\n"
         "You MUST end every passage with a citation in the exact format [n], where n is one of the numbered passage blocks.\n"
         "Use ONLY the provided passage numbers. Do NOT output filenames, secrets, URLs, page numbers, or any other metadata.\n"
         "Do NOT invent citations.\n"
@@ -114,7 +114,7 @@ ANSWER_PROMPT_TEMPLATE = _env_str(
 ENABLE_PRESIGNED_URLS = _env_bool("ENABLE_PRESIGNED_URLS", True)
 PRESIGNED_URL_TTL_SECONDS = _env_int("PRESIGNED_URL_TTL_SECONDS", 1800)
 
-LLM_MAX_TOKENS = _env_int("LLM_MAX_TOKENS", 400)
+LLM_MAX_TOKENS = _env_int("LLM_MAX_TOKENS", 250)
 LLM_TEMPERATURE = _env_float("LLM_TEMPERATURE", 0.0)
 
 BEDROCK_GUARDRAIL_IDENTIFIER = (_env_str("BEDROCK_GUARDRAIL_IDENTIFIER", "") or "").strip()
