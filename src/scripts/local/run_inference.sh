@@ -89,6 +89,9 @@ git add . && git commit -m "new" && git push origin main
 # kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
 
 
+19I2T81vuKmVy1jN
+
+
 bash src/infra/observability/prometheus_setup.sh
 
 export GRAFANA_ADMIN_PASSWORD=grafana
