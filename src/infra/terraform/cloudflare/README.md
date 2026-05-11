@@ -1,150 +1,132 @@
 # Cloudflare Terraform Stack
 
-This stack manages the **Cloudflare-side infrastructure** for this deployment.
+This stack manages the Cloudflare-side infrastructure for this deployment. It creates one named Cloudflare Tunnel, explicit DNS CNAME records for the published hostnames, and a small set of zone settings. It does not create any Kubernetes resources, Cloudflare Pages, public load balancers, or origin certificates.
 
-It creates **one named Cloudflare Tunnel**, **explicit DNS CNAME records** for the published hostnames, and a small set of **zone settings**. It does **not** create any Kubernetes resources, Cloudflare Pages, public load balancers, or origin certificates.
+## Architecture
 
-## Public hostnames
+GitHub to Cloudflare to Tunnel to Argo CD (ClusterIP). No Kubernetes ingress or LoadBalancer is required, and TLS terminates at Cloudflare.
 
-The deployment is exposed under this namespace:
+## Public Hostnames
 
-* `https://rag.athithya.site`
-* `https://argocd.rag.athithya.site`
-* `https://grafana.rag.athithya.site`
+The deployment is exposed under the following namespace:
 
-All three hostnames point to the **same tunnel**, but each hostname has its **own explicit DNS record**. There is **no wildcard DNS**.
+- `https://rag.athithya.site`
+- `https://argocd.rag.athithya.site`
+- `https://grafana.rag.athithya.site`
 
-## Tunnel model
+All three hostnames point to the same tunnel, but each hostname has its own explicit DNS record. There is no wildcard DNS.
 
-The tunnel name is:
+## Tunnel Model
 
-* `default-tunnel-1`
+The tunnel name is `default-tunnel-1`. Cloudflare Tunnel resolves to a tunnel target of the form `<UUID>.cfargotunnel.com`. This stack creates DNS CNAME records that point the published hostnames at that tunnel target. The actual routing to backend services happens in the Kubernetes `cloudflared` configuration, not in Terraform.
 
-Cloudflare Tunnel resolves to a tunnel target of the form:
+## What This Stack Creates
 
-* `<UUID>.cfargotunnel.com`
-
-This stack creates DNS CNAME records that point the published hostnames at that tunnel target. The actual routing to backend services happens in the **Kubernetes `cloudflared` configuration**, not in Terraform.
-
-## What this stack creates
-
-### DNS records
+### DNS Records
 
 Explicit CNAMEs for:
 
-* the root app hostname: `rag.athithya.site`
-* Argo CD: `argocd.rag.athithya.site`
-* Grafana: `grafana.rag.athithya.site`
+- the root app hostname: `rag.athithya.site`
+- Argo CD: `argocd.rag.athithya.site`
+- Grafana: `grafana.rag.athithya.site`
 
-### Zone settings
+### Zone Settings
 
-* `ssl = strict`
-  Cloudflare uses Full (strict) SSL behavior for the zone.
-* `always_use_https = on`
+- `ssl = full`  
+  Cloudflare uses Full SSL behavior for the zone. Do not use Strict mode, as Argo CD runs behind Cloudflare Tunnel with HTTP internally, and Strict mode requires a valid origin certificate, which will cause an `ERR_SSL_VERSION_OR_CIPHER_MISMATCH`.
+- `always_use_https = on`  
   HTTP requests are redirected to HTTPS.
-* `tls_1_3 = on`
+- `tls_1_3 = on`  
   TLS 1.3 is enabled for the zone.
 
-### Bot protections
+### Bot Protections
 
 This stack can enable Cloudflare zone-level bot controls:
 
-* `enable_bot_fight_mode`
-* `enable_js_detections`
+- `enable_bot_fight_mode`
+- `enable_js_detections`
 
-These are **zone-wide** settings. When enabled, they apply to the whole zone, not just one hostname. That means they are appropriate for browser-facing UI hostnames, but they can interfere with machine-to-machine traffic such as webhooks or API clients if used too broadly.
+These are zone-wide settings that apply to the entire zone. Bot Fight Mode may block webhook requests and other non-browser traffic, and it cannot be bypassed per endpoint on free plans. The recommended configuration is:
 
-## What it does not create
+```
+enable_bot_fight_mode = false
+enable_js_detections  = true
+```
 
-This stack does **not** create:
+## What It Does Not Create
 
-* Cloudflare Pages
-* wildcard DNS records
-* Kubernetes objects
-* public load balancers
-* origin certificates
+This stack does not create:
 
-## Runtime model
+- Cloudflare Pages
+- Wildcard DNS records
+- Kubernetes objects
+- Public load balancers
+- Origin certificates
 
-The outputs from this stack are used by the `cloudflared` deployment in Kubernetes.
+## Runtime Model
 
-The Kubernetes-side `cloudflared` config must route:
+The outputs from this stack are used by the `cloudflared` deployment in Kubernetes. The Kubernetes-side `cloudflared` configuration must route:
 
-* `rag.athithya.site` → frontend
-* `argocd.rag.athithya.site` → Argo CD
-* `grafana.rag.athithya.site` → Grafana
+- `rag.athithya.site` to the frontend service
+- `argocd.rag.athithya.site` to Argo CD
+- `grafana.rag.athithya.site` to Grafana
 
-The ingress list must end with a catch-all rule that returns `404` for unmatched requests.
+The ingress list must end with a catch-all rule that returns a 404 response for unmatched requests.
 
 ## Inputs
 
 ### Required
 
-* `CLOUDFLARE_ACCOUNT_ID`
-* Cloudflare zone apex via one of:
+- `CLOUDFLARE_ACCOUNT_ID`
+- Cloudflare zone apex provided via one of:
+  - `TF_VAR_zone_name`
+  - `CLOUDFLARE_ZONE_NAME`
+  - `CLOUDFLARE_ZONE`
+  - `DOMAIN`
 
-  * `TF_VAR_zone_name`, or
-  * `CLOUDFLARE_ZONE_NAME`, or
-  * `CLOUDFLARE_ZONE`, or
-  * `DOMAIN`
-
-### Required for authentication
+### Required for Authentication
 
 Use one of:
 
-* `CLOUDFLARE_API_TOKEN`, or
-* `CLOUDFLARE_GLOBAL_API_KEY` + `CLOUDFLARE_EMAIL`
+- `CLOUDFLARE_API_TOKEN`
+- `CLOUDFLARE_GLOBAL_API_KEY` with `CLOUDFLARE_EMAIL`
 
 ### Optional
 
-* `CLOUDFLARE_TUNNEL_NAME`
-  Default: `default-tunnel-1`
+- `CLOUDFLARE_TUNNEL_NAME` (default: `default-tunnel-1`)
+- `TF_VAR_root_subdomain` (default: `rag`)
+- `TF_VAR_enable_always_use_https` (default: `true`)
+- `TF_VAR_enable_tls_1_3` (default: `true`)
+- `TF_VAR_enable_bot_fight_mode` (default: `false`)
+- `TF_VAR_enable_js_detections` (default: `false`)
 
-* `TF_VAR_root_subdomain`
-  Default: `rag`
-
-* `TF_VAR_enable_always_use_https`
-  Default: `true`
-
-* `TF_VAR_enable_tls_1_3`
-  Default: `true`
-
-* `TF_VAR_enable_bot_fight_mode`
-  Default: `false`
-
-* `TF_VAR_enable_js_detections`
-  Default: `false`
-
-## Run
+## Execution
 
 Plan:
-
 ```bash
 bash src/infra/terraform/cloudflare/run.sh --plan
 ```
 
 Apply:
-
 ```bash
 bash src/infra/terraform/cloudflare/run.sh --apply
 ```
 
 Destroy:
-
 ```bash
 bash src/infra/terraform/cloudflare/run.sh --destroy
 ```
 
 ## Outputs
 
-* `cloudflare_tunnel_id`
-* `cloudflare_tunnel_name`
-* `cloudflare_tunnel_token`
-* `rag_url`
-* `argocd_url`
-* `grafana_url`
+- `cloudflare_tunnel_id`
+- `cloudflare_tunnel_name`
+- `cloudflare_tunnel_token`
+- `rag_url`
+- `argocd_url`
+- `grafana_url`
 
-## Runtime exports
+## Runtime Exports
 
 Use these values for the `cloudflared` deployment:
 
@@ -161,32 +143,16 @@ python3 src/infra/core/cloudflared.py --rollout
 
 ## Idempotency
 
-This stack is intended to be safely rerun.
+This stack is intended to be safely rerun. Existing DNS records and zone settings are imported into state if they already exist, and the named tunnel is reused when it already exists. Because the stack uses explicit DNS records only, adding a new public hostname requires creating a new DNS record in Terraform and adding a matching ingress rule in `cloudflared`.
 
-* Existing DNS records are imported into state if they already exist.
-* Existing zone settings are imported into state if they already exist.
-* The named tunnel is reused when it already exists.
+## SSL Configuration
 
-Because the stack uses **explicit DNS records only**, adding a new public hostname means:
+Ensure the Cloudflare SSL mode is set to Full. Do not use Strict mode, as Argo CD runs behind Cloudflare Tunnel with HTTP internally. Strict mode requires a valid origin certificate and will cause an `ERR_SSL_VERSION_OR_CIPHER_MISMATCH`.
 
-1. creating a new DNS record in Terraform, and
-2. adding a matching ingress rule in `cloudflared`.
+## Webhook Behavior
 
-## Bot protection guidance
-
-Bot Fight Mode and JS Detections are zone-wide controls. For this deployment:
-
-* they are reasonable for browser-facing UIs such as:
-
-  * `rag.athithya.site`
-  * `grafana.rag.athithya.site`
+A webhook will show as "never triggered" until a real push occurs. GitHub ping events do not count as triggers.
 
 ## Notes
 
-This is the production-oriented model for this stack:
-
-* one tunnel
-* explicit hostnames only
-* no wildcard DNS
-* narrow public surface area
-* optional zone-wide bot mitigation
+This is the production-oriented model for this stack: one tunnel, explicit hostnames only, no wildcard DNS, a narrow public surface area, and optional zone-wide bot mitigation.

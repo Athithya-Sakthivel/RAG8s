@@ -10,10 +10,6 @@ data:
   routes.yaml: |
     tunnel: default-tunnel-1
     ingress:
-    - hostname: argocd.rag.athithya.site
-      service: http://argocd-server.argocd.svc.cluster.local:80
-    - hostname: grafana.rag.athithya.site
-      service: http://grafana.grafana.svc.cluster.local:80
     - hostname: rag.athithya.site
       path: /metrics
       service: http_status:403
@@ -29,4 +25,8 @@ data:
         connectTimeout: 10s
         keepAliveTimeout: 30s
         disableChunkedEncoding: false
+    - hostname: argocd.athithya.site
+      service: http://argocd-server.argocd.svc.cluster.local:80
+    - hostname: grafana.athithya.site
+      service: http://grafana.grafana.svc.cluster.local:80
     - service: http_status:404

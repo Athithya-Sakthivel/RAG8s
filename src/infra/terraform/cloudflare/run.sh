@@ -31,24 +31,19 @@ case "$MODE" in
   *) usage ;;
 esac
 
-# Backward compatible inputs:
-# - zone_name is the Cloudflare zone apex, e.g. athithya.site
-# - root_subdomain is the public namespace, e.g. rag -> rag.athithya.site
-export TF_VAR_zone_name="${TF_VAR_zone_name:-${CLOUDFLARE_ZONE_NAME:-${CLOUDFLARE_ZONE:-${DOMAIN:-${TF_VAR_domain:-}}}}}"
-export TF_VAR_domain="${TF_VAR_domain:-${TF_VAR_zone_name:-}}"
-export TF_VAR_root_subdomain="${TF_VAR_root_subdomain:-${CLOUDFLARE_ROOT_SUBDOMAIN:-rag}}"
 export TF_VAR_account_id="${TF_VAR_account_id:-${CLOUDFLARE_ACCOUNT_ID:-}}"
 export TF_VAR_zone_id="${TF_VAR_zone_id:-${CLOUDFLARE_ZONE_ID:-}}"
+export TF_VAR_domain="${TF_VAR_domain:-${CLOUDFLARE_ZONE:-${DOMAIN:-}}}"
 export TF_VAR_tunnel_name="${TF_VAR_tunnel_name:-${CLOUDFLARE_TUNNEL_NAME:-default-tunnel-1}}"
 export TF_VAR_enable_always_use_https="${TF_VAR_enable_always_use_https:-true}"
 export TF_VAR_enable_tls_1_3="${TF_VAR_enable_tls_1_3:-true}"
-export TF_VAR_enable_bot_fight_mode="${TF_VAR_enable_bot_fight_mode:-true}"
-export TF_VAR_enable_js_detections="${TF_VAR_enable_js_detections:-true}"
+export TF_VAR_enable_bot_fight_mode="${TF_VAR_enable_bot_fight_mode:-false}"
+export TF_VAR_enable_js_detections="${TF_VAR_enable_js_detections:-false}"
 export TF_IN_AUTOMATION=1
 export TF_INPUT=0
 
 : "${TF_VAR_account_id:?TF_VAR_account_id or CLOUDFLARE_ACCOUNT_ID is required}"
-: "${TF_VAR_zone_name:?TF_VAR_zone_name or CLOUDFLARE_ZONE_NAME/CLOUDFLARE_ZONE/DOMAIN is required}"
+: "${TF_VAR_domain:?TF_VAR_domain or CLOUDFLARE_ZONE or DOMAIN is required}"
 
 if [[ -n "${CLOUDFLARE_API_TOKEN:-}" && ( -n "${CLOUDFLARE_API_KEY:-}" || -n "${CLOUDFLARE_GLOBAL_API_KEY:-}" ) ]]; then
   echo "ERROR: set either CLOUDFLARE_API_TOKEN or CLOUDFLARE_GLOBAL_API_KEY/CLOUDFLARE_API_KEY, not both" >&2
@@ -98,12 +93,12 @@ resolve_zone_id() {
     return 0
   fi
 
-  echo "[INFO] resolving zone_id for ${TF_VAR_zone_name}" >&2
+  echo "[INFO] resolving zone_id for ${TF_VAR_domain}" >&2
   local zone_json
-  zone_json="$(cf_curl "https://api.cloudflare.com/client/v4/zones?name=${TF_VAR_zone_name}&status=active&per_page=1")"
+  zone_json="$(cf_curl "https://api.cloudflare.com/client/v4/zones?name=${TF_VAR_domain}&status=active&per_page=1")"
   TF_VAR_zone_id="$(jq -r '.result[0].id // empty' <<<"${zone_json}")"
   if [[ -z "${TF_VAR_zone_id}" ]]; then
-    echo "ERROR: failed to resolve zone_id for ${TF_VAR_zone_name}" >&2
+    echo "ERROR: failed to resolve zone_id for ${TF_VAR_domain}" >&2
     exit 3
   fi
   export TF_VAR_zone_id
@@ -179,14 +174,10 @@ import_zone_setting_if_exists() {
 }
 
 import_bot_management_if_exists() {
-  if [[ "${TF_VAR_enable_bot_fight_mode}" != "true" && "${TF_VAR_enable_js_detections}" != "true" ]]; then
-    return 0
-  fi
-
   local status
   status="$(cf_status "https://api.cloudflare.com/client/v4/zones/${TF_VAR_zone_id}/bot_management")"
   if [[ "${status}" == "200" ]]; then
-    import_if_exists "cloudflare_bot_management.zone[0]" "${TF_VAR_zone_id}"
+    import_if_exists "cloudflare_bot_management.zone" "${TF_VAR_zone_id}"
   fi
 }
 
@@ -202,10 +193,6 @@ cleanup_tunnel() {
 
 resolve_zone_id
 
-ROOT_HOST="${TF_VAR_root_subdomain}.${TF_VAR_zone_name}"
-ARGOCD_HOST="argocd.${ROOT_HOST}"
-GRAFANA_HOST="grafana.${ROOT_HOST}"
-
 if [[ "${MODE}" != "--destroy" ]]; then
   TUNNEL_ID="$(ensure_tunnel)"
   export TUNNEL_ID
@@ -215,19 +202,13 @@ fi
 "$TF_BIN" -chdir="${STACK_DIR}" validate
 
 if [[ "${MODE}" != "--destroy" ]]; then
-  import_dns_record_if_exists "cloudflare_dns_record.root_cname" "${ROOT_HOST}"
-  import_dns_record_if_exists "cloudflare_dns_record.argocd_cname" "${ARGOCD_HOST}"
-  import_dns_record_if_exists "cloudflare_dns_record.grafana_cname" "${GRAFANA_HOST}"
+  # Import root domain CNAME
+  import_dns_record_if_exists "cloudflare_dns_record.root_cname" "${TF_VAR_domain}"
+  # Import wildcard CNAME (optional - remove if not using wildcard)
+  import_dns_record_if_exists "cloudflare_dns_record.wildcard_cname" "*.${TF_VAR_domain}"
   import_zone_setting_if_exists "cloudflare_zone_setting.ssl" "ssl"
-
-  if [[ "${TF_VAR_enable_always_use_https}" == "true" ]]; then
-    import_zone_setting_if_exists "cloudflare_zone_setting.always_use_https[0]" "always_use_https"
-  fi
-
-  if [[ "${TF_VAR_enable_tls_1_3}" == "true" ]]; then
-    import_zone_setting_if_exists "cloudflare_zone_setting.tls_1_3[0]" "tls_1_3"
-  fi
-
+  import_zone_setting_if_exists "cloudflare_zone_setting.always_use_https[0]" "always_use_https"
+  import_zone_setting_if_exists "cloudflare_zone_setting.tls_1_3[0]" "tls_1_3"
   import_bot_management_if_exists
 fi
 
@@ -237,6 +218,7 @@ case "${MODE}" in
     ;;
   --apply)
     "$TF_BIN" -chdir="${STACK_DIR}" apply -input=false -auto-approve
+    "$TF_BIN" -chdir="${STACK_DIR}" output
     ;;
   --destroy)
     "$TF_BIN" -chdir="${STACK_DIR}" destroy -input=false -auto-approve

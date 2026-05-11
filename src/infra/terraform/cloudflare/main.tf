@@ -20,39 +20,14 @@ variable "zone_id" {
   default = null
 }
 
-# Cloudflare zone apex, e.g. "athithya.site"
-variable "zone_name" {
-  type    = string
-  default = null
-}
-
-# Deprecated alias kept for compatibility with older callers.
 variable "domain" {
-  type        = string
-  default     = null
-  description = "Deprecated alias for zone_name."
-}
-
-# Public app namespace under the zone, e.g. "rag" -> rag.athithya.site
-variable "root_subdomain" {
-  type    = string
-  default = "rag"
-
-  validation {
-    condition     = trimspace(var.root_subdomain) != ""
-    error_message = "root_subdomain must not be empty."
-  }
+  type = string
 }
 
 variable "tunnel_name" {
   description = "Cloudflare Tunnel name used by cloudflared"
   type        = string
   default     = "default-tunnel-1"
-
-  validation {
-    condition     = trimspace(var.tunnel_name) != ""
-    error_message = "tunnel_name must not be empty."
-  }
 }
 
 variable "enable_always_use_https" {
@@ -67,31 +42,17 @@ variable "enable_tls_1_3" {
 
 variable "enable_bot_fight_mode" {
   type    = bool
-  default = true
+  default = false
 }
 
 variable "enable_js_detections" {
   type    = bool
-  default = true
+  default = false
 }
 
 locals {
-  zone_name_raw  = try(coalesce(var.zone_name, var.domain), null)
-  zone_name      = local.zone_name_raw != null ? trim(local.zone_name_raw, ".") : null
-  root_subdomain = trim(var.root_subdomain, ".")
-
-  root_hostname   = local.zone_name != null ? "${local.root_subdomain}.${local.zone_name}" : null
-  argocd_hostname  = local.root_hostname != null ? "argocd.${local.root_hostname}" : null
-  grafana_hostname = local.root_hostname != null ? "grafana.${local.root_hostname}" : null
-
+  domain       = trim(var.domain, ".")
   tunnel_cname = "${data.cloudflare_zero_trust_tunnel_cloudflared.default.id}.cfargotunnel.com"
-}
-
-check "zone_name_present" {
-  assert {
-    condition     = local.zone_name != null && local.zone_name != ""
-    error_message = "Set TF_VAR_zone_name (preferred) or TF_VAR_domain to the Cloudflare zone apex, e.g. athithya.site."
-  }
 }
 
 data "cloudflare_zero_trust_tunnel_cloudflared" "default" {
@@ -108,30 +69,20 @@ data "cloudflare_zero_trust_tunnel_cloudflared_token" "default" {
   tunnel_id  = data.cloudflare_zero_trust_tunnel_cloudflared.default.id
 }
 
-# Root app hostname -> tunnel
+# Single DNS record for the root domain
 resource "cloudflare_dns_record" "root_cname" {
   zone_id = var.zone_id
-  name    = local.root_subdomain
+  name    = local.domain
   type    = "CNAME"
   content = local.tunnel_cname
   proxied = true
   ttl     = 1
 }
 
-# Argo CD -> tunnel
-resource "cloudflare_dns_record" "argocd_cname" {
+# Wildcard record for any subdomains (optional, remove if not needed)
+resource "cloudflare_dns_record" "wildcard_cname" {
   zone_id = var.zone_id
-  name    = "argocd.${local.root_subdomain}"
-  type    = "CNAME"
-  content = local.tunnel_cname
-  proxied = true
-  ttl     = 1
-}
-
-# Grafana -> tunnel
-resource "cloudflare_dns_record" "grafana_cname" {
-  zone_id = var.zone_id
-  name    = "grafana.${local.root_subdomain}"
+  name    = "*.${local.domain}"
   type    = "CNAME"
   content = local.tunnel_cname
   proxied = true
@@ -159,14 +110,13 @@ resource "cloudflare_zone_setting" "tls_1_3" {
 }
 
 resource "cloudflare_bot_management" "zone" {
-  count   = (var.enable_bot_fight_mode || var.enable_js_detections) ? 1 : 0
   zone_id = var.zone_id
 
   fight_mode = var.enable_bot_fight_mode
   enable_js  = var.enable_js_detections
 
   ai_bots_protection = "block"
-  crawler_protection  = "enabled"
+  crawler_protection = "enabled"
 
   lifecycle {
     ignore_changes = [
@@ -188,14 +138,6 @@ output "cloudflare_tunnel_token" {
   sensitive = true
 }
 
-output "rag_url" {
-  value = "https://${local.root_hostname}"
-}
-
-output "argocd_url" {
-  value = "https://${local.argocd_hostname}"
-}
-
-output "grafana_url" {
-  value = "https://${local.grafana_hostname}"
+output "root_url" {
+  value = "https://${local.domain}"
 }

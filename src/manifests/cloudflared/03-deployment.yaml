@@ -18,7 +18,7 @@ spec:
         app.kubernetes.io/name: cloudflared
         app.kubernetes.io/component: tunnel
       annotations:
-        cloudflared/config-checksum: 49a75d181f445dd2510859120c2b319e9d5603a4b4d143910defe7fca7182c2f
+        cloudflared/config-checksum: ee811e3b65ff295b73e354c13d112169d22a4cf031bf5b4f9dd9f3f5e7292e0f
         prometheus.io/scrape: 'true'
         prometheus.io/port: '2000'
     spec:

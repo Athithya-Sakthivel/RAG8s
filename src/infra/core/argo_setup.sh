@@ -13,13 +13,9 @@ NAMESPACE="argocd"
 VALUES_FILE="/tmp/argocd.yaml"
 TIMEOUT="10m"
 TMPDIR="$(mktemp -d)"
-GIT_CLONE_TIMEOUT=60
-PORT_FORWARD_LOCAL=9090
-PORT_FORWARD_REMOTE=443
 
 MODE=""
 CONFIRM="no"
-PF_PID=""
 
 usage() {
   cat <<EOF
@@ -42,9 +38,6 @@ err()  { printf '\033[1;31m%s\033[0m\n' "$*"; }
 
 cleanup() {
   local rc=$?
-  if [[ -n "${PF_PID}" ]]; then
-    kill "${PF_PID}" >/dev/null 2>&1 || true
-  fi
   if [[ -d "${TMPDIR}" ]]; then
     rm -rf "${TMPDIR}"
   fi
@@ -109,9 +102,11 @@ server:
     limits:
       cpu: "500m"
       memory: "750Mi"
-  configs:
-    params:
-      server.insecure: true
+
+configs:
+  params:
+    server.insecure: "true"
+  resourceTrackingMethod: "annotation"
 
 controller:
   replicas: 1
@@ -150,9 +145,6 @@ redis:
 
 crds:
   install: false
-
-configs:
-  resourceTrackingMethod: "annotation"
 
 resources:
   requests:
@@ -310,48 +302,6 @@ delete_crds_last() {
   warn "Some Argo CD CRDs may still be terminating; continuing"
 }
 
-post_install_setup() {
-  log "Starting post-install setup"
-  local admin_pwd repo_url
-
-  admin_pwd="$(kubectl -n "${NAMESPACE}" get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 --decode)"
-  log "Port-forwarding Argo CD server to localhost:${PORT_FORWARD_LOCAL}"
-  kubectl -n "${NAMESPACE}" port-forward svc/argocd-server "${PORT_FORWARD_LOCAL}:${PORT_FORWARD_REMOTE}" >/dev/null 2>&1 &
-  PF_PID=$!
-
-  local seconds_waited=0
-  until curl -k --silent --fail "https://localhost:${PORT_FORWARD_LOCAL}/healthz" >/dev/null 2>&1; do
-    sleep 2
-    seconds_waited=$((seconds_waited + 2))
-    if [[ ${seconds_waited} -gt 120 ]]; then
-      err "Timed out waiting for argocd-server on localhost:${PORT_FORWARD_LOCAL}"
-      kill "${PF_PID}" >/dev/null 2>&1 || true
-      exit 1
-    fi
-  done
-
-  log "Logging in to Argo CD CLI"
-  argocd login "localhost:${PORT_FORWARD_LOCAL}" --username admin --password "${admin_pwd}" --insecure
-
-  repo_url=""
-  if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    if git remote get-url origin >/dev/null 2>&1; then
-      repo_url="$(git remote get-url origin)"
-    else
-      repo_url="$(git remote -v | awk '/origin/ {print $2; exit}')"
-    fi
-  fi
-
-  if [[ -n "${repo_url}" ]]; then
-    log "Registering Git repo ${repo_url} with Argo CD"
-    argocd repo add "${repo_url}" || warn "argocd repo add returned non-zero; it may already exist"
-  else
-    warn "No git remote found; skipping repo registration"
-  fi
-
-  log "Post-install setup complete"
-}
-
 do_rollout() {
   require_cmds
   write_values
@@ -384,9 +334,7 @@ do_rollout() {
   kubectl -n "${NAMESPACE}" get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 --decode && echo
 
   log "Applying Argo CD bootstrap manifests from src/argocd"
-  kubectl apply -f src/argocd -n "${NAMESPACE}" || warn "kubectl apply for src/argocd returned non-zero"
-
-  post_install_setup
+  kubectl apply -f src/argocd || warn "kubectl apply for src/argocd returned non-zero"
 }
 
 do_delete() {
