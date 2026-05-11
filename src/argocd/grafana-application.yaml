@@ -7,9 +7,9 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://grafana.github.io/helm-charts      # correct Helm repo
+    repoURL: https://grafana.github.io/helm-charts
     chart: grafana
-    targetRevision: 12.3.0
+    targetRevision: 10.5.15   # <-- fix this line
     helm:
       values: |
         admin:
