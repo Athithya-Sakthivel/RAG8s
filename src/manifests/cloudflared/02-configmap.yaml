@@ -10,16 +10,20 @@ data:
   config.yaml: |
     tunnel: default-tunnel-1
     ingress:
-    - hostname: athithya.site
+    - hostname: argocd.rag.athithya.site
+      service: http://argocd-server.argocd.svc.cluster.local:80
+    - hostname: grafana.rag.athithya.site
+      service: http://grafana.grafana.svc.cluster.local:80
+    - hostname: rag.athithya.site
       path: /metrics
       service: http_status:403
-    - hostname: athithya.site
+    - hostname: rag.athithya.site
       path: /healthz
       service: http_status:403
-    - hostname: athithya.site
+    - hostname: rag.athithya.site
       path: /readyz
       service: http_status:403
-    - hostname: athithya.site
+    - hostname: rag.athithya.site
       service: http://frontend.inference.svc.cluster.local:8000
       originRequest:
         connectTimeout: 10s

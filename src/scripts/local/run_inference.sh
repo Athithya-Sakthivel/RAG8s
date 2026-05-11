@@ -43,9 +43,9 @@ export CLOUDFLARE_TUNNEL_TOKEN="$(tofu -chdir=src/infra/terraform/cloudflare out
 export CLOUDFLARE_TUNNEL_NAME="$(tofu -chdir=src/infra/terraform/cloudflare output -raw cloudflare_tunnel_name)"
 export CLOUDFLARE_SECRET_NAME="cloudflared-token"
 export CLOUDFLARE_SECRET_KEY="token"
-export DOMAIN="athithya.site"
+export DOMAIN="app.athithya.site"
 python3 src/infra/core/cloudflared_setup.py --write
-kubectl apply -f /workspace/src/manifests/cloudflared
+kubectl apply -f src/manifests/cloudflared
 
 
 bash src/infra/core/valkey_service.sh
@@ -87,7 +87,7 @@ bash src/infra/core/argo_setup.sh --rollout
 git add . && git commit -m "new" && git push origin main
 
 # kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
-# 
+# kubectl -n argocd port-forward svc/argocd-server 8080:443
 
 bash src/infra/observability/prometheus_setup.sh
 

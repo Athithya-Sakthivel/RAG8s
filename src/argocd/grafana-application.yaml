@@ -9,7 +9,7 @@ spec:
     # ── Grafana Helm chart ─────────────────────────────
     - repoURL: https://grafana.github.io/helm-charts
       chart: grafana
-      targetRevision: 12.3.0
+      targetRevision: 10.5.15 
       helm:
         values: |
           admin:

@@ -1,10 +1,18 @@
 """
 Production Cloudflare Tunnel manifest generator.
 
-Routes everything through a single frontend service with one hostname.
-Blocks /metrics, /healthz, and /readyz at the Cloudflare edge (403).
-Internal Kubernetes probes still reach the pod directly.
-Creates a metrics Service for in-cluster Prometheus scraping.
+Routes multiple hostnames through a single tunnel:
+- rag.athithya.site → frontend service
+- argocd.rag.athithya.site → Argo CD server
+- grafana.rag.athithya.site → Grafana
+
+Blocks /metrics, /healthz, and /readyz at the Cloudflare edge (403)
+for the public app hostname only.
+
+Internal Kubernetes probes and Prometheus scraping continue to access
+pods/services directly inside the cluster (not via the tunnel).
+
+Includes a metrics Service for in-cluster Prometheus scraping.
 """
 
 from __future__ import annotations
@@ -154,15 +162,32 @@ def frontend_upstream() -> str:
 
 
 def ingress_rules() -> list[dict[str, Any]]:
-    """Ingress rules with blocked internal endpoints and catch‑all."""
+    """Cloudflared ingress rules for rag, Argo CD, and Grafana."""
+    app_host = "rag.athithya.site"
+    argocd_host = "argocd.rag.athithya.site"
+    grafana_host = "grafana.rag.athithya.site"
+
     return [
-        # Block internal probe/metrics paths at the Cloudflare edge
-        {"hostname": DOMAIN, "path": "/metrics",  "service": "http_status:403"},
-        {"hostname": DOMAIN, "path": "/healthz",  "service": "http_status:403"},
-        {"hostname": DOMAIN, "path": "/readyz",   "service": "http_status:403"},
-        # Main tunnel – everything else goes to the frontend
+        # Argo CD UI + webhook
         {
-            "hostname": DOMAIN,
+            "hostname": argocd_host,
+            "service": "http://argocd-server.argocd.svc.cluster.local:80",
+        },
+
+        # Grafana
+        {
+            "hostname": grafana_host,
+            "service": "http://grafana.grafana.svc.cluster.local:80",
+        },
+
+        # App entrypoint: block internal probe/metrics paths at the edge
+        {"hostname": app_host, "path": "/metrics", "service": "http_status:403"},
+        {"hostname": app_host, "path": "/healthz", "service": "http_status:403"},
+        {"hostname": app_host, "path": "/readyz", "service": "http_status:403"},
+
+        # Main app backend
+        {
+            "hostname": app_host,
             "service": f"http://{frontend_upstream()}",
             "originRequest": {
                 "connectTimeout": "10s",
@@ -170,10 +195,10 @@ def ingress_rules() -> list[dict[str, Any]]:
                 "disableChunkedEncoding": False,
             },
         },
-        # Catch-all 404 for any unmatched hostnames
+
+        # Catch-all for any unmatched hostnames
         {"service": "http_status:404"},
     ]
-    
 
 def validate() -> None:
     require(bool(NAMESPACE), "NAMESPACE is required")

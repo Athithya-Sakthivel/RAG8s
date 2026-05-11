@@ -22,3 +22,5 @@ kubectl create secret generic "$ADMIN_SECRET" \
 kubectl apply -f src/argocd/grafana-application.yaml
 
 echo "Grafana Application applied.  Argo CD will now deploy Grafana and the dashboard."
+echo ""
+echo "kubectl port-forward -n grafana svc/grafana 3000:80"
