@@ -50,7 +50,7 @@ kubectl apply -f src/manifests/cloudflared
 
 bash src/infra/core/valkey_service.sh
 
-export FRONTEND_HOSTNAME=athithya.site
+export FRONTEND_HOSTNAME=rag.athithya.site
 kubectl delete -f src/manifests/frontend || true
 python3 src/infra/rag/spa_service.py --apply-secrets
 python3 src/infra/rag/spa_service.py --write

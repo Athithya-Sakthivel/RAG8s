@@ -171,10 +171,12 @@ def frontend_upstream() -> str:
 
 
 def argocd_upstream() -> str:
+    """Build the internal K8s DNS name for Argo CD server."""
     return f"{ARGOCD_SERVICE_NAME}.{ARGOCD_NAMESPACE}.svc.cluster.local:{ARGOCD_SERVICE_PORT}"
 
 
 def grafana_upstream() -> str:
+    """Build the internal K8s DNS name for Grafana."""
     return f"{GRAFANA_SERVICE_NAME}.{GRAFANA_NAMESPACE}.svc.cluster.local:{GRAFANA_SERVICE_PORT}"
 
 
@@ -182,7 +184,8 @@ def ingress_rules() -> list[dict[str, Any]]:
     """
     Cloudflare Tunnel ingress rules.
 
-    Matching is evaluated top-to-bottom and must end with a catch-all rule.
+    Rules are evaluated top-to-bottom.
+    The final rule must be a catch-all 404.
     """
     return [
         # Public RAG host: block internal endpoints at the edge.
@@ -205,12 +208,20 @@ def ingress_rules() -> list[dict[str, Any]]:
         {
             "hostname": ARGOCD_HOST,
             "service": f"http://{argocd_upstream()}",
+            "originRequest": {
+                "connectTimeout": "10s",
+                "keepAliveTimeout": "30s",
+            },
         },
 
         # Grafana.
         {
             "hostname": GRAFANA_HOST,
             "service": f"http://{grafana_upstream()}",
+            "originRequest": {
+                "connectTimeout": "10s",
+                "keepAliveTimeout": "30s",
+            },
         },
 
         # Catch-all.

@@ -27,6 +27,12 @@ data:
         disableChunkedEncoding: false
     - hostname: argocd.athithya.site
       service: http://argocd-server.argocd.svc.cluster.local:80
+      originRequest:
+        connectTimeout: 10s
+        keepAliveTimeout: 30s
     - hostname: grafana.athithya.site
       service: http://grafana.grafana.svc.cluster.local:80
+      originRequest:
+        connectTimeout: 10s
+        keepAliveTimeout: 30s
     - service: http_status:404

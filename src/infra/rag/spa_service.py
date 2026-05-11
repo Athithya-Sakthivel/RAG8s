@@ -385,7 +385,7 @@ def build_deployment_doc(cfg: dict[str, Any], has_secret: bool) -> dict[str, Any
         {"name": "MICROSOFT_ALLOWED_TENANT_IDS", "value": ""},
         {"name": "GITHUB_ALLOWED_ORGS", "value": ""},
         # Critical: the public hostname for OAuth redirects
-        {"name": "FRONTEND_HOSTNAME", "value": cfg.get("FRONTEND_HOSTNAME", "")},
+        {"name": "FRONTEND_HOSTNAME", "value": cfg.get("FRONTEND_HOSTNAME", "rag.athithya.site")},
         # Upstream retriever
         {"name": "RETRIEVER_URL", "value": "http://retriever.inference.svc.cluster.local:8001"},
         {"name": "GENERATE_STREAM_PATH", "value": "/generate/stream"},

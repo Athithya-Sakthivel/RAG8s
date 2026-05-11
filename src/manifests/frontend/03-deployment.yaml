@@ -109,7 +109,7 @@ spec:
         - name: GITHUB_ALLOWED_ORGS
           value: ''
         - name: FRONTEND_HOSTNAME
-          value: athithya.site
+          value: rag.athithya.site
         - name: RETRIEVER_URL
           value: http://retriever.inference.svc.cluster.local:8001
         - name: GENERATE_STREAM_PATH
