@@ -1,9 +1,14 @@
 """
 Production Cloudflare Tunnel manifest generator.
 
-Routes everything through a single frontend service with one hostname.
-Blocks /metrics, /healthz, and /readyz at the Cloudflare edge (403).
-Internal Kubernetes probes still reach the pod directly.
+Routes:
+- rag.<domain>      -> frontend service
+- argocd.<domain>   -> Argo CD server
+- grafana.<domain>  -> Grafana service
+
+Blocks /metrics, /healthz, and /readyz at the Cloudflare edge (403)
+for the public RAG hostname only.
+
 Creates a metrics Service for in-cluster Prometheus scraping.
 """
 
@@ -41,8 +46,20 @@ OUT_DIR = ROOT / "src" / "manifests" / "cloudflared"
 NAMESPACE = os.getenv("NAMESPACE", "inference").strip() or "inference"
 DOMAIN = os.getenv("DOMAIN", "athithya.site").strip().rstrip(".") or "athithya.site"
 
+RAG_HOST = os.getenv("RAG_HOST", f"rag.{DOMAIN}").strip() or f"rag.{DOMAIN}"
+ARGOCD_HOST = os.getenv("ARGOCD_HOST", f"argocd.{DOMAIN}").strip() or f"argocd.{DOMAIN}"
+GRAFANA_HOST = os.getenv("GRAFANA_HOST", f"grafana.{DOMAIN}").strip() or f"grafana.{DOMAIN}"
+
 FRONTEND_SERVICE_NAME = os.getenv("FRONTEND_SERVICE_NAME", "frontend").strip() or "frontend"
 FRONTEND_SERVICE_PORT = int(os.getenv("FRONTEND_SERVICE_PORT", "8000"))
+
+ARGOCD_NAMESPACE = os.getenv("ARGOCD_NAMESPACE", "argocd").strip() or "argocd"
+ARGOCD_SERVICE_NAME = os.getenv("ARGOCD_SERVICE_NAME", "argocd-server").strip() or "argocd-server"
+ARGOCD_SERVICE_PORT = int(os.getenv("ARGOCD_SERVICE_PORT", "80"))
+
+GRAFANA_NAMESPACE = os.getenv("GRAFANA_NAMESPACE", "grafana").strip() or "grafana"
+GRAFANA_SERVICE_NAME = os.getenv("GRAFANA_SERVICE_NAME", "grafana").strip() or "grafana"
+GRAFANA_SERVICE_PORT = int(os.getenv("GRAFANA_SERVICE_PORT", "80"))
 
 TUNNEL_NAME = os.getenv("CLOUDFLARE_TUNNEL_NAME", "default-tunnel-1").strip() or "default-tunnel-1"
 TUNNEL_TOKEN = os.getenv("CLOUDFLARE_TUNNEL_TOKEN", "").strip()
@@ -152,24 +169,30 @@ def frontend_upstream() -> str:
     """Build the internal K8s DNS name for the frontend service."""
     return f"{FRONTEND_SERVICE_NAME}.{NAMESPACE}.svc.cluster.local:{FRONTEND_SERVICE_PORT}"
 
-from typing import Any
+
+def argocd_upstream() -> str:
+    return f"{ARGOCD_SERVICE_NAME}.{ARGOCD_NAMESPACE}.svc.cluster.local:{ARGOCD_SERVICE_PORT}"
+
+
+def grafana_upstream() -> str:
+    return f"{GRAFANA_SERVICE_NAME}.{GRAFANA_NAMESPACE}.svc.cluster.local:{GRAFANA_SERVICE_PORT}"
+
 
 def ingress_rules() -> list[dict[str, Any]]:
-    """Cloudflare Tunnel ingress rules with subdomain routing."""
+    """
+    Cloudflare Tunnel ingress rules.
 
-    rag_host = f"rag.{DOMAIN}"
-    argocd_host = f"argocd.{DOMAIN}"
-    grafana_host = f"grafana.{DOMAIN}"
-
+    Matching is evaluated top-to-bottom and must end with a catch-all rule.
+    """
     return [
-        # ---- RAG APP (frontend) ----
-        # Block internal endpoints only on app domain
-        {"hostname": rag_host, "path": "/metrics", "service": "http_status:403"},
-        {"hostname": rag_host, "path": "/healthz", "service": "http_status:403"},
-        {"hostname": rag_host, "path": "/readyz",  "service": "http_status:403"},
+        # Public RAG host: block internal endpoints at the edge.
+        {"hostname": RAG_HOST, "path": "/metrics", "service": "http_status:403"},
+        {"hostname": RAG_HOST, "path": "/healthz", "service": "http_status:403"},
+        {"hostname": RAG_HOST, "path": "/readyz", "service": "http_status:403"},
 
+        # RAG app frontend.
         {
-            "hostname": rag_host,
+            "hostname": RAG_HOST,
             "service": f"http://{frontend_upstream()}",
             "originRequest": {
                 "connectTimeout": "10s",
@@ -178,32 +201,39 @@ def ingress_rules() -> list[dict[str, Any]]:
             },
         },
 
-        # ---- ARGO CD ----
+        # Argo CD UI/API.
         {
-            "hostname": argocd_host,
-            "service": "http://argocd-server.argocd.svc.cluster.local:80",
+            "hostname": ARGOCD_HOST,
+            "service": f"http://{argocd_upstream()}",
         },
 
-        # ---- GRAFANA ----
+        # Grafana.
         {
-            "hostname": grafana_host,
-            "service": "http://grafana.grafana.svc.cluster.local:80",
+            "hostname": GRAFANA_HOST,
+            "service": f"http://{grafana_upstream()}",
         },
 
-        # ---- FINAL CATCH-ALL ----
+        # Catch-all.
         {"service": "http_status:404"},
     ]
-    
+
 
 def validate() -> None:
     require(bool(NAMESPACE), "NAMESPACE is required")
     require(bool(DOMAIN), "DOMAIN is required")
-    require(TUNNEL_PROTOCOL in ALLOWED_PROTOCOLS, 
-            f"TUNNEL_PROTOCOL must be one of: {', '.join(sorted(ALLOWED_PROTOCOLS))}")
+    require(bool(RAG_HOST), "RAG_HOST is required")
+    require(bool(ARGOCD_HOST), "ARGOCD_HOST is required")
+    require(bool(GRAFANA_HOST), "GRAFANA_HOST is required")
+    require(
+        TUNNEL_PROTOCOL in ALLOWED_PROTOCOLS,
+        f"TUNNEL_PROTOCOL must be one of: {', '.join(sorted(ALLOWED_PROTOCOLS))}",
+    )
     require(REPLICAS > 0, "REPLICAS must be greater than 0")
     require(METRICS_PORT > 0, "METRICS_PORT must be greater than 0")
     require(STARTUP_FAILURE_THRESHOLD > 0, "STARTUP_FAILURE_THRESHOLD must be greater than 0")
     require(FRONTEND_SERVICE_PORT > 0, "FRONTEND_SERVICE_PORT must be greater than 0")
+    require(ARGOCD_SERVICE_PORT > 0, "ARGOCD_SERVICE_PORT must be greater than 0")
+    require(GRAFANA_SERVICE_PORT > 0, "GRAFANA_SERVICE_PORT must be greater than 0")
 
 
 # ---------------------------------------------------------------------------
@@ -280,10 +310,12 @@ def render_routes_reference() -> dict[str, Any]:
             },
         },
         "data": {
-            "routes.yaml": yaml_dump({
-                "tunnel": TUNNEL_NAME,
-                "ingress": ingress_rules(),
-            }),
+            "routes.yaml": yaml_dump(
+                {
+                    "tunnel": TUNNEL_NAME,
+                    "ingress": ingress_rules(),
+                }
+            ),
         },
     }
 
@@ -390,10 +422,14 @@ def render_deployment(checksum: str) -> dict[str, Any]:
                             "args": [
                                 "tunnel",
                                 "--no-autoupdate",
-                                "--loglevel", "info",
-                                "--protocol", TUNNEL_PROTOCOL,
-                                "--metrics", f"0.0.0.0:{METRICS_PORT}",
-                                "--config", "/etc/cloudflared/config.yaml",
+                                "--loglevel",
+                                "info",
+                                "--protocol",
+                                TUNNEL_PROTOCOL,
+                                "--metrics",
+                                f"0.0.0.0:{METRICS_PORT}",
+                                "--config",
+                                "/etc/cloudflared/config.yaml",
                                 "run",
                             ],
                             "env": [
@@ -472,21 +508,32 @@ def build() -> tuple[list[dict[str, Any]], dict[str, Any]]:
     configmap = render_configmap()
     secret = render_secret()
 
-    checksum = hash_obj({
-        "namespace": NAMESPACE,
-        "image": IMAGE,
-        "replicas": REPLICAS,
-        "metrics_port": METRICS_PORT,
-        "protocol": TUNNEL_PROTOCOL,
-        "tunnel_name": TUNNEL_NAME,
-        "secret_name": SECRET_NAME,
-        "secret_key": SECRET_KEY,
-        "token_hash": hash_text(TUNNEL_TOKEN) if TUNNEL_TOKEN else "",
-        "domain": DOMAIN,
-        "frontend_service_name": FRONTEND_SERVICE_NAME,
-        "frontend_service_port": FRONTEND_SERVICE_PORT,
-        "config_yaml": configmap["data"]["config.yaml"],
-    })
+    checksum = hash_obj(
+        {
+            "namespace": NAMESPACE,
+            "image": IMAGE,
+            "replicas": REPLICAS,
+            "metrics_port": METRICS_PORT,
+            "protocol": TUNNEL_PROTOCOL,
+            "tunnel_name": TUNNEL_NAME,
+            "secret_name": SECRET_NAME,
+            "secret_key": SECRET_KEY,
+            "token_hash": hash_text(TUNNEL_TOKEN) if TUNNEL_TOKEN else "",
+            "domain": DOMAIN,
+            "rag_host": RAG_HOST,
+            "argocd_host": ARGOCD_HOST,
+            "grafana_host": GRAFANA_HOST,
+            "frontend_service_name": FRONTEND_SERVICE_NAME,
+            "frontend_service_port": FRONTEND_SERVICE_PORT,
+            "argocd_service_name": ARGOCD_SERVICE_NAME,
+            "argocd_namespace": ARGOCD_NAMESPACE,
+            "argocd_service_port": ARGOCD_SERVICE_PORT,
+            "grafana_service_name": GRAFANA_SERVICE_NAME,
+            "grafana_namespace": GRAFANA_NAMESPACE,
+            "grafana_service_port": GRAFANA_SERVICE_PORT,
+            "config_yaml": configmap["data"]["config.yaml"],
+        }
+    )
 
     docs = [
         render_serviceaccount(),
@@ -523,17 +570,21 @@ def apply_rollout(docs: list[dict[str, Any]]) -> None:
 
 def delete_resources() -> None:
     logger.info(f"Deleting cloudflared resources in namespace {NAMESPACE}")
-    run([
-        "kubectl", "delete",
-        f"deployment/{DEPLOYMENT_NAME}",
-        f"serviceaccount/{SERVICE_ACCOUNT}",
-        f"configmap/{CONFIGMAP_NAME}",
-        f"configmap/{DEPLOYMENT_NAME}-routes-reference",
-        f"secret/{SECRET_NAME}",
-        f"service/{METRICS_SERVICE_NAME}",
-        "-n", NAMESPACE,
-        "--ignore-not-found=true",
-    ])
+    run(
+        [
+            "kubectl",
+            "delete",
+            f"deployment/{DEPLOYMENT_NAME}",
+            f"serviceaccount/{SERVICE_ACCOUNT}",
+            f"configmap/{CONFIGMAP_NAME}",
+            f"configmap/{DEPLOYMENT_NAME}-routes-reference",
+            f"secret/{SECRET_NAME}",
+            f"service/{METRICS_SERVICE_NAME}",
+            "-n",
+            NAMESPACE,
+            "--ignore-not-found=true",
+        ]
+    )
     logger.info("Delete operation completed")
 
 

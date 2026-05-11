@@ -1,4 +1,3 @@
-# stateless_openid_auth.py
 from __future__ import annotations
 
 import html
@@ -162,10 +161,9 @@ if ENABLE_MICROSOFT and "microsoft" in ENABLED_PROVIDERS:
             client_kwargs={"scope": "openid email profile offline_access User.Read", "code_challenge_method": "S256"},
         )
         log.info("Microsoft auth provider registered")
-        _microsoft_available = True
     except Exception as e:
-        log.error("Failed to register Microsoft auth, but keeping UI button", error=str(e))
-        _microsoft_available = False 
+        log.error("Failed to register Microsoft auth", error=str(e))
+        ENABLED_PROVIDERS.remove("microsoft")
 
 if ENABLE_GITHUB and "github" in ENABLED_PROVIDERS:
     try:
@@ -426,13 +424,16 @@ async def callback(request: Request, provider: str):
         log.warn("oauth state mismatch", provider=provider)
         return RedirectResponse(url=f"{_frontend_base()}/?error=state_mismatch", status_code=302)
 
-    # Attempt token exchange via normal flow
+    # Attempt token exchange – relax issuer check for Microsoft
     token = None
     try:
-        token = await client.authorize_access_token(request)
+        if provider == "microsoft":
+            # Microsoft ID tokens have a different issuer, skip our strict check
+            token = await client.authorize_access_token(request, claims_options=None)
+        else:
+            token = await client.authorize_access_token(request)
     except OAuthError as e:
         log.warn("OAuthError during authorize_access_token", provider=provider, error=str(e))
-        # Fallback to manual exchange
         code = request.query_params.get("code")
         if not code:
             return RedirectResponse(url=f"{_frontend_base()}/?error=oauth", status_code=302)

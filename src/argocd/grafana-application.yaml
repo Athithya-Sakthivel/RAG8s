@@ -1,4 +1,3 @@
-# src/argocd/grafana-application.yaml
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -7,7 +6,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/grafana/helm-charts
+    repoURL: https://grafana-community.github.io/helm-charts
     chart: grafana
     targetRevision: 12.3.0
     helm:
