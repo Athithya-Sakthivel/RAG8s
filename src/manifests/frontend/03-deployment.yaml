@@ -67,17 +67,17 @@ spec:
         - name: ENABLE_GOOGLE_AUTH
           value: 'true'
         - name: ENABLE_MICROSOFT_AUTH
-          value: 'false'
+          value: 'true'
         - name: ENABLE_GITHUB_AUTH
           value: 'false'
         - name: DISPLAY_SOURCES_IN_UI
           value: 'true'
         - name: DISPLAY_TOPK_IN_UI
-          value: 'true'
+          value: 'false'
         - name: USE_IAM
           value: 'false'
         - name: RATE_LIMIT_GENERATE_STREAM
-          value: 10/minute
+          value: 5/minute
         - name: RATE_LIMIT_AUTH_ME
           value: 30/minute
         - name: RATE_LIMIT_STREAM_CONCURRENCY
@@ -101,7 +101,7 @@ spec:
         - name: JWT_KID
           value: production-key-1
         - name: GOOGLE_ALLOWED_DOMAINS
-          value: ''
+          value: 'gmail.com'
         - name: MICROSOFT_ALLOWED_DOMAINS
           value: outlook.com
         - name: MICROSOFT_ALLOWED_TENANT_IDS
