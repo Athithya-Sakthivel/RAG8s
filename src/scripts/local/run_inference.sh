@@ -21,6 +21,27 @@ bash src/scripts/backups_and_restore.sh restore
 bash src/infra/core/argo_setup.sh --rollout
 
 bash src/infra/observability/prometheus_setup.sh
+sleep 800 
+kubectl exec -it -n logging clickhouse-0 -- clickhouse-client --multiquery "
+CREATE DATABASE IF NOT EXISTS logs;
+CREATE TABLE IF NOT EXISTS logs.inference_logs (
+    ts        DateTime64(3) DEFAULT now(),
+    service   String,
+    pod       String,
+    namespace String,
+    message   String,
+    fields    String,
+    level     String,
+    container String,
+    trace_id  String,
+    span_id   String
+) ENGINE = MergeTree()
+ORDER BY ts TTL toDateTime(ts) + INTERVAL 30 DAY;
+CREATE USER IF NOT EXISTS vector IDENTIFIED WITH plaintext_password BY 'vectorpass';
+GRANT INSERT ON logs.* TO vector;
+GRANT SELECT ON logs.* TO vector;
+"
+kubectl exec -n logging clickhouse-0 -- clickhouse-client --query "SELECT count() FROM logs.inference_logs"
 
 git add . && git commit -m "argocd full sync" && git push origin main
 

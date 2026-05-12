@@ -4,7 +4,7 @@ set -euo pipefail
 NAMESPACE="grafana"
 ADMIN_SECRET="grafana-admin"
 ADMIN_USER="admin"
-ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD:-}"
+ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD:-grafana}"
 DASHBOARDS_DIR="src/manifests/grafana-dashboards"
 
 # ── Namespace and admin secret ──────────────────────────────
