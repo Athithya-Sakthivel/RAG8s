@@ -37,7 +37,7 @@ spec:
         emptyDir: {}
       containers:
       - name: frontend
-        image: ghcr.io/athithya-sakthivel/frontend:2026-05-12-06-14--3c2de03@sha256:1def29f367843007d38dacfbea916142896aaf36c79bb3719e6d0947a3d2b851
+        image: ghcr.io/athithya-sakthivel/frontend:staging
         imagePullPolicy: Always
         ports:
         - name: http
@@ -67,13 +67,13 @@ spec:
         - name: ENABLE_GOOGLE_AUTH
           value: 'true'
         - name: ENABLE_MICROSOFT_AUTH
-          value: 'true'
+          value: 'false'
         - name: ENABLE_GITHUB_AUTH
           value: 'false'
         - name: DISPLAY_SOURCES_IN_UI
           value: 'true'
         - name: DISPLAY_TOPK_IN_UI
-          value: 'false'
+          value: 'true'
         - name: USE_IAM
           value: 'false'
         - name: RATE_LIMIT_GENERATE_STREAM
@@ -101,15 +101,17 @@ spec:
         - name: JWT_KID
           value: production-key-1
         - name: GOOGLE_ALLOWED_DOMAINS
-          value: gmail.com
+          value: ''
         - name: MICROSOFT_ALLOWED_DOMAINS
-          value: ''
+          value: outlook.com
         - name: MICROSOFT_ALLOWED_TENANT_IDS
-          value: ''
+          value: b8a65a11-9d1c-4d48-b9f6-dabfc67f2e4b
         - name: GITHUB_ALLOWED_ORGS
           value: ''
         - name: FRONTEND_HOSTNAME
           value: rag.athithya.site
+        - name: MS_TENANT_ID
+          value: common
         - name: RETRIEVER_URL
           value: http://retriever.inference.svc.cluster.local:8001
         - name: GENERATE_STREAM_PATH
