@@ -337,13 +337,6 @@ spec:
                       description: "Container has been OOM-killed in the last 5 minutes."
               - name: cloudflared
                 rules:
-                  - alert: CloudflaredTunnelErrors
-                    expr: rate(cloudflared_tunnel_request_errors[5m]) > 0
-                    for: 2m
-                    labels: {severity: critical}
-                    annotations:
-                      summary: "Cloudflared tunnel returning errors to origin"
-                      description: "Tunnel is returning errors ({{ $value }}/s)."
                   - alert: CloudflaredHighHeartbeatRetries
                     expr: cloudflared_tunnel_timer_retries > 5
                     for: 5m

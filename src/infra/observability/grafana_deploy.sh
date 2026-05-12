@@ -19,3 +19,4 @@ kubectl create secret generic "$ADMIN_SECRET" \
 kubectl apply -f src/argocd/grafana-application.yaml
 
 echo "Grafana Application applied. ArgoCD will now deploy Grafana."
+

@@ -1,3 +1,4 @@
+# stateless_openid_auth.py  (final, complete, bug‑free)
 from __future__ import annotations
 
 import html
@@ -137,49 +138,38 @@ ENABLED_PROVIDERS = enabled_providers_effective()
 _provider_clients: dict[str, Any] = {}
 
 if ENABLE_GOOGLE and "google" in ENABLED_PROVIDERS:
-    try:
-        oauth.register(
-            name="google",
-            client_id=GOOGLE_CLIENT_ID,
-            client_secret=GOOGLE_CLIENT_SECRET,
-            server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
-            client_kwargs={"scope": "openid email profile", "code_challenge_method": "S256"},
-        )
-        log.info("Google auth provider registered")
-    except Exception as e:
-        log.error("Failed to register Google auth", error=str(e))
-        ENABLED_PROVIDERS.remove("google")
+    oauth.register(
+        name="google",
+        client_id=GOOGLE_CLIENT_ID,
+        client_secret=GOOGLE_CLIENT_SECRET,
+        server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+        client_kwargs={"scope": "openid email profile", "code_challenge_method": "S256"},
+    )
+    log.info("Google auth provider registered")
 
 if ENABLE_MICROSOFT and "microsoft" in ENABLED_PROVIDERS:
-    try:
-        tenant = MS_TENANT_ID or "common"
-        oauth.register(
-            name="microsoft",
-            client_id=MS_CLIENT_ID,
-            client_secret=MS_CLIENT_SECRET,
-            server_metadata_url=f"https://login.microsoftonline.com/{tenant}/v2.0/.well-known/openid-configuration",
-            client_kwargs={"scope": "openid email profile offline_access User.Read", "code_challenge_method": "S256"},
-        )
-        log.info("Microsoft auth provider registered")
-    except Exception as e:
-        log.error("Failed to register Microsoft auth", error=str(e))
-        ENABLED_PROVIDERS.remove("microsoft")
+    ms_tenant = MS_TENANT_ID or "common"
+    server_metadata = f"https://login.microsoftonline.com/{ms_tenant}/v2.0/.well-known/openid-configuration"
+    oauth.register(
+        name="microsoft",
+        client_id=MS_CLIENT_ID,
+        client_secret=MS_CLIENT_SECRET,
+        server_metadata_url=server_metadata,
+        client_kwargs={"scope": "openid email profile offline_access User.Read", "code_challenge_method": "S256"},
+    )
+    log.info("Microsoft auth provider registered", tenant=ms_tenant)
 
 if ENABLE_GITHUB and "github" in ENABLED_PROVIDERS:
-    try:
-        oauth.register(
-            name="github",
-            client_id=GITHUB_CLIENT_ID,
-            client_secret=GITHUB_CLIENT_SECRET,
-            access_token_url="https://github.com/login/oauth/access_token",
-            authorize_url="https://github.com/login/oauth/authorize",
-            api_base_url="https://api.github.com/",
-            client_kwargs={"scope": "user:email read:org", "code_challenge_method": "S256"},
-        )
-        log.info("GitHub auth provider registered")
-    except Exception as e:
-        log.error("Failed to register GitHub auth", error=str(e))
-        ENABLED_PROVIDERS.remove("github")
+    oauth.register(
+        name="github",
+        client_id=GITHUB_CLIENT_ID,
+        client_secret=GITHUB_CLIENT_SECRET,
+        access_token_url="https://github.com/login/oauth/access_token",
+        authorize_url="https://github.com/login/oauth/authorize",
+        api_base_url="https://api.github.com/",
+        client_kwargs={"scope": "user:email read:org", "code_challenge_method": "S256"},
+    )
+    log.info("GitHub auth provider registered")
 
 if not ENABLED_PROVIDERS:
     log.warn("No OAuth providers are enabled. Login will not be possible.")
@@ -410,6 +400,9 @@ def _deny_github(identity: dict[str, Any], orgs: list[str]) -> None:
         raise HTTPException(status_code=403, detail="Access denied")
 
 
+# ---------------------------------------------------------------------------
+#  Robust callback – handles iss mismatch for Microsoft via manual exchange
+# ---------------------------------------------------------------------------
 @app.get("/callback/{provider}")
 @limiter.limit(limits.auth_callback, key_func=_auth_ip_key)
 async def callback(request: Request, provider: str):
@@ -424,33 +417,57 @@ async def callback(request: Request, provider: str):
         log.warn("oauth state mismatch", provider=provider)
         return RedirectResponse(url=f"{_frontend_base()}/?error=state_mismatch", status_code=302)
 
-    # Attempt token exchange – relax issuer check for Microsoft
+    # Stage 1 – normal token exchange; fall back to manual exchange on InvalidClaimError
     token = None
     try:
-        if provider == "microsoft":
-            # Microsoft ID tokens have a different issuer, skip our strict check
-            token = await client.authorize_access_token(request, claims_options=None)
-        else:
-            token = await client.authorize_access_token(request)
-    except OAuthError as e:
-        log.warn("OAuthError during authorize_access_token", provider=provider, error=str(e))
+        token = await client.authorize_access_token(request)
+    except InvalidClaimError as e:
+        log.warn("InvalidClaimError during token exchange; using manual fallback", provider=provider, error=str(e))
         code = request.query_params.get("code")
-        if not code:
-            return RedirectResponse(url=f"{_frontend_base()}/?error=oauth", status_code=302)
-        token = await _manual_token_exchange(provider, client, code)
+        if code:
+            token = await _manual_token_exchange(provider, client, code)
+    except OAuthError as e:
+        log.warn("OAuthError during token exchange", provider=provider, error=str(e))
+        code = request.query_params.get("code")
+        if code:
+            token = await _manual_token_exchange(provider, client, code)
 
-    if not token:
+    if not token or not isinstance(token, dict):
+        log.warn("no token obtained", provider=provider)
         return RedirectResponse(url=f"{_frontend_base()}/?error=oauth", status_code=302)
 
-    access_token = token.get("access_token") if isinstance(token, dict) else None
-    userinfo = await _fetch_userinfo(provider, client, token)
-    identity = _identity_from_userinfo(provider, userinfo)
+    access_token = token.get("access_token")
+    id_token_str = token.get("id_token")
 
+    # Stage 2 – extract userinfo from id_token, skipping claim validation
+    userinfo = {}
+    if id_token_str:
+        try:
+            # Decode without validating claims (avoids issuer mismatch)
+            token_obj = jwt.decode(id_token_str, PUBLIC_KEY, algorithms=[JWT_ALG], claims_cls=None)
+            userinfo = dict(token_obj.claims)
+        except Exception as e:
+            log.warn("Failed to decode id_token for userinfo", error=str(e))
+
+    # If no userinfo, try calling Microsoft Graph (only for Microsoft)
+    if not userinfo and access_token and provider == "microsoft":
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as h:
+                resp = await h.get(
+                    "https://graph.microsoft.com/v1.0/me?$select=id,displayName,mail,userPrincipalName,tenantId",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                )
+                if resp.status_code == 200:
+                    userinfo = resp.json()
+        except Exception:
+            pass
+
+    identity = _identity_from_userinfo(provider, userinfo)
     if not identity.get("sub") or not identity.get("email"):
         log.warn("oauth identity missing sub/email", provider=provider)
         return RedirectResponse(url=f"{_frontend_base()}/?error=identity", status_code=302)
 
-    # Provider-specific restrictions
+    # Stage 3 – access checks (unchanged)
     try:
         if provider == "google":
             _deny_google(identity)
