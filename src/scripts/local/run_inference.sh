@@ -37,6 +37,10 @@ python3 src/infra/rag/retriever_service.py --write
 kubectl apply -f src/manifests/retriever
 
 
+bash src/infra/core/valkey_service.sh
+
+
+
 
 kubectl delete -f src/manifests/cloudflared || true
 export CLOUDFLARE_TUNNEL_TOKEN="$(tofu -chdir=src/infra/terraform/cloudflare output -raw cloudflare_tunnel_token)"
@@ -47,8 +51,6 @@ export DOMAIN="athithya.site"
 python3 src/infra/core/cloudflared_setup.py --write
 kubectl apply -f src/manifests/cloudflared
 
-
-bash src/infra/core/valkey_service.sh
 
 export FRONTEND_HOSTNAME=rag.athithya.site
 kubectl delete -f src/manifests/frontend || true

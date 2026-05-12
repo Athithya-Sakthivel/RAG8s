@@ -58,7 +58,7 @@ DEFAULTS: dict[str, Any] = {
     "SERVICE_NAME": "frontend",
     "SERVICE_ACCOUNT_NAME": "frontend-sa",
     "SECRET_NAME": "frontend-secrets",
-    "IMAGE": "ghcr.io/athithya-sakthivel/frontend:2026-05-11-18-19--17eaa51@sha256:b47f5c1b4139395e1c42072c6230b99dc76a30e23c47a954b117e87d3f9c50ee",
+    "IMAGE": "ghcr.io/athithya-sakthivel/frontend:2026-05-12-06-14--3c2de03@sha256:1def29f367843007d38dacfbea916142896aaf36c79bb3719e6d0947a3d2b851",
     "IMAGE_PULL_POLICY": "Always",
     "REPLICAS": 1,
     "CONTAINER_PORT": 8000,
