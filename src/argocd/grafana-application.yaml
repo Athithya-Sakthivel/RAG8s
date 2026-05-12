@@ -65,7 +65,7 @@ spec:
             subPath: false
 
         # Create the dashboard ConfigMap directly
-        extraDeploy:
+        extraObjects:
           - apiVersion: v1
             kind: ConfigMap
             metadata:
