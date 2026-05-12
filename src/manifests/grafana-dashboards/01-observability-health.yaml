@@ -13,7 +13,7 @@ data:
       "tags": ["observability", "prometheus"],
       "timezone": "browser",
       "schemaVersion": 39,
-      "version": 6,
+      "version": 7,
       "refresh": "30s",
       "editable": true,
       "panels": [
@@ -106,7 +106,7 @@ data:
           "title": "Active Alerts",
           "gridPos": {"x": 0, "y": 6, "w": 6, "h": 6},
           "datasource": {"type": "prometheus", "uid": "prometheus"},
-          "targets": [{"refId": "A", "expr": "sum(ALERTS{alertstate=\"firing\"})"}],
+          "targets": [{"refId": "A", "expr": "count(ALERTS{alertstate=\"firing\"}) or vector(0)"}],
           "fieldConfig": {
             "defaults": {
               "thresholds": {
@@ -168,22 +168,21 @@ data:
         },
         {
           "type": "stat",
-          "title": "Vector Buffer Events",
+          "title": "Vector Events Processed",
           "gridPos": {"x": 18, "y": 6, "w": 6, "h": 6},
           "datasource": {"type": "prometheus", "uid": "prometheus"},
-          "targets": [{"refId": "A", "expr": "sum(vector_component_buffer_events{job=\"vector\"})"}],
+          "targets": [{"refId": "A", "expr": "sum(rate(vector_adaptive_concurrency_averaged_rtt_count{job=\"vector\"}[5m]))"}],
           "fieldConfig": {
             "defaults": {
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
                   {"color": "green", "value": null},
-                  {"color": "yellow", "value": 500},
-                  {"color": "red", "value": 1000}
+                  {"color": "yellow", "value": 0}
                 ]
               },
               "color": {"mode": "thresholds"},
-              "decimals": 0
+              "decimals": 1
             }
           },
           "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "value"}
@@ -193,7 +192,7 @@ data:
           "title": "ClickHouse Insert Rate",
           "gridPos": {"x": 0, "y": 12, "w": 6, "h": 6},
           "datasource": {"type": "prometheus", "uid": "prometheus"},
-          "targets": [{"refId": "A", "expr": "sum(rate(ClickHouseProfileEvents_InsertQuery{job=\"clickhouse\"}[5m]))", "legendFormat": "inserts/s"}],
+          "targets": [{"refId": "A", "expr": "rate(ClickHouseProfileEvents_InsertQuery{job=\"clickhouse\"}[5m])", "legendFormat": "inserts/s"}],
           "fieldConfig": {
             "defaults": {
               "unit": "short",
@@ -235,12 +234,11 @@ data:
         },
         {
           "type": "timeseries",
-          "title": "Vector Events In / Out",
+          "title": "Vector Uptime",
           "gridPos": {"x": 12, "y": 12, "w": 12, "h": 6},
           "datasource": {"type": "prometheus", "uid": "prometheus"},
           "targets": [
-            {"refId": "A", "expr": "sum(rate(vector_component_events_in_total{job=\"vector\"}[5m])) by (component_id)", "legendFormat": "in: {{component_id}}"},
-            {"refId": "B", "expr": "sum(rate(vector_component_events_out_total{job=\"vector\"}[5m])) by (component_id)", "legendFormat": "out: {{component_id}}"}
+            {"refId": "A", "expr": "min(up{job=\"vector\"})", "legendFormat": "Vector UP"}
           ],
           "fieldConfig": {
             "defaults": {

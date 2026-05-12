@@ -15,7 +15,6 @@ spec:
     - Ingress
     - Egress
   ingress:
-    # Prometheus monitoring
     - from:
         - namespaceSelector:
             matchLabels:
@@ -27,7 +26,6 @@ spec:
         - port: 9598
           protocol: TCP
   egress:
-    # DNS resolution
     - to:
         - namespaceSelector: {}
           podSelector:
@@ -38,7 +36,6 @@ spec:
           protocol: UDP
         - port: 53
           protocol: TCP
-    # Communication with ClickHouse
     - to:
         - namespaceSelector:
             matchLabels:
@@ -49,14 +46,12 @@ spec:
       ports:
         - port: 8123
           protocol: TCP
-    # Kubernetes API server (explicit IP)
     - to:
         - ipBlock:
             cidr: 10.43.0.1/32
       ports:
         - port: 443
           protocol: TCP
-    # All other outbound (safe for now)
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
