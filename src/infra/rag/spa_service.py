@@ -126,17 +126,17 @@ IRSA_ROLE_ARN = _env_str("IRSA_ROLE_ARN", "")
 # Auth toggles
 REQUIRE_AUTH = _env_bool("REQUIRE_AUTH", True)
 ENABLE_GOOGLE_AUTH = _env_bool("ENABLE_GOOGLE_AUTH", True)
-ENABLE_MICROSOFT_AUTH = _env_bool("ENABLE_MICROSOFT_AUTH", False)
+ENABLE_MICROSOFT_AUTH = _env_bool("ENABLE_MICROSOFT_AUTH", True)
 ENABLE_GITHUB_AUTH = _env_bool("ENABLE_GITHUB_AUTH", False)
 
 # Domain / tenant allow‑lists (empty = no restriction)
-GOOGLE_ALLOWED_DOMAINS = _env_str("GOOGLE_ALLOWED_DOMAINS", "")
-MICROSOFT_ALLOWED_DOMAINS = _env_str("MICROSOFT_ALLOWED_DOMAINS", "")
+GOOGLE_ALLOWED_DOMAINS = _env_str("GOOGLE_ALLOWED_DOMAINS", "gmail.com")
+MICROSOFT_ALLOWED_DOMAINS = _env_str("MICROSOFT_ALLOWED_DOMAINS", "outlook.com")
 MICROSOFT_ALLOWED_TENANT_IDS = _env_str("MICROSOFT_ALLOWED_TENANT_IDS", "")
 GITHUB_ALLOWED_ORGS = _env_str("GITHUB_ALLOWED_ORGS", "")
 
 # Public hostname – critical for OAuth redirects
-FRONTEND_HOSTNAME = _env_str("FRONTEND_HOSTNAME", "athithya.site")
+FRONTEND_HOSTNAME = _env_str("FRONTEND_HOSTNAME", "rag.athithya.site")
 
 # Upstream retriever
 RETRIEVER_URL = _env_str("RETRIEVER_URL", "http://retriever.inference.svc.cluster.local:8001")
@@ -172,7 +172,7 @@ PRESIGNED_URL_TTL_SECONDS = _env_str("PRESIGNED_URL_TTL_SECONDS", "3600")
 
 # UI toggles
 DISPLAY_SOURCES_IN_UI = _env_bool("DISPLAY_SOURCES_IN_UI", True)
-DISPLAY_TOPK_IN_UI = _env_bool("DISPLAY_TOPK_IN_UI", True)
+DISPLAY_TOPK_IN_UI = _env_bool("DISPLAY_TOPK_IN_UI", False)
 
 # Sensitive keys – stored in Kubernetes Secret, never in YAML
 SECRET_KEYS = (
