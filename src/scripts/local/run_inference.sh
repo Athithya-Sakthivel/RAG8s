@@ -12,7 +12,7 @@ helm upgrade --install "${QDRANT_RELEASE:-qdrant}" qdrant/qdrant \
   --set resources.requests.cpu=1,resources.requests.memory=2Gi \
   --set resources.limits.cpu=1,resources.limits.memory=2Gi \
   --wait --timeout 15m
-
+sleep 200
 export PER_POD=true
 export QDRANT_BACKUP_S3_PREFIX=qdrant/backups/
 export BACKUP_S3_BUCKET=$DATA_S3_BUCKET
