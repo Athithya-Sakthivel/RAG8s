@@ -34,6 +34,7 @@ kubectl create secret generic clickhouse-credentials -n logging \
   --from-literal=password="${CLICKHOUSE_PASSWORD:-vectorpass}" \
   --dry-run=client -o yaml | kubectl apply -f -
 
+export CLOUDFLARE_TUNNEL_TOKEN="$(tofu -chdir=src/infra/terraform/cloudflare output -raw cloudflare_tunnel_token)"
 # Cloudflare tunnel secret
 kubectl create secret generic cloudflared-token -n inference \
   --from-literal=token="${CLOUDFLARE_TUNNEL_TOKEN:-}" \
