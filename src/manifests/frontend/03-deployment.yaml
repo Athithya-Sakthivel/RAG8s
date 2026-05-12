@@ -111,7 +111,7 @@ spec:
         - name: FRONTEND_HOSTNAME
           value: rag.athithya.site
         - name: MS_TENANT_ID
-          value: common
+          value: b8a65a11-9d1c-4d48-b9f6-dabfc67f2e4b
         - name: RETRIEVER_URL
           value: http://retriever.inference.svc.cluster.local:8001
         - name: GENERATE_STREAM_PATH
