@@ -1,0 +1,217 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-infrastructure-network
+  namespace: grafana
+  labels:
+    grafana_dashboard: "1"
+data:
+  infrastructure-network.json: |
+    {
+      "uid": "infrastructure-network",
+      "title": "Infrastructure & Network",
+      "tags": ["infrastructure", "network", "prometheus"],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "version": 4,
+      "refresh": "30s",
+      "editable": true,
+      "templating": {
+        "list": [
+          {
+            "name": "namespace",
+            "type": "query",
+            "query": "label_values(container_cpu_usage_seconds_total, namespace)",
+            "refresh": 1,
+            "includeAll": false,
+            "multi": false,
+            "current": {"text": "inference", "value": "inference"}
+          }
+        ]
+      },
+      "panels": [
+        {
+          "type": "timeseries",
+          "title": "Pod CPU Usage",
+          "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "rate(container_cpu_usage_seconds_total{namespace=\"$namespace\", container!=\"\"}[5m])", "legendFormat": "{{pod}}/{{container}}"}],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 0.8},
+                  {"color": "red", "value": 1}
+                ]
+              },
+              "color": {"mode": "thresholds"},
+              "custom": {"lineWidth": 2, "fillOpacity": 10, "spanNulls": true}
+            }
+          },
+          "options": {"legend": {"displayMode": "table", "placement": "right"}}
+        },
+        {
+          "type": "timeseries",
+          "title": "Pod Memory (Working Set)",
+          "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "container_memory_working_set_bytes{namespace=\"$namespace\", container!=\"\"}", "legendFormat": "{{pod}}/{{container}}"}],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 8589934592},
+                  {"color": "red", "value": 17179869184}
+                ]
+              },
+              "color": {"mode": "thresholds"},
+              "custom": {"lineWidth": 2, "fillOpacity": 10, "spanNulls": true}
+            }
+          },
+          "options": {"legend": {"displayMode": "table", "placement": "right"}}
+        },
+        {
+          "type": "timeseries",
+          "title": "Pod Network Receive",
+          "gridPos": {"x": 0, "y": 8, "w": 6, "h": 8},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "rate(container_network_receive_bytes_total{namespace=\"$namespace\", container!=\"\"}[5m])", "legendFormat": "{{pod}}"}],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "Bps",
+              "color": {"mode": "palette-classic"},
+              "custom": {"lineWidth": 2, "fillOpacity": 10, "spanNulls": true}
+            }
+          },
+          "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+        },
+        {
+          "type": "timeseries",
+          "title": "Pod Network Transmit",
+          "gridPos": {"x": 6, "y": 8, "w": 6, "h": 8},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "rate(container_network_transmit_bytes_total{namespace=\"$namespace\", container!=\"\"}[5m])", "legendFormat": "{{pod}}"}],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "Bps",
+              "color": {"mode": "palette-classic"},
+              "custom": {"lineWidth": 2, "fillOpacity": 10, "spanNulls": true}
+            }
+          },
+          "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+        },
+        {
+          "type": "timeseries",
+          "title": "Cloudflared Tunnel Errors",
+          "gridPos": {"x": 12, "y": 8, "w": 6, "h": 8},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "sum(rate(cloudflared_tunnel_request_errors{job=\"cloudflared\"}[5m]))", "legendFormat": "errors/s"}],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "red", "value": 0}
+                ]
+              },
+              "color": {"mode": "thresholds"},
+              "custom": {"lineWidth": 2, "fillOpacity": 15, "spanNulls": true}
+            }
+          },
+          "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+        },
+        {
+          "type": "stat",
+          "title": "Cloudflared Heartbeat Retries",
+          "gridPos": {"x": 18, "y": 8, "w": 6, "h": 4},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "max(cloudflared_tunnel_timer_retries{job=\"cloudflared\"})"}],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 3},
+                  {"color": "red", "value": 5}
+                ]
+              },
+              "color": {"mode": "thresholds"},
+              "decimals": 0
+            }
+          },
+          "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "value"}
+        },
+        {
+          "type": "timeseries",
+          "title": "Cloudflared QUIC RTT",
+          "gridPos": {"x": 18, "y": 12, "w": 6, "h": 4},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {"refId": "A", "expr": "quic_client_smoothed_rtt{job=\"cloudflared\"}", "legendFormat": "smoothed RTT"},
+            {"refId": "B", "expr": "quic_client_latest_rtt{job=\"cloudflared\"}", "legendFormat": "latest RTT"}
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 0.05},
+                  {"color": "red", "value": 0.1}
+                ]
+              },
+              "color": {"mode": "thresholds"},
+              "custom": {"lineWidth": 2, "fillOpacity": 10, "spanNulls": true}
+            }
+          },
+          "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+        },
+        {
+          "type": "stat",
+          "title": "OOM Kills (Last 5m)",
+          "gridPos": {"x": 12, "y": 16, "w": 6, "h": 4},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "increase(container_oom_events_total{namespace=\"$namespace\", container!=\"\"}[5m])"}],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "red", "value": 1}
+                ]
+              },
+              "color": {"mode": "thresholds"},
+              "decimals": 0
+            }
+          },
+          "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "value"}
+        },
+        {
+          "type": "stat",
+          "title": "Cloudflared Active Streams",
+          "gridPos": {"x": 18, "y": 16, "w": 6, "h": 4},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "sum(cloudflared_tunnel_active_streams{job=\"cloudflared\"})"}],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "color": {"mode": "thresholds"},
+              "decimals": 0
+            }
+          },
+          "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "value"}
+        }
+      ],
+      "time": {"from": "now-15m", "to": "now"}
+    }
