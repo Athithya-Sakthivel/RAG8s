@@ -1,3 +1,5 @@
+# src/argocd/grafana-application.yaml
+# Deploys Grafana (Helm chart 10.5.15) with sidecar and multi‑source GitOps.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -6,7 +8,7 @@ metadata:
 spec:
   project: default
   sources:
-    # Source 1 – Grafana Helm chart (with sidecar enabled)
+    # Source 1 – Grafana Helm chart from official Helm repo
     - repoURL: https://grafana.github.io/helm-charts
       chart: grafana
       targetRevision: 10.5.15

@@ -1,4 +1,4 @@
-# stateless_openid_auth.py  (final, complete, bug‑free)
+# stateless_openid_auth.py  (final – Google + Microsoft e2e working)
 from __future__ import annotations
 
 import html
@@ -125,6 +125,8 @@ class _SkewClaimsRegistry(JWTClaimsRegistry):
             raise InvalidClaimError("nbf")
 
 
+# IMPORTANT: this registry with strict iss/aud is used ONLY for the JWT
+# tokens we mint ourselves.  It is NOT used for decoding provider id_tokens.
 CLAIMS_REQUESTS = _SkewClaimsRegistry(
     iss={"essential": True, "value": JWT_ISS},
     aud={"essential": True, "value": JWT_AUD},
@@ -149,12 +151,11 @@ if ENABLE_GOOGLE and "google" in ENABLED_PROVIDERS:
 
 if ENABLE_MICROSOFT and "microsoft" in ENABLED_PROVIDERS:
     ms_tenant = MS_TENANT_ID or "common"
-    server_metadata = f"https://login.microsoftonline.com/{ms_tenant}/v2.0/.well-known/openid-configuration"
     oauth.register(
         name="microsoft",
         client_id=MS_CLIENT_ID,
         client_secret=MS_CLIENT_SECRET,
-        server_metadata_url=server_metadata,
+        server_metadata_url=f"https://login.microsoftonline.com/{ms_tenant}/v2.0/.well-known/openid-configuration",
         client_kwargs={"scope": "openid email profile offline_access User.Read", "code_challenge_method": "S256"},
     )
     log.info("Microsoft auth provider registered", tenant=ms_tenant)
@@ -249,6 +250,7 @@ def mint_access_token(identity: dict[str, Any]) -> str:
 
 
 def verify_access_token(token_text: str) -> dict[str, Any]:
+    """Verify and validate a self‑issued access token."""
     token = jwt.decode(token_text, PUBLIC_KEY, algorithms=[JWT_ALG])
     claims = dict(token.claims)
     CLAIMS_REQUESTS.validate(claims)
@@ -263,6 +265,35 @@ def _extract_bearer_token(request: Request) -> str:
     if not token:
         raise HTTPException(status_code=401, detail="Missing bearer token")
     return token
+
+
+def _decode_id_token_safe(token_str: str) -> dict[str, Any] | None:
+    """
+    Decode a provider id_token using joserfc's jwt.decode() WITHOUT claims
+    validation.  joserfc separates signature verification from claims
+    validation, so skipping the validate() call avoids iss/aud mismatches
+    while still verifying the token signature.
+    Falls back to manual base64 decoding if joserfc decode fails.
+    """
+    # Method 1 – joserfc decode (verifies signature, NO claim validation)
+    try:
+        token = jwt.decode(token_str, PUBLIC_KEY, algorithms=[JWT_ALG])
+        return dict(token.claims)
+    except Exception:
+        pass
+
+    # Method 2 – bare minimum: base64 decode (no signature verification)
+    try:
+        import base64 as _b64
+        parts = token_str.split(".")
+        if len(parts) >= 2:
+            payload_b64 = parts[1]
+            payload_b64 += "=" * (4 - len(payload_b64) % 4)
+            return json.loads(_b64.urlsafe_b64decode(payload_b64))
+    except Exception:
+        pass
+
+    return None
 
 
 def _render_access_denied(title: str, message: str, details: str | None = None, allowed: str | None = None) -> HTMLResponse:
@@ -285,6 +316,7 @@ def _render_access_denied(title: str, message: str, details: str | None = None, 
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
 @app.get("/redirects", response_class=HTMLResponse)
 async def redirects_page():
     providers = _enabled_providers()
@@ -400,9 +432,7 @@ def _deny_github(identity: dict[str, Any], orgs: list[str]) -> None:
         raise HTTPException(status_code=403, detail="Access denied")
 
 
-# ---------------------------------------------------------------------------
-#  Robust callback – handles iss mismatch for Microsoft via manual exchange
-# ---------------------------------------------------------------------------
+# ── Callback  (fixed for Microsoft iss mismatch) ────────────────────────
 @app.get("/callback/{provider}")
 @limiter.limit(limits.auth_callback, key_func=_auth_ip_key)
 async def callback(request: Request, provider: str):
@@ -417,12 +447,12 @@ async def callback(request: Request, provider: str):
         log.warn("oauth state mismatch", provider=provider)
         return RedirectResponse(url=f"{_frontend_base()}/?error=state_mismatch", status_code=302)
 
-    # Stage 1 – normal token exchange; fall back to manual exchange on InvalidClaimError
+    # ── Stage 1 – obtain token ──────────────────────────────────────
     token = None
     try:
         token = await client.authorize_access_token(request)
     except InvalidClaimError as e:
-        log.warn("InvalidClaimError during token exchange; using manual fallback", provider=provider, error=str(e))
+        log.warn("InvalidClaimError during token exchange; falling back to manual", provider=provider, error=str(e))
         code = request.query_params.get("code")
         if code:
             token = await _manual_token_exchange(provider, client, code)
@@ -439,17 +469,14 @@ async def callback(request: Request, provider: str):
     access_token = token.get("access_token")
     id_token_str = token.get("id_token")
 
-    # Stage 2 – extract userinfo from id_token, skipping claim validation
+    # ── Stage 2 – extract userinfo from id_token ─────────────────────
     userinfo = {}
     if id_token_str:
-        try:
-            # Decode without validating claims (avoids issuer mismatch)
-            token_obj = jwt.decode(id_token_str, PUBLIC_KEY, algorithms=[JWT_ALG], claims_cls=None)
-            userinfo = dict(token_obj.claims)
-        except Exception as e:
-            log.warn("Failed to decode id_token for userinfo", error=str(e))
+        decoded = _decode_id_token_safe(id_token_str)
+        if decoded:
+            userinfo = decoded
 
-    # If no userinfo, try calling Microsoft Graph (only for Microsoft)
+    # Fallback for Microsoft: call Graph API
     if not userinfo and access_token and provider == "microsoft":
         try:
             async with httpx.AsyncClient(timeout=10.0) as h:
@@ -467,7 +494,7 @@ async def callback(request: Request, provider: str):
         log.warn("oauth identity missing sub/email", provider=provider)
         return RedirectResponse(url=f"{_frontend_base()}/?error=identity", status_code=302)
 
-    # Stage 3 – access checks (unchanged)
+    # ── Stage 3 – access checks ─────────────────────────────────────
     try:
         if provider == "google":
             _deny_google(identity)

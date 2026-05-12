@@ -13,7 +13,7 @@ data:
       "tags": ["frontend", "auth", "prometheus"],
       "timezone": "browser",
       "schemaVersion": 39,
-      "version": 2,
+      "version": 3,
       "refresh": "30s",
       "editable": true,
       "panels": [
@@ -139,9 +139,8 @@ data:
           "targets": [{"refId": "A", "expr": "sum(frontend_active_requests{job=\"frontend-auth\",route=\"/generate/stream\"})"}],
           "fieldConfig": {
             "defaults": {
-              "thresholds": {"mode": "absolute", "steps": [{"color": "green"}]},
-              "color": {"mode": "thresholds"},
-              "noValue": "0"
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "color": {"mode": "thresholds"}
             }
           },
           "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "auto"}
@@ -166,8 +165,7 @@ data:
                   {"color": "green", "value": 1}
                 ]
               },
-              "color": {"mode": "thresholds"},
-              "noValue": "DOWN"
+              "color": {"mode": "thresholds"}
             }
           },
           "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "auto"}
@@ -192,8 +190,7 @@ data:
                   {"color": "green", "value": 1}
                 ]
               },
-              "color": {"mode": "thresholds"},
-              "noValue": "Unknown"
+              "color": {"mode": "thresholds"}
             }
           },
           "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "auto"}

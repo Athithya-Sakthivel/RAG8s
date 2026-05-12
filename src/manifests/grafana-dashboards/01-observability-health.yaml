@@ -13,7 +13,7 @@ data:
       "tags": ["observability", "prometheus"],
       "timezone": "browser",
       "schemaVersion": 39,
-      "version": 4,
+      "version": 5,
       "refresh": "30s",
       "editable": true,
       "panels": [
@@ -37,8 +37,7 @@ data:
                   {"color": "green", "value": 1}
                 ]
               },
-              "color": {"mode": "thresholds"},
-              "noValue": "DOWN"
+              "color": {"mode": "thresholds"}
             }
           },
           "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "auto"}
@@ -63,8 +62,7 @@ data:
                   {"color": "green", "value": 1}
                 ]
               },
-              "color": {"mode": "thresholds"},
-              "noValue": "DOWN"
+              "color": {"mode": "thresholds"}
             }
           },
           "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "auto"}
@@ -89,8 +87,7 @@ data:
                   {"color": "green", "value": 1}
                 ]
               },
-              "color": {"mode": "thresholds"},
-              "noValue": "DOWN"
+              "color": {"mode": "thresholds"}
             }
           },
           "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "auto"}
@@ -115,8 +112,7 @@ data:
                   {"color": "green", "value": 1}
                 ]
               },
-              "color": {"mode": "thresholds"},
-              "noValue": "DOWN"
+              "color": {"mode": "thresholds"}
             }
           },
           "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "auto"}
@@ -140,8 +136,7 @@ data:
                   {"color": "red", "value": 1}
                 ]
               },
-              "color": {"mode": "thresholds"},
-              "noValue": "None"
+              "color": {"mode": "thresholds"}
             }
           },
           "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "auto"}
@@ -174,7 +169,7 @@ data:
           "title": "ClickHouse Read-Only",
           "gridPos": {"x": 12, "y": 6, "w": 6, "h": 6},
           "datasource": {"type": "prometheus", "uid": "prometheus"},
-          "targets": [{"refId": "A", "expr": "max(clickhouse_is_readonly{job=\"clickhouse\"})"}],
+          "targets": [{"refId": "A", "expr": "max(ClickHouseMetrics_ReadonlyReplica{job=\"clickhouse\"})"}],
           "fieldConfig": {
             "defaults": {
               "mappings": [
@@ -188,8 +183,7 @@ data:
                   {"color": "red", "value": 1}
                 ]
               },
-              "color": {"mode": "thresholds"},
-              "noValue": "—"
+              "color": {"mode": "thresholds"}
             }
           },
           "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "auto"}
@@ -210,8 +204,7 @@ data:
                   {"color": "red", "value": 1000}
                 ]
               },
-              "color": {"mode": "thresholds"},
-              "noValue": "—"
+              "color": {"mode": "thresholds"}
             }
           },
           "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "auto"}
@@ -221,7 +214,7 @@ data:
           "title": "ClickHouse Insert Rate",
           "gridPos": {"x": 0, "y": 12, "w": 6, "h": 6},
           "datasource": {"type": "prometheus", "uid": "prometheus"},
-          "targets": [{"refId": "A", "expr": "sum(rate(clickhouse_inserts_per_query{job=\"clickhouse\"}[5m]))", "legendFormat": "inserts/s"}],
+          "targets": [{"refId": "A", "expr": "sum(rate(ClickHouseProfileEvents_InsertQuery{job=\"clickhouse\"}[5m]))", "legendFormat": "inserts/s"}],
           "fieldConfig": {
             "defaults": {
               "unit": "short",
@@ -243,7 +236,7 @@ data:
           "title": "ClickHouse Memory Tracking",
           "gridPos": {"x": 6, "y": 12, "w": 6, "h": 6},
           "datasource": {"type": "prometheus", "uid": "prometheus"},
-          "targets": [{"refId": "A", "expr": "sum(clickhouse_memory_tracking{job=\"clickhouse\"})", "legendFormat": "total memory"}],
+          "targets": [{"refId": "A", "expr": "sum(ClickHouseMetrics_MemoryTracking{job=\"clickhouse\"})", "legendFormat": "total memory"}],
           "fieldConfig": {
             "defaults": {
               "unit": "bytes",

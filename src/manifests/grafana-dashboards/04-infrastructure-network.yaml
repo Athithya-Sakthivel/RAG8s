@@ -13,7 +13,7 @@ data:
       "tags": ["infrastructure", "network", "prometheus"],
       "timezone": "browser",
       "schemaVersion": 39,
-      "version": 2,
+      "version": 3,
       "refresh": "30s",
       "editable": true,
       "templating": {
@@ -144,8 +144,7 @@ data:
                   {"color": "red", "value": 5}
                 ]
               },
-              "color": {"mode": "thresholds"},
-              "noValue": "—"
+              "color": {"mode": "thresholds"}
             }
           },
           "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "auto"}
@@ -195,8 +194,7 @@ data:
                   {"color": "red", "value": 1}
                 ]
               },
-              "color": {"mode": "thresholds"},
-              "noValue": "—"
+              "color": {"mode": "thresholds"}
             }
           },
           "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "auto"}
@@ -209,9 +207,8 @@ data:
           "targets": [{"refId": "A", "expr": "sum(cloudflared_tunnel_active_streams{job=\"cloudflared\"})"}],
           "fieldConfig": {
             "defaults": {
-              "thresholds": {"mode": "absolute", "steps": [{"color": "green"}]},
-              "color": {"mode": "thresholds"},
-              "noValue": "—"
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "color": {"mode": "thresholds"}
             }
           },
           "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "auto"}
