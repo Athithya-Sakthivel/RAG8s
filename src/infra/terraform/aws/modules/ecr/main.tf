@@ -1,5 +1,5 @@
-// src/terraform/aws/modules/ecr/main.tf
-// ECR repository module for the MLOps platform.
+// src/infra/terraform/aws/modules/ecr/main.tf
+// ECR repository module for the E2E RAG platform.
 //
 // Responsibilities:
 // - create repositories from root-provided input
@@ -8,7 +8,7 @@
 // - enforce AES256 encryption by default
 // - attach exactly one lifecycle policy per repository
 //
-// This module is production-owned, tfvars-driven, and contains no AgentOps names.
+// This module is production-owned, tfvars-driven, and contains no legacy names.
 
 variable "repositories" {
   description = "Map of logical repository key -> repository configuration."
@@ -27,9 +27,10 @@ variable "repositories" {
       v.retain_last_images > 0 &&
       try(upper(v.image_tag_mutability), "IMMUTABLE") == "IMMUTABLE" &&
       try(v.scan_on_push, true) == true &&
-      try(upper(v.encryption_type), "AES256") == "AES256"
+      try(upper(v.encryption_type), "AES256") == "AES256" &&
+      can(regex("^[a-z0-9]+(-[a-z0-9]+)*$", v.name))
     ])
-    error_message = "Each repositories entry must define a non-empty name, retain_last_images > 0, immutable tags, scan_on_push = true, and AES256 encryption."
+    error_message = "Each repositories entry must define a lowercase hyphenated name, retain_last_images > 0, immutable tags, scan_on_push = true, and AES256 encryption."
   }
 }
 
@@ -44,7 +45,8 @@ locals {
 
   common_tags = merge(
     {
-      ManagedBy   = "mlops-platform-terraform"
+      ManagedBy   = "opentofu"
+      Platform    = "rag"
       Environment = local.env_tag
     },
     var.tags
@@ -56,15 +58,14 @@ resource "aws_ecr_repository" "this" {
 
   name = each.value.name
 
-  # Hard-enforced for supply-chain security.
   image_tag_mutability = "IMMUTABLE"
 
   image_scanning_configuration {
-    scan_on_push = try(each.value.scan_on_push, true)
+    scan_on_push = true
   }
 
   encryption_configuration {
-    encryption_type = try(each.value.encryption_type, "AES256")
+    encryption_type = "AES256"
   }
 
   tags = merge(local.common_tags, {

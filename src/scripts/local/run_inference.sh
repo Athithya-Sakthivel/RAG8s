@@ -1,7 +1,6 @@
 
-bash src/scripts/local/local_cluster.sh
-sleep 30
-bash src/infra/core/default_storage_class.sh
+
+K8S_CLUSTER=eks bash src/infra/core/default_storage_class.sh
 bash src/infra/core/create_secrets.sh
 
 helm repo add qdrant https://qdrant.github.io/qdrant-helm --force-update

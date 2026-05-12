@@ -1,27 +1,50 @@
-## GitHub Actions → AWS (OIDC) Setup for ECR
+## GitHub Actions → AWS (OIDC) Contract for ECR (RAG System)
 
-### When this is needed
+### Scope
 
-Use GitHub OIDC roles **only if workflows interact with AWS** (e.g., pushing images to ECR).
-
-* If workflows only build/test locally → no AWS role needed
-* If workflows push to **Amazon ECR** → OIDC role required
+This document defines how GitHub Actions workflows authenticate to AWS and push container images to **Amazon ECR** using **OIDC (no static credentials)**.
 
 ---
 
-## Required IAM Roles
+# ECR Repositories (Authoritative List)
 
-Create one role per repository:
+Each service maps to a dedicated ECR repository:
 
-* `gh-actions-flyte-elt-task`
-* `gh-actions-flyte-train-task`
-* `gh-actions-tabular-inference-service`
+```
+frontend
+retriever
+dense-model
+sparse-model
+reranker
+indexer
+```
 
 ---
 
-## Trust Policy (OIDC)
+# IAM Role Model (Strict 1:1 Mapping)
 
-Use this trust policy for each role (replace `<ACCOUNT_ID>`, `<OWNER>`, `<REPO>`):
+Create **one IAM role per service**:
+
+```
+gh-actions-frontend
+gh-actions-retriever
+gh-actions-dense-model
+gh-actions-sparse-model
+gh-actions-reranker
+gh-actions-indexer
+```
+
+### Invariant
+
+* One role → one ECR repository
+* No shared roles
+* No wildcard repository access
+
+---
+
+# Trust Policy (OIDC)
+
+Replace `<ACCOUNT_ID>` and `<OWNER>`.
 
 ```json
 {
@@ -36,7 +59,7 @@ Use this trust policy for each role (replace `<ACCOUNT_ID>`, `<OWNER>`, `<REPO>`
       "Condition": {
         "StringEquals": {
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-          "token.actions.githubusercontent.com:sub": "repo:<OWNER>/<REPO>:ref:refs/heads/main"
+          "token.actions.githubusercontent.com:sub": "repo:<OWNER>/E2E-RAG-System:ref:refs/heads/main"
         }
       }
     }
@@ -46,21 +69,11 @@ Use this trust policy for each role (replace `<ACCOUNT_ID>`, `<OWNER>`, `<REPO>`
 
 ---
 
-## Repository-Specific `sub` Values
+# Permissions Policy (ECR Push — Scoped)
 
-Use the correct `sub` for each repo:
+Each role must be scoped to its **own repository only**.
 
-```
-repo:<OWNER>/flyte-elt-task:ref:refs/heads/main
-repo:<OWNER>/flyte-train-task:ref:refs/heads/main
-repo:<OWNER>/tabular-inference-service:ref:refs/heads/main
-```
-
----
-
-## Permissions Policy (ECR Push)
-
-Attach this policy to each role to allow pushing images to ECR:
+Replace `<REGION>`, `<ACCOUNT_ID>`, `<REPO_NAME>`.
 
 ```json
 {
@@ -93,17 +106,92 @@ Attach this policy to each role to allow pushing images to ECR:
 
 ---
 
-## Notes
+# Service → Repository Mapping
 
-* Scope each role **per repo and branch** (no wildcards)
-* Start with minimal permissions; expand only if required
-* Roles can be created **without permissions initially** and updated later
-* Do not use static AWS credentials in GitHub Actions when OIDC is enabled
+| Service   | Role                    | ECR Repo     |
+| --------- | ----------------------- | ------------ |
+| frontend  | gh-actions-frontend     | frontend     |
+| retriever | gh-actions-retriever    | retriever    |
+| dense     | gh-actions-dense-model  | dense-model  |
+| sparse    | gh-actions-sparse-model | sparse-model |
+| reranker  | gh-actions-reranker     | reranker     |
+| indexer   | gh-actions-indexer      | indexer      |
 
 ---
 
-## Outcome
+# GitHub Actions Requirements
 
-* GitHub Actions authenticate to AWS via OIDC
+Each workflow must include:
+
+## Permissions
+
+```yaml
+permissions:
+  id-token: write
+  contents: read
+```
+
+---
+
+## AWS Authentication (OIDC)
+
+```yaml
+- name: Configure AWS credentials
+  uses: aws-actions/configure-aws-credentials@v4
+  with:
+    role-to-assume: arn:aws:iam::<ACCOUNT_ID>:role/gh-actions-<service>
+    aws-region: <REGION>
+```
+
+---
+
+## ECR Login
+
+```yaml
+- name: Login to ECR
+  uses: aws-actions/amazon-ecr-login@v2
+```
+
+---
+
+## Build + Push Pattern
+
+```yaml
+- name: Build and push image
+  run: |
+    IMAGE_URI=${{ steps.login-ecr.outputs.registry }}/<repo>:latest
+    docker build -t $IMAGE_URI .
+    docker push $IMAGE_URI
+```
+
+---
+
+# Security Constraints (Non-Negotiable)
+
+* No static AWS credentials in GitHub
+* No wildcard (`*`) ECR repository permissions
+* No shared IAM roles across services
+* Trust policy must match **exact repo + branch**
+* Default branch assumed: `main`
+
+---
+
+# Operational Notes
+
+* Region must match ECR + EKS deployment region
+* Roles can be created before repositories (policy attach later)
+* Image tags should evolve beyond `latest` (e.g., commit SHA) for production
+* Failures typically come from:
+
+  * incorrect `sub` in trust policy
+  * wrong repo name in IAM policy
+  * missing `id-token: write`
+
+---
+
+# Outcome
+
+* GitHub Actions authenticate via OIDC (STS)
 * No long-lived credentials are stored
-* Workflows can securely push images to **Amazon ECR**
+* Each service securely pushes to its own ECR repository
+* Access is tightly scoped and auditable

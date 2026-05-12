@@ -1,43 +1,47 @@
-Here are the **system invariants** that emerged from the whole design discussion, stated as the final contract for the Terraform layer.
-
 ## 1) Platform identity
 
-The repository is a **neutral MLOps platform bootstrap**, not an AgentOps stack.
+The repository is a **private, RAG-first AWS platform bootstrap**.
 
 Hard invariants:
-* environment separation is handled by `prod.tfvars` and `staging.tfvars`
-* everything is driven from the root module contract, not from child modules reading tfvars directly
+
+- environment separation is handled by `prod.tfvars` and `staging.tfvars`
+- the root module is the only place that consumes tfvars
+- child modules never read tfvars directly
+- the platform is built for online retrieval, model serving, indexing, storage, and observability
 
 ---
 
 ## 2) Root-module contract
 
-The root module is the only place that consumes `tfvars`.
+The root module is the only consumer of environment variables.
 
 Invariant flow:
 
-* `prod.tfvars` / `staging.tfvars`
-* `variables.tf`
-* `main.tf`
-* `modules/*`
+- `prod.tfvars` / `staging.tfvars`
+- `variables.tf`
+- `main.tf`
+- `modules/*`
 
-Child modules never read tfvars directly.
+Rules:
 
-Root module must pass only declared inputs to modules, and outputs must come only from module outputs.
+- child modules never read tfvars directly
+- root passes only declared inputs to modules
+- outputs must come only from module outputs
+- root is the single source of truth for composition
 
 ---
 
-## 3) Versioning and provider contract
+## 3) Provider and versioning contract
 
 There is one canonical provider/version source of truth.
 
 Invariants:
 
-* one `terraform` block in `providers.tf`
-* no split version policy across `versions.tf` and `providers.tf`
-* AWS provider is pinned to the 6.x line
-* TLS provider is present because EKS OIDC thumbprint support depends on it
-* default tags are platform-neutral, not AgentOps-specific
+- one `terraform` block in `providers.tf`
+- no split version policy across multiple files
+- AWS provider is pinned to the 6.x line
+- TLS provider is present for EKS OIDC thumbprint support
+- default tags are platform-neutral and not tied to a legacy MLOps naming scheme
 
 ---
 
@@ -47,20 +51,20 @@ The VPC design is fixed.
 
 Invariants:
 
-* private EKS cluster only
-* no public worker nodes
-* no VPC endpoints
-* multi-AZ design
-* one public subnet per AZ
-* one private subnet per AZ
-* one NAT gateway per AZ by default
-* `single_nat_gateway` exists only as a compatibility escape hatch, not the preferred production mode
+- private EKS cluster only
+- no public worker nodes
+- no VPC endpoints
+- multi-AZ design
+- one public subnet per AZ
+- one private subnet per AZ
+- one NAT gateway per AZ by default
+- `single_nat_gateway` exists only as a compatibility escape hatch
 
 Routing invariants:
 
-* public subnets route to the Internet Gateway
-* private subnets route to NAT
-* worker nodes live only in private subnets
+- public subnets route to the Internet Gateway
+- private subnets route to NAT
+- worker nodes live only in private subnets
 
 ---
 
@@ -70,11 +74,11 @@ The security module owns only the worker-node security group.
 
 Invariants:
 
-* one node security group only
-* ingress allowed within the VPC CIDR
-* egress allowed to `0.0.0.0/0` so NAT-based outbound works
-* no VPC endpoint SG
-* no control-plane SG rule inside the security module
+- one node security group only
+- ingress allowed within the VPC CIDR
+- egress allowed to `0.0.0.0/0` so NAT-based outbound works
+- no VPC endpoint security group
+- no control-plane security-group rule inside the security module
 
 The EKS module owns the control-plane ↔ node security-group rule.
 
@@ -86,52 +90,75 @@ The cluster is private-only.
 
 Invariants:
 
-* `endpoint_public_access = false`
-* `endpoint_private_access = true`
-* EKS control plane is encrypted with a KMS key
-* OIDC provider is created for IRSA
-* the control-plane security-group rule allowing nodes to reach the API server belongs in the EKS module
+- `endpoint_public_access = false`
+- `endpoint_private_access = true`
+- EKS control plane is encrypted with a KMS key
+- OIDC provider is created for IRSA
+- the control-plane security-group rule allowing nodes to reach the API server belongs in the EKS module
 
 Nodegroup invariants:
 
-* exactly two managed nodegroups
-* `system` nodegroup = long-running services
-* `workloads` nodegroup = batch / compute / jobs
-* no `inference` nodegroup anymore
-* labels and taints reflect the nodegroup split
+- exactly two managed nodegroups
+- `system` nodegroup = long-running stateful and control-plane-like services
+- `workloads` nodegroup = stateless services, jobs, and compute
+- no `inference` nodegroup
+- labels and taints reflect the nodegroup split
 
 Required labels:
 
-* `node-type = general`
-* `node-type = compute`
+- `node-type = general`
+- `node-type = compute`
 
 Required taints:
 
-* `node-type=general:NoSchedule`
-* `node-type=compute:NoSchedule`
+- `node-type=general:NoSchedule`
+- `node-type=compute:NoSchedule`
+
+Scheduling intent:
+
+- `general` = stable, always-on, stateful, control-plane-like
+- `compute` = interruptible, horizontally scalable, stateless
 
 ---
 
 ## 7) Workload placement invariants
 
-Terraform only establishes the platform-side scheduling contract. Actual workload manifests must honor it.
+Terraform only establishes the platform-side scheduling contract. Kubernetes manifests must honor it.
 
 Invariant mapping:
 
-* `general` nodes host control-plane-like and stateful services
-* `compute` nodes host task pods, workers, executors, and jobs
+- `general` nodes host stateful services, control-plane-like services, and platform operators
+- `compute` nodes host stateless inference services, batch jobs, and ephemeral workers
 
 Expected placement:
 
-* Flyte control plane → `general`
-* CNPG → `general`
-* MLflow → `general`
-* Iceberg REST catalog → `general`
-* Spark operators → `general`
-* Ray operators / control-plane components → `general`
-* Flyte tasks → `compute`
-* Spark executors and jobs → `compute`
-* Ray workers → `compute`
+### `system` / `general`
+- ArgoCD
+- Qdrant
+- Valkey
+- ClickHouse
+- Prometheus server
+- Alertmanager
+- Grafana
+- CoreDNS
+- metrics-server
+- any other stateful platform service
+
+### `workloads` / `compute`
+- frontend
+- retriever
+- dense model service
+- sparse model service
+- reranker
+- indexing jobs and CronJobs
+- cloudflared, if retained as a stateless edge component
+
+Placement rules:
+
+- stateful workloads must not run on Spot
+- stateless workloads may run on Spot
+- system services must have explicit scheduling constraints
+- compute services should not tolerate general-node taints unless required
 
 ---
 
@@ -141,23 +168,24 @@ S3 is a first-class module.
 
 Invariants:
 
-* exactly three managed buckets
-* bucket keys are stable:
+- exactly two managed buckets
+- bucket keys are stable:
 
-  * `S3_BUCKET`
-  * `PG_BACKUPS_S3_BUCKET`
-  * `MLFLOW_S3_BUCKET`
-* buckets are private
-* buckets are encrypted
-* buckets are versioned
-* public access is blocked
-* bucket ownership is enforced
+  - `DATA_S3_BUCKET`
+  - `QDRANT_BACKUPS_BUCKET`
+
+- buckets are private
+- buckets are encrypted
+- buckets are versioned
+- public access is blocked
+- bucket ownership is enforced
 
 Role mapping:
 
-* `S3_BUCKET` = general platform data
-* `PG_BACKUPS_S3_BUCKET` = Postgres backups
-* `MLFLOW_S3_BUCKET` = MLflow artifacts
+- `DATA_S3_BUCKET` = document data, uploads, derived artifacts used by the RAG pipeline
+- `QDRANT_BACKUPS_BUCKET` = Qdrant snapshot and backup storage
+
+No additional S3 buckets are allowed unless the contract is explicitly revised.
 
 ---
 
@@ -167,13 +195,13 @@ Role mapping:
 
 Invariants:
 
-* EKS control-plane role
-* EKS node role
-* Cluster Autoscaler policy
-* EBS CSI managed policy ARN output
-* no IRSA roles
-* no GitHub OIDC roles
-* no CI-specific permissions here
+- EKS control-plane role
+- EKS node role
+- Cluster Autoscaler policy
+- EBS CSI managed policy ARN output
+- no IRSA roles
+- no GitHub OIDC roles
+- no workload-specific AWS permissions
 
 ---
 
@@ -183,72 +211,89 @@ Invariants:
 
 Invariants:
 
-* IRSA roles are created only after EKS OIDC exists
-* each IRSA role is scoped to one namespace/service account
-* each IRSA role is scoped to one bucket key
-* access mode is only `read` or `read_write`
-* trust policy must use:
+- IRSA roles are created only after EKS OIDC exists
+- each IRSA role is scoped to one namespace/service account
+- each IRSA role is scoped to explicit S3 buckets and explicit AWS services
+- access mode is restricted to the minimum required for the workload
+- trust policy must use:
 
-  * EKS OIDC provider
-  * `sts:AssumeRoleWithWebIdentity`
-  * `aud = sts.amazonaws.com`
-  * exact service-account subject
+  - EKS OIDC provider
+  - `sts:AssumeRoleWithWebIdentity`
+  - `aud = sts.amazonaws.com`
+  - exact service-account subject
 
 Required IRSA roles:
 
-* CNPG → `PG_BACKUPS_S3_BUCKET`
-* Flyte task → `S3_BUCKET`
-* Iceberg REST → `S3_BUCKET`
-* Ray inference → `MLFLOW_S3_BUCKET` read-only
-* MLflow → `MLFLOW_S3_BUCKET` read/write
+- `indexer`:
+  - read/write `DATA_S3_BUCKET`
+  - read/write `QDRANT_BACKUPS_BUCKET`
+
+- `frontend`:
+  - read/write `DATA_S3_BUCKET` for presigned URL flows
+
+- `retriever`:
+  - Bedrock invocation permissions only
+  - no S3 access required
+
+Dense, sparse, and reranker model services:
+
+- no AWS permissions required
+- models load from Hugging Face and do not depend on AWS IAM
 
 ---
 
 ## 11) GitHub Actions OIDC invariants
 
-GitHub OIDC roles are also owned inside `iam_post_eks`, not a separate module.
+GitHub OIDC roles are owned inside `iam_post_eks`, not a separate module.
 
 Invariants:
 
-* one role per repository
-* repo-subject must be exact
-* branch is `main`
-* `token.actions.githubusercontent.com:aud = sts.amazonaws.com`
-* roles are repository-scoped, not wildcarded
+- one role per repository/workflow identity
+- repo-subject must be exact
+- branch is `main`
+- `token.actions.githubusercontent.com:aud = sts.amazonaws.com`
+- roles are repository-scoped, not wildcarded
 
 Required roles:
 
-* `gh-actions-flyte-elt-task`
-* `gh-actions-flyte-train-task`
-* `gh-actions-tabular-inference-service`
+- `gh-actions-frontend`
+- `gh-actions-retriever`
+- `gh-actions-dense-model`
+- `gh-actions-sparse-model`
+- `gh-actions-reranker`
+- `gh-actions-indexer`
 
-Important naming invariant:
+Important naming invariants:
 
-* repository strings must be lowercase and owner-qualified
-* correct format is `athithya-sakthivel/<repo-name>`
+- repository strings must be lowercase and owner-qualified
+- repo names must match the ECR repository names exactly
+- the source repository is the E2E RAG system repository, not legacy Flyte repositories
 
 ---
 
 ## 12) ECR invariants
 
-ECR is not optional in the final tree.
+ECR is required in the final tree.
 
 Invariants:
 
-* `modules/ecr/main.tf` stays present
-* repositories are defined from root tfvars
-* no hardcoded AgentOps repo names
-* repositories are lowercase and match the CI/image naming contract
-* each repository gets exactly one lifecycle policy
-* images are immutable by default
-* scan-on-push is enabled
-* AES256 encryption is enabled
+- `modules/ecr/main.tf` stays present
+- repositories are defined from root tfvars
+- no hardcoded legacy repository names
+- repositories are lowercase and match the CI/image naming contract
+- each repository gets exactly one lifecycle policy
+- images are immutable by default
+- scan-on-push is enabled
+- AES256 encryption is enabled
 
 Repository set:
 
-* `flyte-elt-task`
-* `flyte-train-task`
-* `tabular-inference-service`
+- `frontend`
+- `retriever`
+- `dense-model`
+- `sparse-model`
+- `reranker`
+- `indexer`
 
 ---
 
@@ -258,33 +303,33 @@ Repository set:
 
 Invariant keys:
 
-* `environment`
-* `region`
-* `cluster_name`
-* `vpc_cidr`
-* `az_count`
-* `private_subnet_cidrs`
-* `public_subnet_cidrs`
-* `enable_nat_per_az`
-* `single_nat_gateway`
-* `system_nodegroup`
-* `workloads_nodegroup`
-* `system_node_taints`
-* `workloads_node_taints`
-* `system_node_labels`
-* `workloads_node_labels`
-* `s3_buckets`
-* `irsa_roles`
-* `github_actions_roles`
-* `ecr_repositories`
-* `cluster_autoscaler`
-* `tags`
+- `environment`
+- `region`
+- `cluster_name`
+- `vpc_cidr`
+- `az_count`
+- `private_subnet_cidrs`
+- `public_subnet_cidrs`
+- `enable_nat_per_az`
+- `single_nat_gateway`
+- `system_nodegroup`
+- `workloads_nodegroup`
+- `system_node_taints`
+- `workloads_node_taints`
+- `system_node_labels`
+- `workloads_node_labels`
+- `s3_buckets`
+- `irsa_roles`
+- `github_actions_roles`
+- `ecr_repositories`
+- `cluster_autoscaler`
+- `tags`
 
 Environment invariants:
 
-* staging and prod have the same contract
-* only sizing differs between environments
-* repo naming does not differ by environment
+- staging and prod have the same contract
+- only sizing differs between environments
+- repo naming does not differ by environment
 
 ---
 
@@ -304,32 +349,32 @@ Required dependency order:
 
 The root must pass:
 
-* subnet and NAT settings to VPC
-* VPC ID and CIDR to security
-* cluster and node roles to EKS
-* buckets to S3
-* OIDC + bucket maps + IRSA roles + GitHub roles to `iam_post_eks`
-* ECR repository map to ECR
+- subnet and NAT settings to VPC
+- VPC ID and CIDR to security
+- cluster and node roles to EKS
+- buckets to S3
+- OIDC + bucket maps + IRSA roles + GitHub roles to `iam_post_eks`
+- ECR repository map to ECR
 
 ---
 
 ## 15) Documentation invariants
 
-`README.md` must describe the current platform, not the old one.
+`README.md` must describe the current RAG platform, not the old MLOps platform.
 
 It must reflect:
 
-* MLOps platform
-* private VPC
-* multi-AZ NAT
-* two nodegroups: `system` and `workloads`
-* three buckets
-* five IRSA roles
-* three GitHub Actions OIDC roles
-* optional ECR
-* no CloudWatch dependence
-* no VPC endpoints
-* no AgentOps framing
+- E2E RAG platform
+- private VPC
+- multi-AZ NAT
+- two nodegroups: `system` and `workloads`
+- two buckets
+- three IRSA roles
+- six GitHub Actions OIDC roles
+- ECR for all service images
+- no CloudWatch dependence unless explicitly added
+- no VPC endpoints
+- no legacy Flyte framing
 
 ---
 
@@ -339,11 +384,11 @@ It must reflect:
 
 Invariants:
 
-* create the S3 backend bucket
-* create the DynamoDB lock table
-* run `tofu init`
-* no application resources in bootstrap
-* neutral naming only
+- create the S3 backend bucket
+- create the DynamoDB lock table
+- run `tofu init`
+- no application resources in bootstrap
+- neutral naming only
 
 ---
 
@@ -351,12 +396,14 @@ Invariants:
 
 The repo is only considered fully synced when all of these are true:
 
-* no duplicate provider/version policy
-* root variables match root module inputs
-* root outputs match module outputs
-* tfvars values are lowercase and owner-qualified where required
-* `main.tf` passes `ecr_repositories`, `irsa_roles`, and `github_actions_roles`
-* `iam_post_eks` is the single home for IRSA and GitHub OIDC roles
-* ECR repo names match the CI naming contract exactly
+- no duplicate provider/version policy
+- root variables match root module inputs
+- root outputs match module outputs
+- tfvars values are lowercase and owner-qualified where required
+- `main.tf` passes `ecr_repositories`, `irsa_roles`, and `github_actions_roles`
+- `iam_post_eks` is the single home for IRSA and GitHub OIDC roles
+- ECR repo names match the CI naming contract exactly
+- stateful services are pinned to `system`
+- stateless services are allowed on `workloads`, including Spot capacity where appropriate
 
 That is the final invariant set for this repository.

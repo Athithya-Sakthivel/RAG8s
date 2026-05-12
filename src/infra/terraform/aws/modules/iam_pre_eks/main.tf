@@ -1,20 +1,18 @@
-// src/terraform/aws/modules/iam_pre_eks/main.tf
-// Pre-EKS IAM for the platform.
+// src/infra/terraform/aws/modules/iam_pre_eks/main.tf
+// Pre-EKS IAM for the RAG platform.
 //
 // Responsibilities:
 // - EKS control plane role
 // - EKS node role
 // - Cluster Autoscaler policy
-// - CI ECR push policy (legacy/backward compatibility)
 // - EBS CSI managed policy ARN output
 //
-// The worker node role includes AmazonEC2ContainerRegistryPullOnly so managed
-// nodes can bootstrap and pull images successfully.
+// CI/ECR permissions are now owned post-EKS in iam_post_eks.
 
 variable "name_prefix" {
   description = "Prefix used for IAM role and policy names."
   type        = string
-  default     = "mlops"
+  default     = "rag"
 }
 
 variable "tags" {
@@ -29,7 +27,7 @@ locals {
   common_tags = merge(
     {
       ManagedBy   = "opentofu"
-      Platform    = "mlops"
+      Platform    = "rag"
       Environment = local.env_tag
     },
     var.tags
@@ -129,31 +127,6 @@ resource "aws_iam_policy" "cluster_autoscaler" {
   tags = local.common_tags
 }
 
-resource "aws_iam_policy" "ci_ecr_push" {
-  name = "${var.name_prefix}-ci-ecr-push-policy"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "ecr:GetAuthorizationToken",
-          "ecr:BatchCheckLayerAvailability",
-          "ecr:InitiateLayerUpload",
-          "ecr:UploadLayerPart",
-          "ecr:CompleteLayerUpload",
-          "ecr:PutImage",
-          "ecr:BatchGetImage"
-        ]
-        Resource = ["*"]
-      }
-    ]
-  })
-
-  tags = local.common_tags
-}
-
 output "cluster_role_arn" {
   description = "ARN of the EKS control plane IAM role."
   value       = aws_iam_role.cluster.arn
@@ -167,11 +140,6 @@ output "node_role_arn" {
 output "cluster_autoscaler_policy_arn" {
   description = "ARN of the Cluster Autoscaler policy."
   value       = aws_iam_policy.cluster_autoscaler.arn
-}
-
-output "ci_ecr_push_policy_arn" {
-  description = "ARN of the CI ECR push policy."
-  value       = aws_iam_policy.ci_ecr_push.arn
 }
 
 output "ebs_csi_managed_policy_arn" {

@@ -166,6 +166,21 @@ EOF
 
   log "saved StorageClass manifest to ${out}"
   kubectl apply -f "${out}" >/dev/null
+  kubectl patch deployment coredns -n kube-system --type='merge' -p '{
+  "spec": {
+    "template": {
+      "spec": {
+        "tolerations": [
+          {
+            "operator": "Exists"
+          }
+        ]
+      }
+    }
+  }
+}'
+  kubectl rollout restart deployment coredns -n kube-system
+
 }
 
 # ------------------------------------------------------------------------------

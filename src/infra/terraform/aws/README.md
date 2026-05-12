@@ -1,6 +1,8 @@
-This repository defines AWS infrastructure using **OpenTofu (Terraform-compatible)**. It provisions a VPC, security boundaries, IAM, S3 storage, and a production-ready **EKS cluster** with strict workload isolation.
+# E2E RAG Platform Infrastructure
 
-Ingress is expected to be handled externally (Cloudflare). This layer only provisions the underlying platform.
+This repository defines AWS infrastructure using **OpenTofu (Terraform-compatible)**. It provisions the network, security boundaries, IAM, storage, and a production-ready **EKS cluster** for an end-to-end RAG system.
+
+Ingress is handled externally through the existing cloudflare setup. This layer provisions the underlying AWS platform only.
 
 ---
 
@@ -8,15 +10,15 @@ Ingress is expected to be handled externally (Cloudflare). This layer only provi
 
 Single AWS account environment with:
 
-* VPC with configurable CIDR
-* Multi-AZ private networking
-* NAT gateway(s) for outbound access
-* EKS cluster with two isolated nodegroups
-* IAM roles (pre- and post-cluster)
-* S3 buckets for platform storage
-* ECR repositories
-* Security groups for cluster nodes
-* Remote state (S3 + DynamoDB via `run.sh`)
+- VPC with configurable CIDR
+- Multi-AZ private networking
+- NAT gateways for outbound access
+- EKS cluster with two isolated nodegroups
+- IAM roles for cluster bootstrap and post-cluster access
+- 2 S3 buckets for platform data and Qdrant backups
+- 6 ECR repositories for service images
+- Security group for worker nodes
+- Remote state via S3 + DynamoDB through `run.sh`
 
 All resources are environment-scoped via `.tfvars`.
 
@@ -28,21 +30,19 @@ All resources are environment-scoped via `.tfvars`.
 
 The VPC module creates:
 
-* VPC with configurable CIDR
-* Public + private subnets across `az_count`
-* Internet Gateway
-* NAT configuration:
+- VPC with configurable CIDR
+- Public and private subnets across `az_count`
+- Internet Gateway
+- NAT configuration:
+  - one NAT per AZ by default
+  - single NAT only as a compatibility escape hatch
+- Route tables:
+  - public subnets route to the Internet Gateway
+  - private subnets route to NAT
 
-  * **one NAT per AZ** (default)
-  * or **single NAT** (cost mode)
-* Route tables:
+Worker nodes run only in private subnets.
 
-  * public → IGW
-  * private → NAT
-
-Worker nodes run **only in private subnets**.
-
-VPC endpoints were removed.
+VPC endpoints are not used.
 
 ---
 
@@ -50,86 +50,98 @@ VPC endpoints were removed.
 
 The EKS module provisions:
 
-* EKS control plane
-* OIDC provider (required for IRSA)
-* Managed nodegroups
-* Cluster security group
-* Secrets encryption (KMS)
+- EKS control plane
+- OIDC provider for IRSA
+- Managed nodegroups
+- Cluster security group
+- Secrets encryption with KMS
 
-### Nodegroups (strict contract)
+### Nodegroups
 
-Two nodegroups exist:
+The cluster has exactly two managed nodegroups.
 
-### 1. `system` (general)
+---
 
-Purpose: long-running services
+### 1. `system` nodegroup
 
-Runs:
+**Purpose:** stable, always-on platform services
 
-* Flyte control plane
-* Postgres (CNPG)
-* MLflow
-* Iceberg REST
-* Operators (Ray, Spark, etc.)
+**Runs:**
 
-Characteristics:
+- ArgoCD
+- Qdrant
+- Valkey
+- ClickHouse
+- Prometheus
+- Alertmanager
+- Grafana
+- CoreDNS
+- metrics-server
+- other stateful or control-plane-like services
 
-* On-demand instances
-* Stable capacity
-* No batch workloads
+**Characteristics:**
 
-Labels:
+- on-demand only
+- stable capacity
+- no batch workloads
+- no Spot capacity
 
-```
-node-type=general
-```
+**Labels:**
 
-Taint:
+```yaml
+node-type: general
+````
 
-```
+**Taint:**
+
+```yaml
 node-type=general:NoSchedule
 ```
 
 ---
 
-### 2. `workloads` (compute)
+### 2. `workloads` nodegroup
 
-Purpose: execution layer
+**Purpose:** stateless inference and execution layer
 
-Runs:
+**Runs:**
 
-* Flyte tasks (ELT, training)
-* Spark jobs
-* Ray workers
-* batch jobs
+* frontend
+* retriever
+* dense model service
+* sparse model service
+* reranker
+* indexing jobs and CronJobs
+* cloudflared, if retained as a stateless edge component
 
-Characteristics:
+**Characteristics:**
 
 * autoscaling enabled
-* spot allowed
-* no long-running services
+* Spot capacity allowed
+* no stateful services
+* interruptible by design
 
-Labels:
+**Labels:**
 
+```yaml
+node-type: compute
 ```
-node-type=compute
-```
 
-Taint:
+**Taint:**
 
-```
+```yaml
 node-type=compute:NoSchedule
 ```
 
 ---
 
-## Scheduling Model (enforced by workloads, not Terraform)
+## Scheduling Model
 
-* Services → must target `general`
-* Jobs/workers → must target `compute`
+Terraform defines the scheduling contract through labels and taints. Kubernetes manifests must honor it.
 
-Terraform only sets labels/taints.
-Kubernetes manifests enforce placement.
+* stateful services → `general`
+* stateless services and jobs → `compute`
+* Spot capacity is allowed only for stateless workloads
 
 ---
 
@@ -137,29 +149,28 @@ Kubernetes manifests enforce placement.
 
 The security module creates:
 
-* Node security group
-* Required ingress/egress for:
+* one worker-node security group
+* ingress for traffic within the VPC CIDR
+* egress to the internet through NAT
 
-  * control plane ↔ nodes
-  * node ↔ node
-  * outbound internet
+The security module does not own control-plane security-group rules. Those are managed by the EKS module.
 
-No permissive 0.0.0.0/0 ingress is allowed.
+No permissive public ingress is used.
 
 ---
 
 ## IAM Design
 
-Split into two phases:
+IAM is split into two phases.
 
 ---
 
 ### `iam_pre_eks`
 
-Created before cluster:
+Created before cluster provisioning:
 
 * EKS cluster role
-* Nodegroup role
+* EKS node role
 * Cluster Autoscaler policy
 * EBS CSI managed policy reference
 
@@ -169,105 +180,102 @@ These are required to create the cluster.
 
 ### `iam_post_eks`
 
-Created after cluster:
+Created after the EKS OIDC provider exists.
 
-Uses:
+This module creates:
 
-* OIDC provider from EKS
+#### IRSA roles
 
-Creates:
+These are mapped to Kubernetes service accounts and explicit AWS permissions.
 
-### IRSA roles for workloads
+Current IRSA roles:
 
-Each role is mapped to:
+* `indexer`
 
-* Kubernetes service account
-* specific S3 bucket access
+  * read/write `DATA_S3_BUCKET`
+  * read/write `QDRANT_BACKUPS_BUCKET`
 
-Roles include:
+* `frontend`
 
-* CNPG backup role → `PG_BACKUPS_S3_BUCKET`
-* Flyte task role → `S3_BUCKET`
-* MLflow role → `MLFLOW_S3_BUCKET`
-* Ray inference role → `MLFLOW_S3_BUCKET`
-* Iceberg role → `S3_BUCKET`
+  * read/write `DATA_S3_BUCKET`
 
-Each role has:
+* `retriever`
 
-* least-privilege S3 policy
-* OIDC trust bound to namespace + service account
+  * Bedrock invocation permissions only
+
+Dense, sparse, and reranker services do not require AWS access. They load model weights from Hugging Face.
+
+Each IRSA role uses least-privilege policies and exact namespace + service account trust.
 
 ---
 
-### GitHub Actions roles
+#### GitHub Actions OIDC roles
 
-Also created here:
+These are used by workflows that push images to ECR.
 
-* `flyte-elt-task`
-* `flyte-train-task`
-* `tabular-inference-service`
+Current roles:
 
-Used via OIDC (no static credentials).
+* `gh-actions-frontend`
+* `gh-actions-retriever`
+* `gh-actions-dense-model`
+* `gh-actions-sparse-model`
+* `gh-actions-reranker`
+* `gh-actions-indexer`
 
-Permissions:
-
-* ECR push/pull (if ECR used)
-* optional AWS access if required
+They use OIDC, not static credentials, and are scoped to the repository and branch.
 
 ---
 
 ## S3
 
-The S3 module creates exactly three buckets:
+The S3 module creates exactly two buckets:
 
-* `S3_BUCKET` → general platform data (Flyte, Iceberg)
-* `PG_BACKUPS_S3_BUCKET` → Postgres backups
-* `MLFLOW_S3_BUCKET` → MLflow artifacts
+* `DATA_S3_BUCKET` → platform data and uploads
+* `QDRANT_BACKUPS_BUCKET` → Qdrant backups and snapshots
 
-Each bucket:
+Each bucket is:
 
 * private
-* versioned
 * encrypted
-* no public access
+* versioned
+* protected from public access
 
-Names are provided via `.tfvars`.
+Bucket names are provided via `.tfvars`.
 
 ---
 
 ## ECR
 
-The ECR module creates repositories dynamically.
+The ECR module creates repositories dynamically from root input.
 
-Used only if AWS ECR is required alongside GHCR.
+Current repositories:
 
-Repositories:
+* `frontend`
+* `retriever`
+* `dense-model`
+* `sparse-model`
+* `reranker`
+* `indexer`
 
-* flyte-elt-task
-* flyte-train-task
-* tabular-inference-service
+Each repository uses:
 
-Each repo:
-
-* immutable tags (default)
-* scan on push
-* lifecycle policy (retain N images)
+* immutable tags
+* scan-on-push
+* AES256 encryption
+* lifecycle policy for retention
 
 ---
 
 # Repository structure
 
-```
-src/terraform/aws/
+```text
+src/infra/terraform/aws/
   main.tf
   outputs.tf
   variables.tf
   providers.tf
-  versions.tf
-
   prod.tfvars
   staging.tfvars
-
   run.sh
 
   modules/
@@ -286,12 +294,12 @@ src/terraform/aws/
 
 ## `vpc/`
 
-Creates all networking:
+Creates:
 
 * VPC
-* subnets
-* IGW
-* NAT
+* public and private subnets
+* Internet Gateway
+* NAT gateways
 * route tables
 
 ---
@@ -300,8 +308,9 @@ Creates all networking:
 
 Creates:
 
-* node security group
-* required rules for EKS communication
+* worker-node security group
+* intra-VPC ingress
+* outbound NAT egress
 
 ---
 
@@ -309,9 +318,10 @@ Creates:
 
 Creates:
 
-* cluster role
-* node role
-* autoscaler policy
+* EKS cluster role
+* EKS node role
+* Cluster Autoscaler policy
+* EBS CSI policy reference
 
 ---
 
@@ -320,9 +330,10 @@ Creates:
 Creates:
 
 * EKS cluster
-* nodegroups (`system`, `workloads`)
+* `system` and `workloads` nodegroups
 * OIDC provider
-* KMS encryption
+* KMS encryption for secrets
+* control-plane security-group rule for nodes
 
 ---
 
@@ -330,12 +341,13 @@ Creates:
 
 Creates:
 
-* 3 buckets (tfvars-driven)
+* two buckets from tfvars
 
 Exports:
 
-* name map
-* arn map
+* bucket name map
+* bucket ARN map
+* bucket ID map
 
 ---
 
@@ -343,13 +355,13 @@ Exports:
 
 Creates:
 
-* IRSA roles (S3-scoped)
-* GitHub OIDC roles
+* IRSA roles for Kubernetes service accounts
+* GitHub Actions OIDC roles for ECR access
 
 Depends on:
 
-* EKS OIDC
-* S3 buckets
+* EKS OIDC provider
+* S3 bucket maps
 
 ---
 
@@ -357,7 +369,7 @@ Depends on:
 
 Creates:
 
-* repositories (dynamic)
+* repositories from tfvars
 * lifecycle policies
 
 ---
@@ -366,32 +378,32 @@ Creates:
 
 Key outputs exposed:
 
-Networking:
+## Networking
 
 * `vpc_id`
 * `private_subnet_ids`
 * `public_subnet_ids`
 * `availability_zones`
 
-EKS:
+## EKS
 
 * `eks_cluster_name`
 * `eks_cluster_endpoint`
 * `eks_cluster_ca_data`
 * `eks_oidc_provider_arn`
 
-IAM:
+## IAM
 
 * `iam_cluster_role_arn`
 * `iam_node_role_arn`
 * `irsa_role_arns`
 
-S3:
+## S3
 
 * `s3_bucket_names`
 * `s3_bucket_arns`
 
-ECR:
+## ECR
 
 * `ecr_repository_urls`
 
@@ -401,21 +413,21 @@ ECR:
 
 ## 1. Bootstrap state
 
-```
-bash src/terraform/aws/run.sh --create --env staging
+```bash
+bash src/infra/terraform/aws/run.sh --create --env staging
 ```
 
 Creates:
 
-* S3 state bucket
+* S3 backend bucket
 * DynamoDB lock table
-* runs `tofu init`
+* Terraform/OpenTofu backend initialization
 
 ---
 
 ## 2. Validate
 
-```
+```bash
 tofu validate
 ```
 
@@ -423,38 +435,38 @@ tofu validate
 
 ## 3. Plan
 
-```
-tofu plan -var-file=src/terraform/aws/staging.tfvars
+```bash
+tofu plan -var-file=src/infra/terraform/aws/staging.tfvars
 ```
 
 ---
 
 ## 4. Apply
 
-```
-tofu apply -var-file=src/terraform/aws/staging.tfvars
+```bash
+tofu apply -var-file=src/infra/terraform/aws/staging.tfvars
 ```
 
 ---
 
 # Configuration
 
-Environment-specific config:
+Environment-specific config is stored in:
 
-```
-staging.tfvars
-prod.tfvars
-```
+* `prod.tfvars`
+* `staging.tfvars`
 
-Defines:
+These define:
 
 * region
 * cluster name
 * VPC CIDR
 * subnet CIDRs
-* nodegroup sizes/types
+* nodegroup sizing
 * S3 bucket names
 * IRSA role mappings
+* GitHub Actions role mappings
+* ECR repository mappings
 
 No secrets are stored here.
 
@@ -464,10 +476,10 @@ No secrets are stored here.
 
 Handled by `run.sh`:
 
-* S3 bucket (versioned, encrypted)
+* S3 backend state bucket
 * DynamoDB locking
 
-No local state is used.
+No local state is used for the platform resources.
 
 ---
 
@@ -476,13 +488,12 @@ No local state is used.
 These must not be violated:
 
 * only 2 nodegroups: `system`, `workloads`
-* node isolation via labels + taints
+* `system` is stable, on-demand, stateful
+* `workloads` is stateless and Spot-eligible
 * no workloads in public subnets
-* no static AWS credentials inside cluster
-* all AWS access via IRSA or OIDC
-* S3 access is least-privilege per service
-* modules communicate only via outputs
+* no static AWS credentials inside the cluster
+* AWS access is via IRSA or GitHub OIDC only
+* S3 access is least-privilege and bucket-scoped
+* modules communicate only through outputs
+* ECR names match the CI contract exactly
 
----
-
-This document reflects the current infrastructure exactly as defined in the repository.

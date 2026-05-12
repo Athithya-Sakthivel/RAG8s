@@ -1,5 +1,5 @@
-// src/terraform/aws/main.tf
-// Root composition for the MLOps platform.
+// src/infra/terraform/aws/main.tf
+// Root composition for the E2E RAG platform.
 // This file only wires module contracts together.
 
 terraform {
@@ -24,7 +24,7 @@ module "security" {
 
   vpc_id      = module.vpc.vpc_id
   vpc_cidr    = var.vpc_cidr
-  name_prefix = "mlops"
+  name_prefix = "rag"
   tags        = var.tags
 }
 
@@ -38,15 +38,8 @@ module "ecr" {
 module "iam_pre_eks" {
   source = "./modules/iam_pre_eks"
 
-  name_prefix = "mlops"
+  name_prefix = "rag"
   tags        = var.tags
-}
-
-module "s3" {
-  source = "./modules/s3"
-
-  buckets = var.s3_buckets
-  tags    = var.tags
 }
 
 module "eks" {
@@ -68,8 +61,7 @@ module "eks" {
   system_node_labels    = var.system_node_labels
   workloads_node_labels = var.workloads_node_labels
 
-  launch_template_id      = var.launch_template_id
-  launch_template_version = var.launch_template_version
+  enabled_cluster_log_types = []
 
   tags = var.tags
 
@@ -80,10 +72,17 @@ module "eks" {
   ]
 }
 
+module "s3" {
+  source = "./modules/s3"
+
+  buckets = var.s3_buckets
+  tags    = var.tags
+}
+
 module "iam_post_eks" {
   source = "./modules/iam_post_eks"
 
-  name_prefix = "mlops"
+  name_prefix = "rag"
   tags        = var.tags
 
   oidc_provider_arn    = module.eks.oidc_provider_arn
@@ -99,4 +98,105 @@ module "iam_post_eks" {
     module.eks,
     module.s3
   ]
+}
+
+
+resource "aws_eks_addon" "ebs_csi_driver" {
+  cluster_name             = module.eks.cluster_name
+  addon_name               = "aws-ebs-csi-driver"
+  service_account_role_arn = module.iam_post_eks.ebs_csi_driver_role_arn
+
+  depends_on = [
+    module.iam_post_eks
+  ]
+
+  tags = var.tags
+}
+
+
+###############################################################################
+# PRIVATE EKS ADMIN EC2 (SSM-ONLY)
+###############################################################################
+
+data "aws_ssm_parameter" "al2023_x86_64_ami" {
+  name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
+}
+
+resource "aws_security_group" "eks_admin" {
+  name        = "${var.cluster_name}-eks-admin-sg"
+  description = "Private SSM-only admin host for EKS access"
+  vpc_id      = module.vpc.vpc_id
+
+  egress {
+    description = "Allow outbound access for SSM, AWS API calls, and package installs"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(var.tags, {
+    Name    = "${var.cluster_name}-eks-admin-sg"
+    Purpose = "eks-admin"
+  })
+}
+
+resource "aws_iam_role" "eks_admin" {
+  name = "${var.cluster_name}-eks-admin-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = merge(var.tags, {
+    Name    = "${var.cluster_name}-eks-admin-role"
+    Purpose = "eks-admin"
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "eks_admin_ssm" {
+  role       = aws_iam_role.eks_admin.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_instance_profile" "eks_admin" {
+  name = "${var.cluster_name}-eks-admin-profile"
+  role = aws_iam_role.eks_admin.name
+}
+
+resource "aws_instance" "eks_admin" {
+  ami                         = data.aws_ssm_parameter.al2023_x86_64_ami.value
+  instance_type               = "t3.micro"
+  subnet_id                   = module.vpc.private_subnet_ids[0]
+  vpc_security_group_ids      = [aws_security_group.eks_admin.id]
+  iam_instance_profile        = aws_iam_instance_profile.eks_admin.name
+  associate_public_ip_address = false
+
+  root_block_device {
+    volume_type           = "gp3"
+    volume_size           = 8
+    encrypted             = true
+    delete_on_termination = true
+  }
+
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 2
+    instance_metadata_tags      = "disabled"
+  }
+
+  tags = merge(var.tags, {
+    Name    = "${var.cluster_name}-eks-admin"
+    Purpose = "eks-admin"
+  })
 }

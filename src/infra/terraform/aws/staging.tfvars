@@ -1,7 +1,7 @@
-# src/terraform/aws/staging.tfvars
+# src/infra/terraform/aws/staging.tfvars
 environment  = "staging"
 region       = "ap-south-1"
-cluster_name = "mlsecops-eks-staging"
+cluster_name = "rag-eks-staging"
 
 vpc_cidr = "10.1.0.0/16"
 
@@ -59,101 +59,142 @@ workloads_node_labels = {
 }
 
 s3_buckets = {
-  S3_BUCKET = {
-    name          = "mlops-staging-data-681802563986"
+  DATA_S3_BUCKET = {
+    name          = "rag-staging-data-681802563986"
     versioning    = true
     force_destroy = false
   }
 
-  PG_BACKUPS_S3_BUCKET = {
-    name          = "mlops-staging-pg-backups-681802563986"
-    versioning    = true
-    force_destroy = false
-  }
-
-  MLFLOW_S3_BUCKET = {
-    name          = "mlops-staging-mlflow-681802563986"
+  QDRANT_BACKUPS_BUCKET = {
+    name          = "rag-staging-qdrant-backups-681802563986"
     versioning    = true
     force_destroy = false
   }
 }
 
 irsa_roles = {
-  cnpg = {
-    namespace       = "database"
-    service_account = "cnpg-sa"
-    bucket_key      = "PG_BACKUPS_S3_BUCKET"
-    access          = "read_write"
+  indexer = {
+    namespace       = "indexing"
+    service_account = "indexer"
+    buckets = [
+      {
+        key    = "DATA_S3_BUCKET"
+        access = "read_write"
+      },
+      {
+        key    = "QDRANT_BACKUPS_BUCKET"
+        access = "read_write"
+      }
+    ]
   }
 
-  flyte_task = {
-    namespace       = "flyte"
-    service_account = "flyte-task"
-    bucket_key      = "S3_BUCKET"
-    access          = "read_write"
-  }
-
-  iceberg = {
-    namespace       = "iceberg"
-    service_account = "iceberg-rest"
-    bucket_key      = "S3_BUCKET"
-    access          = "read_write"
-  }
-
-  ray_inference = {
+  frontend = {
     namespace       = "inference"
-    service_account = "ray-inference-sa"
-    bucket_key      = "MLFLOW_S3_BUCKET"
-    access          = "read"
+    service_account = "frontend"
+    buckets = [
+      {
+        key    = "DATA_S3_BUCKET"
+        access = "read_write"
+      }
+    ]
   }
 
-  mlflow = {
-    namespace       = "mlflow"
-    service_account = "mlflow-sa"
-    bucket_key      = "MLFLOW_S3_BUCKET"
-    access          = "read_write"
+  retriever = {
+    namespace       = "inference"
+    service_account = "retriever"
+    aws_services = {
+      bedrock = true
+    }
   }
 }
 
 github_actions_roles = {
-  flyte_elt_task = {
-    repository = "athithya-sakthivel/flyte-elt-task"
+  frontend = {
+    repository = "athithya-sakthivel/E2E-RAG-System"
     branch     = "main"
-    role_name  = "gh-actions-flyte-elt-task"
+    role_name  = "gh-actions-frontend"
+    ecr_repo   = "frontend"
   }
 
-  flyte_train_task = {
-    repository = "athithya-sakthivel/flyte-train-task"
+  retriever = {
+    repository = "athithya-sakthivel/E2E-RAG-System"
     branch     = "main"
-    role_name  = "gh-actions-flyte-train-task"
+    role_name  = "gh-actions-retriever"
+    ecr_repo   = "retriever"
   }
 
-  tabular_inference_service = {
-    repository = "athithya-sakthivel/mlsecops-tabular"
+  dense_model = {
+    repository = "athithya-sakthivel/E2E-RAG-System"
     branch     = "main"
-    role_name  = "gh-actions-tabular-inference-service"
+    role_name  = "gh-actions-dense-model"
+    ecr_repo   = "dense-model"
+  }
+
+  sparse_model = {
+    repository = "athithya-sakthivel/E2E-RAG-System"
+    branch     = "main"
+    role_name  = "gh-actions-sparse-model"
+    ecr_repo   = "sparse-model"
+  }
+
+  reranker = {
+    repository = "athithya-sakthivel/E2E-RAG-System"
+    branch     = "main"
+    role_name  = "gh-actions-reranker"
+    ecr_repo   = "reranker"
+  }
+
+  indexer = {
+    repository = "athithya-sakthivel/E2E-RAG-System"
+    branch     = "main"
+    role_name  = "gh-actions-indexer"
+    ecr_repo   = "indexer"
   }
 }
 
 ecr_repositories = {
-  flyte_elt_task = {
-    name                 = "flyte-elt-task"
+  frontend = {
+    name                 = "frontend"
     image_tag_mutability = "IMMUTABLE"
     scan_on_push         = true
     encryption_type      = "AES256"
     retain_last_images   = 30
   }
 
-  flyte_train_task = {
-    name                 = "flyte-train-task"
+  retriever = {
+    name                 = "retriever"
     image_tag_mutability = "IMMUTABLE"
     scan_on_push         = true
     encryption_type      = "AES256"
     retain_last_images   = 30
   }
 
-  tabular_inference_service = {
-    name                 = "tabular-inference-service"
+  dense_model = {
+    name                 = "dense-model"
+    image_tag_mutability = "IMMUTABLE"
+    scan_on_push         = true
+    encryption_type      = "AES256"
+    retain_last_images   = 30
+  }
+
+  sparse_model = {
+    name                 = "sparse-model"
+    image_tag_mutability = "IMMUTABLE"
+    scan_on_push         = true
+    encryption_type      = "AES256"
+    retain_last_images   = 30
+  }
+
+  reranker = {
+    name                 = "reranker"
+    image_tag_mutability = "IMMUTABLE"
+    scan_on_push         = true
+    encryption_type      = "AES256"
+    retain_last_images   = 30
+  }
+
+  indexer = {
+    name                 = "indexer"
     image_tag_mutability = "IMMUTABLE"
     scan_on_push         = true
     encryption_type      = "AES256"
@@ -170,6 +211,6 @@ cluster_autoscaler = {
 }
 
 tags = {
-  Platform    = "mlsecops"
+  Platform    = "rag"
   Environment = "staging"
 }

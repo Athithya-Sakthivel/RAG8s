@@ -1,12 +1,12 @@
-// src/terraform/aws/modules/iam_post_eks/main.tf
-// Post-EKS IAM identities:
-// - IRSA roles for Kubernetes service accounts (S3 access)
-// - GitHub Actions OIDC roles (ECR push/pull access)
+// src/infra/terraform/aws/modules/iam_post_eks/main.tf
+// Post-EKS IAM identities for the RAG platform:
+// - IRSA roles for Kubernetes service accounts
+// - GitHub Actions OIDC roles for ECR push/pull
 
 variable "name_prefix" {
   description = "Prefix used for IAM role and policy names."
   type        = string
-  default     = "mlops"
+  default     = "rag"
 }
 
 variable "tags" {
@@ -40,20 +40,32 @@ variable "irsa_roles" {
   type = map(object({
     namespace       = string
     service_account = string
-    bucket_key      = string
-    access          = string
+    buckets = optional(list(object({
+      key    = string
+      access = string # read | read_write
+    })), [])
+    aws_services = optional(object({
+      bedrock = optional(bool, false)
+    }), null)
   }))
 
   validation {
     condition = alltrue([
       for _, role in var.irsa_roles :
-      contains(keys(var.s3_bucket_name_map), role.bucket_key) &&
-      contains(keys(var.s3_bucket_arn_map), role.bucket_key) &&
-      contains(["read", "read_write"], role.access) &&
       length(trimspace(role.namespace)) > 0 &&
-      length(trimspace(role.service_account)) > 0
+      length(trimspace(role.service_account)) > 0 &&
+      (
+        length(try(role.buckets, [])) > 0 ||
+        try(role.aws_services.bedrock, false) == true
+      ) &&
+      alltrue([
+        for bucket in try(role.buckets, []) :
+        contains(keys(var.s3_bucket_name_map), bucket.key) &&
+        contains(keys(var.s3_bucket_arn_map), bucket.key) &&
+        contains(["read", "read_write"], bucket.access)
+      ])
     ])
-    error_message = "Each irsa_roles item must reference a valid bucket_key, valid access mode, namespace, and service_account."
+    error_message = "Each irsa_roles item must define namespace/service_account and either S3 buckets or aws_services.bedrock, with valid bucket keys and access modes."
   }
 }
 
@@ -63,24 +75,18 @@ variable "github_actions_roles" {
     repository = string
     branch     = string
     role_name  = string
+    ecr_repo   = string
   }))
 
   validation {
     condition = alltrue([
-      for role_key, role in var.github_actions_roles :
-      contains(
-        [
-          "flyte_elt_task",
-          "flyte_train_task",
-          "tabular_inference_service"
-        ],
-        role_key
-      ) &&
-      can(regex("^[a-z0-9._-]+/[a-z0-9._-]+$", role.repository)) &&
-      length(trimspace(role.branch)) > 0 &&
-      length(trimspace(role.role_name)) > 0
+      for _, role in var.github_actions_roles :
+      can(regex("^[a-z0-9._-]+/[A-Za-z0-9._-]+$", role.repository)) &&
+      role.branch == "main" &&
+      can(regex("^gh-actions-[a-z0-9-]+$", role.role_name)) &&
+      can(regex("^[a-z0-9]+(-[a-z0-9]+)*$", role.ecr_repo))
     ])
-    error_message = "GitHub Actions roles must use approved keys and repository format owner/repo in lowercase."
+    error_message = "GitHub Actions roles must use repo owner/repo format, branch main, a gh-actions-* role name, and a lowercase hyphenated ecr_repo."
   }
 }
 
@@ -94,7 +100,7 @@ locals {
   common_tags = merge(
     {
       ManagedBy   = "opentofu"
-      Platform    = "mlops"
+      Platform    = "rag"
       Environment = local.env_tag
     },
     var.tags
@@ -121,20 +127,41 @@ locals {
   }
 
   github_ecr_repository_names = {
-    flyte_elt_task            = "flyte-elt-task"
-    flyte_train_task          = "flyte-train-task"
-    tabular_inference_service = "tabular-inference-service"
+    for k, v in var.github_actions_roles :
+    k => v.ecr_repo
   }
 
-  list_bucket_actions = ["s3:ListBucket"]
+  list_bucket_actions       = ["s3:ListBucket"]
+  read_object_actions       = ["s3:GetObject"]
+  read_write_object_actions = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
 
-  read_object_actions = ["s3:GetObject"]
+  irsa_s3_roles = {
+    for k, role in var.irsa_roles :
+    k => role if length(try(role.buckets, [])) > 0
+  }
 
-  read_write_object_actions = [
-    "s3:GetObject",
-    "s3:PutObject",
-    "s3:DeleteObject"
-  ]
+  irsa_bedrock_roles = {
+    for k, role in var.irsa_roles :
+    k => role if try(role.aws_services.bedrock, false)
+  }
+
+  irsa_s3_statements = {
+    for role_key, role in local.irsa_s3_roles :
+    role_key => flatten([
+      for bucket in role.buckets : [
+        {
+          actions   = local.list_bucket_actions
+          resources = [var.s3_bucket_arn_map[bucket.key]]
+        },
+        {
+          actions = bucket.access == "read" ? local.read_object_actions : local.read_write_object_actions
+          resources = [
+            "${var.s3_bucket_arn_map[bucket.key]}/*"
+          ]
+        }
+      ]
+    ])
+  }
 }
 
 ###############################################################################
@@ -145,7 +172,6 @@ data "aws_iam_policy_document" "irsa_assume_role" {
   for_each = var.irsa_roles
 
   statement {
-    sid     = "AllowAssumeRoleWithWebIdentity"
     effect  = "Allow"
     actions = ["sts:AssumeRoleWithWebIdentity"]
 
@@ -175,24 +201,34 @@ data "aws_iam_policy_document" "irsa_assume_role" {
 ###############################################################################
 
 data "aws_iam_policy_document" "irsa_s3_access" {
-  for_each = var.irsa_roles
+  for_each = local.irsa_s3_roles
 
-  statement {
-    sid       = "AllowBucketListing"
-    effect    = "Allow"
-    actions   = local.list_bucket_actions
-    resources = [var.s3_bucket_arn_map[each.value.bucket_key]]
+  dynamic "statement" {
+    for_each = local.irsa_s3_statements[each.key]
+    content {
+      effect    = "Allow"
+      actions   = statement.value.actions
+      resources = statement.value.resources
+    }
   }
+}
+
+###############################################################################
+# IRSA Bedrock access policies
+###############################################################################
+
+data "aws_iam_policy_document" "irsa_bedrock_access" {
+  for_each = local.irsa_bedrock_roles
 
   statement {
-    sid    = "AllowObjectAccess"
     effect = "Allow"
 
-    actions = each.value.access == "read" ? local.read_object_actions : local.read_write_object_actions
-
-    resources = [
-      "${var.s3_bucket_arn_map[each.value.bucket_key]}/*"
+    actions = [
+      "bedrock:InvokeModel",
+      "bedrock:InvokeModelWithResponseStream"
     ]
+
+    resources = ["*"]
   }
 }
 
@@ -204,8 +240,8 @@ resource "aws_iam_role" "irsa" {
   tags               = local.common_tags
 }
 
-resource "aws_iam_policy" "irsa" {
-  for_each = var.irsa_roles
+resource "aws_iam_policy" "irsa_s3" {
+  for_each = local.irsa_s3_roles
 
   name        = local.irsa_policy_names[each.key]
   description = "IRSA S3 policy for ${each.key}"
@@ -213,11 +249,27 @@ resource "aws_iam_policy" "irsa" {
   tags        = local.common_tags
 }
 
-resource "aws_iam_role_policy_attachment" "irsa" {
-  for_each = var.irsa_roles
+resource "aws_iam_role_policy_attachment" "irsa_s3" {
+  for_each = local.irsa_s3_roles
 
   role       = aws_iam_role.irsa[each.key].name
-  policy_arn = aws_iam_policy.irsa[each.key].arn
+  policy_arn = aws_iam_policy.irsa_s3[each.key].arn
+}
+
+resource "aws_iam_policy" "irsa_bedrock" {
+  for_each = local.irsa_bedrock_roles
+
+  name        = "${var.name_prefix}-${each.key}-bedrock-policy"
+  description = "IRSA Bedrock policy for ${each.key}"
+  policy      = data.aws_iam_policy_document.irsa_bedrock_access[each.key].json
+  tags        = local.common_tags
+}
+
+resource "aws_iam_role_policy_attachment" "irsa_bedrock" {
+  for_each = local.irsa_bedrock_roles
+
+  role       = aws_iam_role.irsa[each.key].name
+  policy_arn = aws_iam_policy.irsa_bedrock[each.key].arn
 }
 
 ###############################################################################
@@ -228,7 +280,6 @@ data "aws_iam_policy_document" "github_assume_role" {
   for_each = var.github_actions_roles
 
   statement {
-    sid     = "AllowGitHubActionsOIDC"
     effect  = "Allow"
     actions = ["sts:AssumeRoleWithWebIdentity"]
 
@@ -263,14 +314,12 @@ data "aws_iam_policy_document" "github_ecr_push" {
   for_each = var.github_actions_roles
 
   statement {
-    sid       = "AllowECRAuth"
     effect    = "Allow"
     actions   = ["ecr:GetAuthorizationToken"]
     resources = ["*"]
   }
 
   statement {
-    sid    = "AllowECRPushPull"
     effect = "Allow"
 
     actions = [
@@ -334,10 +383,10 @@ output "irsa_role_names" {
 
 output "irsa_policy_arns" {
   description = "IRSA policy ARNs."
-  value = {
-    for k, v in aws_iam_policy.irsa :
-    k => v.arn
-  }
+  value = merge(
+    { for k, v in aws_iam_policy.irsa_s3 : k => v.arn },
+    { for k, v in aws_iam_policy.irsa_bedrock : k => v.arn }
+  )
 }
 
 output "github_actions_role_arns" {
@@ -362,4 +411,51 @@ output "github_actions_policy_arns" {
     for k, v in aws_iam_policy.github_actions :
     k => v.arn
   }
+}
+
+
+locals {
+  ebs_csi_role_name = "${var.name_prefix}-ebs-csi-driver-role"
+}
+
+data "aws_iam_policy_document" "ebs_csi_assume_role" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [var.oidc_provider_arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "${var.oidc_provider_issuer}:sub"
+      values = [
+        "system:serviceaccount:kube-system:ebs-csi-controller-sa"
+      ]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "${var.oidc_provider_issuer}:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "ebs_csi_driver" {
+  name               = local.ebs_csi_role_name
+  assume_role_policy = data.aws_iam_policy_document.ebs_csi_assume_role.json
+  tags               = local.common_tags
+}
+
+resource "aws_iam_role_policy_attachment" "ebs_csi_driver" {
+  role       = aws_iam_role.ebs_csi_driver.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+}
+
+output "ebs_csi_driver_role_arn" {
+  description = "IAM role ARN for the EBS CSI driver add-on."
+  value       = aws_iam_role.ebs_csi_driver.arn
 }

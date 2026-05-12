@@ -1,5 +1,5 @@
-// src/terraform/aws/modules/s3/main.tf
-// Managed S3 buckets for the MLOps platform.
+// src/infra/terraform/aws/modules/s3/main.tf
+// Managed S3 buckets for the E2E RAG platform.
 //
 // Responsibilities:
 // - create named buckets from a root-provided map
@@ -42,7 +42,8 @@ locals {
 
   common_tags = merge(
     {
-      ManagedBy   = "mlops-platform-terraform"
+      ManagedBy   = "opentofu"
+      Platform    = "rag"
       Environment = local.env_tag
     },
     var.tags

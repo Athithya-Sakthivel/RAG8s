@@ -1,4 +1,4 @@
-// src/terraform/aws/outputs.tf
+// src/infra/terraform/aws/outputs.tf
 // Stable outputs for automation, kubeconfig generation, and downstream consumers.
 
 output "vpc_id" {
@@ -178,4 +178,41 @@ output "ecr_repository_arns" {
 output "ecr_repository_names" {
   description = "Logical repository key -> ECR repository name."
   value       = module.ecr.repository_name_map
+}
+
+
+
+output "eks_admin_instance_id" {
+  description = "EC2 instance ID for the private EKS admin host."
+  value       = aws_instance.eks_admin.id
+}
+
+output "eks_admin_private_ip" {
+  description = "Private IP of the EKS admin host."
+  value       = aws_instance.eks_admin.private_ip
+}
+
+output "eks_admin_availability_zone" {
+  description = "Availability zone of the EKS admin host."
+  value       = aws_instance.eks_admin.availability_zone
+}
+
+output "eks_admin_security_group_id" {
+  description = "Security group ID attached to the EKS admin host."
+  value       = aws_security_group.eks_admin.id
+}
+
+output "eks_admin_ssm_command" {
+  description = "Command to start an SSM shell session on the admin host."
+  value       = "aws ssm start-session --region ${var.region} --target ${aws_instance.eks_admin.id}"
+}
+
+output "eks_admin_kubeconfig_command" {
+  description = "Command to write kubeconfig from the admin host context."
+  value       = "aws eks update-kubeconfig --region ${var.region} --name ${var.cluster_name}"
+}
+
+output "eks_admin_kubectl_check_command" {
+  description = "Command to verify cluster access from the admin host."
+  value       = "kubectl get nodes -o wide && kubectl get pods -A -o wide"
 }

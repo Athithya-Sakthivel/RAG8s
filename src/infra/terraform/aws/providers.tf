@@ -21,7 +21,7 @@ provider "aws" {
     tags = merge(
       {
         ManagedBy   = "opentofu"
-        Platform    = "mlops"
+        Platform    = "rag"
         Environment = var.environment
       },
       var.tags

@@ -1,5 +1,5 @@
-// src/terraform/aws/modules/security/main.tf
-// Security module for the MLOps platform.
+// src/infra/terraform/aws/modules/security/main.tf
+// Security module for the E2E RAG platform.
 //
 // Responsibilities:
 // - create the worker-node security group
@@ -22,7 +22,7 @@ variable "vpc_cidr" {
 variable "name_prefix" {
   description = "Prefix used for security group names."
   type        = string
-  default     = "mlops"
+  default     = "rag"
 }
 
 variable "tags" {
@@ -38,7 +38,8 @@ locals {
     {
       Name        = "${var.name_prefix}-nodes-sg"
       Environment = local.env_tag
-      ManagedBy   = "mlops-platform-terraform"
+      ManagedBy   = "opentofu"
+      Platform    = "rag"
     },
     var.tags
   )
@@ -47,7 +48,7 @@ locals {
 # trivy:ignore:AWS-0104
 resource "aws_security_group" "node" {
   name        = "${var.name_prefix}-nodes-sg"
-  description = "Worker node security group for the MLOps platform."
+  description = "Worker node security group for the RAG platform."
   vpc_id      = var.vpc_id
 
   ingress {

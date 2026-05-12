@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# src/terraform/aws/run.sh
+# src/infra/terraform/aws/run.sh
 # Production-ready, idempotent wrapper to manage OpenTofu (tofu) lifecycle:
 #  - --plan      : init backend, fmt/validate (auto-fix), produce a plan file (dry-run)
 #  - --create    : init backend, fmt/validate (auto-fix), plan, then apply -auto-approve (fully automated)
@@ -8,10 +8,10 @@
 #  - --find-version / --rollback-state <versionId> : state management helpers. VersionID is created only if a create is successful e2e. 
 #
 # Usage:
-#   bash src/terraform/aws/run.sh --plan  --env staging
-#   bash src/terraform/aws/run.sh --create --env staging
-#   bash src/terraform/aws/run.sh --destroy --env staging --yes-delete
-#   bash src/terraform/aws/run.sh --env staging --find-version
+#   bash src/infra/terraform/aws/run.sh --plan  --env staging
+#   bash src/infra/terraform/aws/run.sh --create --env staging
+#   bash src/infra/terraform/aws/run.sh --destroy --env staging --yes-delete
+#   bash src/infra/terraform/aws/run.sh --env staging --find-version
 # 
 # Notes / invariants:
 #  - AWS_ACCESS_KEY_ID,AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION is used (fallback ap-south-1).
@@ -23,10 +23,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 IFS=$'\n\t'
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
-STACK_DIR="${ROOT_DIR}/src/terraform/aws"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+STACK_DIR="$SCRIPT_DIR"
+ROOT_DIR="$(cd -- "${SCRIPT_DIR}/../../../../" && pwd -P)"
 AWS_REGION="${AWS_DEFAULT_REGION:-ap-south-1}"
 
 usage() {

@@ -1,5 +1,5 @@
-// src/terraform/aws/variables.tf
-// Root-level contract for the MLOps platform.
+// src/infra/terraform/aws/variables.tf
+// Root-level contract for the E2E RAG platform.
 // Finalized for OpenTofu/Terraform 1.x compatibility.
 
 variable "region" {
@@ -22,7 +22,7 @@ variable "environment" {
 variable "cluster_name" {
   description = "EKS cluster name."
   type        = string
-  default     = "mlops-eks-prod"
+  default     = "rag-eks-prod"
 
   validation {
     condition     = length(trimspace(var.cluster_name)) > 0
@@ -247,20 +247,14 @@ variable "s3_buckets" {
   }))
 
   default = {
-    S3_BUCKET = {
-      name          = "mlops-prod-data"
+    DATA_S3_BUCKET = {
+      name          = "rag-prod-data"
       versioning    = true
       force_destroy = false
     }
 
-    PG_BACKUPS_S3_BUCKET = {
-      name          = "mlops-prod-pg-backups"
-      versioning    = true
-      force_destroy = false
-    }
-
-    MLFLOW_S3_BUCKET = {
-      name          = "mlops-prod-mlflow"
+    QDRANT_BACKUPS_BUCKET = {
+      name          = "rag-prod-qdrant-backups"
       versioning    = true
       force_destroy = false
     }
@@ -276,44 +270,48 @@ variable "irsa_roles" {
   type = map(object({
     namespace       = string
     service_account = string
-    bucket_key      = string
-    access          = string
+    buckets = optional(list(object({
+      key    = string
+      access = string # read | read_write
+    })), [])
+    aws_services = optional(object({
+      bedrock = optional(bool, false)
+    }), null)
   }))
 
   default = {
-    cnpg = {
-      namespace       = "database"
-      service_account = "cnpg-sa"
-      bucket_key      = "PG_BACKUPS_S3_BUCKET"
-      access          = "read_write"
+    indexer = {
+      namespace       = "indexing"
+      service_account = "indexer"
+      buckets = [
+        {
+          key    = "DATA_S3_BUCKET"
+          access = "read_write"
+        },
+        {
+          key    = "QDRANT_BACKUPS_BUCKET"
+          access = "read_write"
+        }
+      ]
     }
 
-    flyte_task = {
-      namespace       = "flyte"
-      service_account = "flyte-task"
-      bucket_key      = "S3_BUCKET"
-      access          = "read_write"
-    }
-
-    iceberg = {
-      namespace       = "iceberg"
-      service_account = "iceberg-rest"
-      bucket_key      = "S3_BUCKET"
-      access          = "read_write"
-    }
-
-    ray_inference = {
+    frontend = {
       namespace       = "inference"
-      service_account = "ray-inference-sa"
-      bucket_key      = "MLFLOW_S3_BUCKET"
-      access          = "read"
+      service_account = "frontend"
+      buckets = [
+        {
+          key    = "DATA_S3_BUCKET"
+          access = "read_write"
+        }
+      ]
     }
 
-    mlflow = {
-      namespace       = "mlflow"
-      service_account = "mlflow-sa"
-      bucket_key      = "MLFLOW_S3_BUCKET"
-      access          = "read_write"
+    retriever = {
+      namespace       = "inference"
+      service_account = "retriever"
+      aws_services = {
+        bedrock = true
+      }
     }
   }
 
@@ -322,10 +320,12 @@ variable "irsa_roles" {
       for _, v in var.irsa_roles :
       length(trimspace(v.namespace)) > 0 &&
       length(trimspace(v.service_account)) > 0 &&
-      length(trimspace(v.bucket_key)) > 0 &&
-      contains(["read", "read_write"], v.access)
+      (
+        try(v.aws_services.bedrock, false) == true ||
+        length(try(v.buckets, [])) >= 1
+      )
     ])
-    error_message = "Each irsa_roles item must define namespace, service_account, bucket_key and access."
+    error_message = "Each irsa_roles item must define namespace and service_account, and must define either buckets or aws_services."
   }
 }
 
@@ -339,25 +339,50 @@ variable "github_actions_roles" {
     repository = string
     branch     = string
     role_name  = string
+    ecr_repo   = string
   }))
 
   default = {
-    flyte_elt_task = {
-      repository = "athithya-sakthivel/flyte-elt-task"
+    frontend = {
+      repository = "athithya-sakthivel/E2E-RAG-System"
       branch     = "main"
-      role_name  = "gh-actions-flyte-elt-task"
+      role_name  = "gh-actions-frontend"
+      ecr_repo   = "frontend"
     }
 
-    flyte_train_task = {
-      repository = "athithya-sakthivel/flyte-train-task"
+    retriever = {
+      repository = "athithya-sakthivel/E2E-RAG-System"
       branch     = "main"
-      role_name  = "gh-actions-flyte-train-task"
+      role_name  = "gh-actions-retriever"
+      ecr_repo   = "retriever"
     }
 
-    tabular_inference_service = {
-      repository = "athithya-sakthivel/mlsecops-tabular"
+    dense_model = {
+      repository = "athithya-sakthivel/E2E-RAG-System"
       branch     = "main"
-      role_name  = "gh-actions-tabular-inference-service"
+      role_name  = "gh-actions-dense-model"
+      ecr_repo   = "dense-model"
+    }
+
+    sparse_model = {
+      repository = "athithya-sakthivel/E2E-RAG-System"
+      branch     = "main"
+      role_name  = "gh-actions-sparse-model"
+      ecr_repo   = "sparse-model"
+    }
+
+    reranker = {
+      repository = "athithya-sakthivel/E2E-RAG-System"
+      branch     = "main"
+      role_name  = "gh-actions-reranker"
+      ecr_repo   = "reranker"
+    }
+
+    indexer = {
+      repository = "athithya-sakthivel/E2E-RAG-System"
+      branch     = "main"
+      role_name  = "gh-actions-indexer"
+      ecr_repo   = "indexer"
     }
   }
 
@@ -367,9 +392,12 @@ variable "github_actions_roles" {
       length(trimspace(v.repository)) > 0 &&
       length(trimspace(v.branch)) > 0 &&
       length(trimspace(v.role_name)) > 0 &&
-      can(regex("^[a-z0-9._-]+/[a-z0-9._-]+$", v.repository))
+      length(trimspace(v.ecr_repo)) > 0 &&
+      can(regex("^[a-z0-9._-]+/[A-Za-z0-9._-]+$", v.repository)) &&
+      can(regex("^gh-actions-[a-z0-9-]+$", v.role_name)) &&
+      can(regex("^[a-z0-9]+(-[a-z0-9]+)*$", v.ecr_repo))
     ])
-    error_message = "github_actions_roles entries must define lowercase repository as owner/repo, branch, and role_name."
+    error_message = "github_actions_roles entries must define a valid owner/repo, branch, role_name, and ecr_repo."
   }
 }
 
@@ -388,16 +416,28 @@ variable "ecr_repositories" {
   }))
 
   default = {
-    flyte_elt_task = {
-      name = "flyte-elt-task"
+    frontend = {
+      name = "frontend"
     }
 
-    flyte_train_task = {
-      name = "flyte-train-task"
+    retriever = {
+      name = "retriever"
     }
 
-    tabular_inference_service = {
-      name = "tabular-inference-service"
+    dense_model = {
+      name = "dense-model"
+    }
+
+    sparse_model = {
+      name = "sparse-model"
+    }
+
+    reranker = {
+      name = "reranker"
+    }
+
+    indexer = {
+      name = "indexer"
     }
   }
 
@@ -407,9 +447,10 @@ variable "ecr_repositories" {
       length(trimspace(v.name)) > 0 &&
       v.retain_last_images > 0 &&
       contains(["IMMUTABLE"], upper(v.image_tag_mutability)) &&
-      contains(["AES256"], upper(v.encryption_type))
+      contains(["AES256"], upper(v.encryption_type)) &&
+      can(regex("^[a-z0-9]+(-[a-z0-9]+)*$", v.name))
     ])
-    error_message = "Each ecr_repositories entry must define name, immutable tags, AES256 encryption, and retain_last_images > 0."
+    error_message = "Each ecr_repositories entry must define a lowercase repository name, immutable tags, AES256 encryption, and retain_last_images > 0."
   }
 }
 

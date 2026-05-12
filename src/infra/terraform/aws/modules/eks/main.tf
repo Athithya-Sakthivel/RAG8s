@@ -1,17 +1,14 @@
-// src/terraform/aws/modules/eks/main.tf
-// EKS cluster + managed nodegroups.
+// src/infra/terraform/aws/modules/eks/main.tf
+// EKS cluster + managed nodegroups for the RAG platform.
 //
-// This version fixes the nodegroup bootstrap path by making the worker
-// security group explicit in a module-owned launch template.
-// Managed nodegroups are always created with a launch template; when custom
-// security groups are used there, EKS does not add the cluster security group
-// automatically, so the worker SG must be attached deliberately.
-//
-// Source of truth:
-// - private cluster endpoint
-// - EKS cluster security group
-// - worker node security group attached through launch template
-// - nodegroup -> control-plane ingress rule on TCP/443
+// Contract:
+// - private cluster endpoint only
+// - OIDC provider for IRSA
+// - two managed nodegroups only:
+//   - system    -> on-demand, stateful/control-plane-like services
+//   - workloads  -> Spot, stateless services and jobs
+// - cluster security group rule is owned here
+// - no CloudWatch dependency required
 
 variable "cluster_name" {
   description = "EKS cluster name."
@@ -25,8 +22,9 @@ variable "region" {
 }
 
 variable "vpc_id" {
-  description = "VPC ID."
+  description = "Retained for compatibility."
   type        = string
+  default     = ""
 }
 
 variable "subnet_ids" {
@@ -159,7 +157,7 @@ locals {
   common_tags = merge(
     {
       ManagedBy   = "opentofu"
-      Platform    = "mlops"
+      Platform    = "rag"
       Environment = local.env_tag
       Name        = var.cluster_name
     },
@@ -265,9 +263,20 @@ resource "aws_eks_cluster" "this" {
   tags = local.common_tags
 }
 
-output "cluster_security_group_id" {
-  description = "Control-plane security group ID created by EKS."
-  value       = aws_eks_cluster.this.vpc_config[0].cluster_security_group_id
+data "tls_certificate" "eks_oidc" {
+  url = aws_eks_cluster.this.identity[0].oidc[0].issuer
+}
+
+resource "aws_iam_openid_connect_provider" "this" {
+  url = aws_eks_cluster.this.identity[0].oidc[0].issuer
+
+  client_id_list = ["sts.amazonaws.com"]
+
+  thumbprint_list = [
+    data.tls_certificate.eks_oidc.certificates[0].sha1_fingerprint
+  ]
+
+  tags = local.common_tags
 }
 
 resource "aws_security_group_rule" "allow_nodes_to_control_plane" {
@@ -333,6 +342,7 @@ resource "aws_eks_node_group" "system" {
   node_group_name = "${var.cluster_name}-system"
   node_role_arn   = var.node_role_arn
   subnet_ids      = var.subnet_ids
+  capacity_type   = "ON_DEMAND"
 
   scaling_config {
     desired_size = var.system_nodegroup.desired_size
@@ -372,6 +382,7 @@ resource "aws_eks_node_group" "workloads" {
   node_group_name = "${var.cluster_name}-workloads"
   node_role_arn   = var.node_role_arn
   subnet_ids      = var.subnet_ids
+  capacity_type   = "SPOT"
 
   scaling_config {
     desired_size = var.workloads_nodegroup.desired_size
@@ -404,22 +415,6 @@ resource "aws_eks_node_group" "workloads" {
   tags = local.common_tags
 }
 
-resource "aws_iam_openid_connect_provider" "this" {
-  url = aws_eks_cluster.this.identity[0].oidc[0].issuer
-
-  client_id_list = ["sts.amazonaws.com"]
-
-  thumbprint_list = [
-    data.tls_certificate.eks_oidc.certificates[0].sha1_fingerprint
-  ]
-
-  tags = local.common_tags
-}
-
-data "tls_certificate" "eks_oidc" {
-  url = aws_eks_cluster.this.identity[0].oidc[0].issuer
-}
-
 output "cluster_name" {
   description = "EKS cluster name."
   value       = aws_eks_cluster.this.name
@@ -433,6 +428,11 @@ output "cluster_endpoint" {
 output "cluster_ca_data" {
   description = "Base64-encoded CA data for the cluster."
   value       = aws_eks_cluster.this.certificate_authority[0].data
+}
+
+output "cluster_security_group_id" {
+  description = "Control-plane security group ID created by EKS."
+  value       = aws_eks_cluster.this.vpc_config[0].cluster_security_group_id
 }
 
 output "oidc_provider_arn" {

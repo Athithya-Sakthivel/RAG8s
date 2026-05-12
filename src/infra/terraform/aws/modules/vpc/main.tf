@@ -1,5 +1,5 @@
-// src/terraform/aws/modules/vpc/main.tf
-// Multi-AZ VPC module for the MLOps platform.
+// src/infra/terraform/aws/modules/vpc/main.tf
+// Multi-AZ VPC module for the E2E RAG platform.
 //
 // Goals:
 // - private subnets for worker nodes
@@ -78,9 +78,9 @@ locals {
 
   common_tags = merge(
     {
-      Name        = "mlops-vpc"
+      Name        = "rag-vpc"
       Environment = local.env_tag
-      ManagedBy   = "mlops-platform-terraform"
+      ManagedBy   = "rag-platform-terraform"
     },
     var.tags
   )
@@ -105,7 +105,7 @@ resource "aws_internet_gateway" "this" {
   vpc_id = aws_vpc.this.id
 
   tags = merge(local.common_tags, {
-    Name = "mlops-igw"
+    Name = "rag-igw"
   })
 }
 
@@ -122,7 +122,7 @@ resource "aws_subnet" "public" {
     local.common_tags,
     local.eks_subnet_cluster_tag,
     {
-      Name                     = "mlops-public-${local.azs[count.index]}"
+      Name                     = "rag-public-${local.azs[count.index]}"
       Tier                     = "public"
       AZ                       = local.azs[count.index]
       "kubernetes.io/role/elb" = "1"
@@ -143,7 +143,7 @@ resource "aws_subnet" "private" {
     local.common_tags,
     local.eks_subnet_cluster_tag,
     {
-      Name                              = "mlops-private-${local.azs[count.index]}"
+      Name                              = "rag-private-${local.azs[count.index]}"
       Tier                              = "private"
       AZ                                = local.azs[count.index]
       "kubernetes.io/role/internal-elb" = "1"
@@ -155,7 +155,7 @@ resource "aws_route_table" "public" {
   vpc_id = aws_vpc.this.id
 
   tags = merge(local.common_tags, {
-    Name = "mlops-public-rt"
+    Name = "rag-public-rt"
     Tier = "public"
   })
 }
@@ -179,7 +179,7 @@ resource "aws_eip" "nat" {
   domain = "vpc"
 
   tags = merge(local.common_tags, {
-    Name = local.use_nat_per_az ? "mlops-nat-eip-${local.azs[count.index]}" : "mlops-nat-eip-primary"
+    Name = local.use_nat_per_az ? "rag-nat-eip-${local.azs[count.index]}" : "rag-nat-eip-primary"
   })
 
   depends_on = [aws_internet_gateway.this]
@@ -192,7 +192,7 @@ resource "aws_nat_gateway" "this" {
   subnet_id     = aws_subnet.public[local.use_nat_per_az ? count.index : 0].id
 
   tags = merge(local.common_tags, {
-    Name = local.use_nat_per_az ? "mlops-natgw-${local.azs[count.index]}" : "mlops-natgw-primary"
+    Name = local.use_nat_per_az ? "rag-natgw-${local.azs[count.index]}" : "rag-natgw-primary"
   })
 
   depends_on = [aws_internet_gateway.this, aws_subnet.public]
@@ -204,7 +204,7 @@ resource "aws_route_table" "private" {
   vpc_id = aws_vpc.this.id
 
   tags = merge(local.common_tags, {
-    Name = "mlops-private-rt-${local.azs[count.index]}"
+    Name = "rag-private-rt-${local.azs[count.index]}"
     Tier = "private"
     AZ   = local.azs[count.index]
   })
