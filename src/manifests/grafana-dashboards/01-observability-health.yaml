@@ -1,3 +1,4 @@
+
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -13,7 +14,7 @@ data:
       "tags": ["observability", "prometheus"],
       "timezone": "browser",
       "schemaVersion": 39,
-      "version": 7,
+      "version": 9,
       "refresh": "30s",
       "editable": true,
       "panels": [
@@ -168,21 +169,20 @@ data:
         },
         {
           "type": "stat",
-          "title": "Vector Events Processed",
+          "title": "Logs Total",
           "gridPos": {"x": 18, "y": 6, "w": 6, "h": 6},
           "datasource": {"type": "prometheus", "uid": "prometheus"},
-          "targets": [{"refId": "A", "expr": "sum(rate(vector_adaptive_concurrency_averaged_rtt_count{job=\"vector\"}[5m]))"}],
+          "targets": [{"refId": "A", "expr": "ClickHouseProfileEvents_InsertQuery{job=\"clickhouse\"}"}],
           "fieldConfig": {
             "defaults": {
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
-                  {"color": "green", "value": null},
-                  {"color": "yellow", "value": 0}
+                  {"color": "green", "value": null}
                 ]
               },
               "color": {"mode": "thresholds"},
-              "decimals": 1
+              "decimals": 0
             }
           },
           "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "value"}
@@ -233,21 +233,49 @@ data:
           "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
         },
         {
-          "type": "timeseries",
-          "title": "Vector Uptime",
-          "gridPos": {"x": 12, "y": 12, "w": 12, "h": 6},
+          "type": "stat",
+          "title": "Buffer Events",
+          "gridPos": {"x": 12, "y": 12, "w": 6, "h": 6},
           "datasource": {"type": "prometheus", "uid": "prometheus"},
-          "targets": [
-            {"refId": "A", "expr": "min(up{job=\"vector\"})", "legendFormat": "Vector UP"}
-          ],
+          "targets": [{"refId": "A", "expr": "vector_buffer_events{job=\"vector\"}"}],
           "fieldConfig": {
             "defaults": {
-              "unit": "short",
-              "custom": {"lineWidth": 2, "fillOpacity": 10, "spanNulls": true},
-              "color": {"mode": "palette-classic"}
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 500},
+                  {"color": "red", "value": 1000}
+                ]
+              },
+              "color": {"mode": "thresholds"},
+              "decimals": 0
             }
           },
-          "options": {"legend": {"displayMode": "table", "placement": "right"}}
+          "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "value"}
+        },
+        {
+          "type": "stat",
+          "title": "Buffer Memory",
+          "gridPos": {"x": 18, "y": 12, "w": 6, "h": 6},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "vector_buffer_byte_size{job=\"vector\"}"}],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 52428800},
+                  {"color": "red", "value": 104857600}
+                ]
+              },
+              "color": {"mode": "thresholds"},
+              "decimals": 0
+            }
+          },
+          "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "value"}
         }
       ],
       "time": {"from": "now-15m", "to": "now"}

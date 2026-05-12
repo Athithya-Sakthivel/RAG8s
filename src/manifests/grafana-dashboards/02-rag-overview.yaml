@@ -1,0 +1,204 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-rag-pipeline
+  namespace: grafana
+  labels:
+    grafana_dashboard: "1"
+data:
+  rag-pipeline.json: |
+    {
+      "uid": "rag-system-overview",
+      "title": "RAG System Overview",
+      "tags": ["rag", "frontend", "retriever", "prometheus"],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "30s",
+      "editable": true,
+      "panels": [
+        {
+          "type": "row",
+          "title": "Service Health",
+          "gridPos": {"x": 0, "y": 0, "w": 24, "h": 1}
+        },
+        {
+          "type": "stat",
+          "title": "Frontend Up",
+          "gridPos": {"x": 0, "y": 1, "w": 3, "h": 4},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "min(up{job=\"frontend-auth\"})"}],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]},
+              "color": {"mode": "thresholds"}
+            }
+          },
+          "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "value"}
+        },
+        {
+          "type": "stat",
+          "title": "Retriever Up",
+          "gridPos": {"x": 3, "y": 1, "w": 3, "h": 4},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "min(up{job=\"retriever\"})"}],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]},
+              "color": {"mode": "thresholds"}
+            }
+          },
+          "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "value"}
+        },
+        {
+          "type": "stat",
+          "title": "Cloudflared Up",
+          "gridPos": {"x": 6, "y": 1, "w": 3, "h": 4},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "min(up{job=\"cloudflared\"})"}],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]},
+              "color": {"mode": "thresholds"}
+            }
+          },
+          "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "value"}
+        },
+        {
+          "type": "stat",
+          "title": "Qdrant Up",
+          "gridPos": {"x": 9, "y": 1, "w": 3, "h": 4},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "min(up{job=\"qdrant\"})"}],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]},
+              "color": {"mode": "thresholds"}
+            }
+          },
+          "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "value"}
+        },
+        {
+          "type": "stat",
+          "title": "Frontend Ready",
+          "gridPos": {"x": 12, "y": 1, "w": 3, "h": 4},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "min(frontend_service_ready{job=\"frontend-auth\"})"}],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]},
+              "color": {"mode": "thresholds"}
+            }
+          },
+          "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "value"}
+        },
+        {
+          "type": "stat",
+          "title": "Retriever Ready",
+          "gridPos": {"x": 15, "y": 1, "w": 3, "h": 4},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "min(service_ready{job=\"retriever\"})"}],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]},
+              "color": {"mode": "thresholds"}
+            }
+          },
+          "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "value"}
+        },
+        {
+          "type": "row",
+          "title": "Traffic & Performance",
+          "gridPos": {"x": 0, "y": 5, "w": 24, "h": 1}
+        },
+        {
+          "type": "timeseries",
+          "title": "Frontend Request Rate by Route",
+          "gridPos": {"x": 0, "y": 6, "w": 8, "h": 8},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "sum(rate(frontend_requests_total{job=\"frontend-auth\"}[5m])) by (route)", "legendFormat": "{{route}}"}],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "custom": {"lineWidth": 2, "fillOpacity": 10, "spanNulls": true},
+              "color": {"mode": "palette-classic"}
+            }
+          },
+          "options": {"legend": {"displayMode": "table", "placement": "right"}}
+        },
+        {
+          "type": "timeseries",
+          "title": "Retriever Request Rate by Route",
+          "gridPos": {"x": 8, "y": 6, "w": 8, "h": 8},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "sum(rate(http_requests_total{job=\"retriever\"}[5m])) by (route)", "legendFormat": "{{route}}"}],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "custom": {"lineWidth": 2, "fillOpacity": 10, "spanNulls": true},
+              "color": {"mode": "palette-classic"}
+            }
+          },
+          "options": {"legend": {"displayMode": "table", "placement": "right"}}
+        },
+        {
+          "type": "timeseries",
+          "title": "Frontend Latency P95 by Route",
+          "gridPos": {"x": 16, "y": 6, "w": 8, "h": 8},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "histogram_quantile(0.95, sum(rate(frontend_request_latency_seconds_bucket{job=\"frontend-auth\"}[5m])) by (le, route))", "legendFormat": "{{route}}"}],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 0.5},
+                  {"color": "red", "value": 2}
+                ]
+              },
+              "custom": {"lineWidth": 2, "fillOpacity": 10, "spanNulls": true},
+              "color": {"mode": "thresholds"}
+            }
+          },
+          "options": {"legend": {"displayMode": "table", "placement": "right"}}
+        },
+        {
+          "type": "row",
+          "title": "Streams & Auth",
+          "gridPos": {"x": 0, "y": 14, "w": 24, "h": 1}
+        },
+        {
+          "type": "stat",
+          "title": "Active Generate Streams",
+          "gridPos": {"x": 0, "y": 15, "w": 6, "h": 4},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "sum(frontend_active_requests{job=\"frontend-auth\",route=\"/generate/stream\"})"}],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "color": {"mode": "thresholds"},
+              "decimals": 0
+            }
+          },
+          "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "value"}
+        },
+        {
+          "type": "timeseries",
+          "title": "Auth Events (login/logout)",
+          "gridPos": {"x": 6, "y": 15, "w": 18, "h": 4},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "sum(rate(frontend_auth_events_total{job=\"frontend-auth\"}[5m])) by (event, provider, outcome)", "legendFormat": "{{event}} ({{provider}}) {{outcome}}"}],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {"lineWidth": 2, "fillOpacity": 10, "spanNulls": true},
+              "color": {"mode": "palette-classic"}
+            }
+          },
+          "options": {"legend": {"displayMode": "table", "placement": "right"}}
+        }
+      ],
+      "time": {"from": "now-15m", "to": "now"}
+    }
