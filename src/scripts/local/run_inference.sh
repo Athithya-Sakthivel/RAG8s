@@ -1,6 +1,7 @@
 
 bash src/scripts/local/local_cluster.sh
-
+sleep 30
+bash src/infra/core/default_storage_class.sh
 bash src/infra/core/create_secrets.sh
 
 helm repo add qdrant https://qdrant.github.io/qdrant-helm --force-update
@@ -18,6 +19,9 @@ export BACKUP_S3_BUCKET=$DATA_S3_BUCKET
 bash src/scripts/backups_and_restore.sh restore
 
 bash src/infra/core/argo_setup.sh --rollout
+
+bash src/infra/observability/prometheus_setup.sh
+
 git add . && git commit -m "argocd full sync" && git push origin main
 
 # kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d

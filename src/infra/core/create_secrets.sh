@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-set -euo pipefail
+
+for ns in indexing inference logging grafana monitoring; do
+  kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f -
+done
 
 # Retriever secrets
 kubectl create secret generic retriever-secrets -n inference \
@@ -27,6 +30,12 @@ kubectl create secret generic frontend-secrets -n inference \
   --from-file=JWT_PRIVATE_KEY_PEM="$JWT_PEM_FILE" \
   --dry-run=client -o yaml | kubectl apply -f -
 rm -f "$JWT_PEM_FILE"
+
+kubectl create ns grafana --dry-run=client -o yaml | kubectl apply -f -
+kubectl create secret generic grafana-admin -n grafana \
+  --from-literal=admin-user=admin \
+  --from-literal=admin-password="${GRAFANA_ADMIN_PASSWORD:-grafana}" \
+  --dry-run=client -o yaml | kubectl apply -f -
 
 # ClickHouse/Vector secrets
 kubectl create secret generic clickhouse-credentials -n logging \
