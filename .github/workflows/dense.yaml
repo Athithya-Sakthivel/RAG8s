@@ -6,6 +6,7 @@ on:
     paths:
       - src/services/dense/**
   pull_request:
+    branches: [ main ]
     paths:
       - src/services/dense/**
   workflow_dispatch:
@@ -27,7 +28,7 @@ env:
   IMAGE_NAME: dense
 
   TRIVY_VERSION: v0.70.0
-  TRIVY_CACHE_DIR: ${{ github.workspace }}/.cache/trivy
+  TRIVY_CACHE_DIR: /tmp/trivy-cache
 
 jobs:
   build-test-scan-push:
@@ -38,7 +39,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 1
 
@@ -56,13 +57,15 @@ jobs:
       - name: Prepare Trivy cache
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p "${TRIVY_CACHE_DIR}"
+          chmod 0777 "${TRIVY_CACHE_DIR}"
 
       - name: Restore Trivy cache
         uses: actions/cache@v4
         with:
-          path: ${{ env.TRIVY_CACHE_DIR }}
-          key: trivy-${{ runner.os }}-${{ hashFiles('src/services/dense/Dockerfile', 'src/services/dense/**', '!src/services/dense/.gitignore') }}
+          path: /tmp/trivy-cache
+          key: trivy-${{ runner.os }}-${{ hashFiles('src/services/dense/Dockerfile', 'src/services/dense/**') }}
           restore-keys: |
             trivy-${{ runner.os }}-
 
@@ -96,8 +99,8 @@ jobs:
           tags: |
             ${{ steps.image-meta.outputs.primary_image }}
             ${{ steps.image-meta.outputs.staging_image }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=min
+          cache-from: type=gha,scope=dense-model
+          cache-to: type=gha,mode=max,scope=dense-model
 
       - name: Run service tests
         shell: bash
