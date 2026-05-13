@@ -33,8 +33,6 @@ jobs:
     name: Build, scan, publish runtime indexing image
     runs-on: ubuntu-24.04
     timeout-minutes: 35
-    environment: staging
-
     steps:
       - name: Checkout
         uses: actions/checkout@v5.0.0

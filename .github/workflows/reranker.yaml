@@ -32,7 +32,6 @@ jobs:
     name: Build, test, scan, publish reranker image
     runs-on: ubuntu-24.04
     timeout-minutes: 40
-    environment: staging
 
     steps:
       - name: Checkout

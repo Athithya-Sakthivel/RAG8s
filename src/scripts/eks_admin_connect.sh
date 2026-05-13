@@ -16,3 +16,5 @@ aws ssm start-session --region "$REGION" --target "$INSTANCE_ID"
 
 # run inside shell
 # aws eks update-kubeconfig --region ap-south-1 --name rag-eks-staging
+
+sudo dnf install -y kubectl

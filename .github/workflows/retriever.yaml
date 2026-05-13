@@ -32,7 +32,6 @@ jobs:
     name: Build, scan, publish retriever image
     runs-on: ubuntu-24.04
     timeout-minutes: 35
-    environment: staging
 
     steps:
       - name: Checkout

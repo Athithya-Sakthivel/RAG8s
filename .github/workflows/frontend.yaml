@@ -32,7 +32,6 @@ jobs:
     name: Build, test, scan, publish frontend image
     runs-on: ubuntu-24.04
     timeout-minutes: 35
-    environment: staging
 
     steps:
       - name: Checkout
