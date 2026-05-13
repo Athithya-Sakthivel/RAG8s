@@ -395,3 +395,13 @@ output "internet_gateway_id" {
   description = "Internet gateway ID."
   value       = aws_internet_gateway.this.id
 }
+
+
+resource "aws_vpc_endpoint" "eks" {
+  vpc_id              = aws_vpc.this.id
+  service_name        = "com.amazonaws.${data.aws_region.current.region}.eks"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = aws_subnet.private[*].id
+  security_group_ids  = [aws_security_group.vpce.id]
+  private_dns_enabled = true
+}

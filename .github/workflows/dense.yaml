@@ -31,29 +31,34 @@ jobs:
     steps:
       - name: Show ref
         run: echo "ref=${{ github.ref }}"
-      - name: Request OIDC token (curl)
+      - name: Request OIDC token (curl + jq)
         id: get_token
         run: |
           set -euo pipefail
           echo "Requesting OIDC token..."
           TOKEN_JSON=$(curl -sS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL")
-          echo "token=$TOKEN_JSON" >> "$GITHUB_OUTPUT"
+          TOKEN=$(echo "$TOKEN_JSON" | jq -r '.value')
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
       - name: Decode token payload
         run: |
           echo "Decoded token payload:"
-          echo "${{ steps.get_token.outputs.token }}" | jq -r '.value' | cut -d'.' -f2 | base64 --decode || true
+          echo "${{ steps.get_token.outputs.token }}" | cut -d'.' -f2 | base64 --decode | jq . || true
+
   build-test-scan-push:
     name: Build, test, scan, publish dense image
     runs-on: ubuntu-24.04
     needs: oidc-debug
     timeout-minutes: 40
-    environment: staging
+
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with: { fetch-depth: 1 }
+        with:
+          fetch-depth: 1
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
+
       - name: Compute image metadata
         id: image-meta
         run: |
@@ -62,6 +67,7 @@ jobs:
           REGISTRY_HOST="${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
           echo "primary_image=${REGISTRY_HOST}/${{ env.ECR_REPOSITORY }}:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
           echo "staging_image=${REGISTRY_HOST}/${{ env.ECR_REPOSITORY }}:staging" >> "$GITHUB_OUTPUT"
+
       - name: Build image
         id: build-image
         uses: docker/build-push-action@v7
@@ -76,6 +82,7 @@ jobs:
             ${{ steps.image-meta.outputs.staging_image }}
           cache-from: type=gha,scope=dense-model
           cache-to: type=gha,mode=max,scope=dense-model
+
       - name: Scan built image with Trivy
         uses: aquasecurity/trivy-action@v0.35.0
         with:
@@ -85,6 +92,7 @@ jobs:
           severity: CRITICAL
           ignore-unfixed: true
           exit-code: 1
+
       - name: Configure AWS credentials for ECR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: aws-actions/configure-aws-credentials@v6.1.1
@@ -92,11 +100,14 @@ jobs:
           role-to-assume: arn:aws:iam::681802563986:role/gh-actions-dense-model
           aws-region: ap-south-1
           role-session-name: github-actions-dense
+
       - name: Log in to ECR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: aws-actions/amazon-ecr-login@v2.1.5
+
       - name: Push image tags
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
+          set -euo pipefail
           docker push "${{ steps.image-meta.outputs.primary_image }}"
           docker push "${{ steps.image-meta.outputs.staging_image }}"
