@@ -22,17 +22,33 @@ concurrency:
 env:
   AWS_REGION: ap-south-1
   AWS_ACCOUNT_ID: 681802563986
-  AWS_ROLE_ARN: arn:aws:iam::681802563986:role/gh-actions-dense-model
-
   ECR_REPOSITORY: dense-model
   IMAGE_NAME: dense
 
 jobs:
+  oidc-debug:
+    name: OIDC Token Debug
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - name: Show ref
+        run: echo "ref=${{ github.ref }}"
+      - name: Request OIDC token
+        id: oidc
+        uses: actions/oidc-token@v1
+      - name: Decode token payload
+        run: |
+          echo "---- token payload ----"
+          echo "${{ steps.oidc.outputs.token }}" | cut -d'.' -f2 | base64 --decode || true
+          echo "-----------------------"
+
   build-test-scan-push:
     name: Build, test, scan, publish dense image
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     environment: staging
+    needs: oidc-debug
 
     steps:
       - name: Checkout
@@ -48,16 +64,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           IMAGE_TAG="${IMAGE_TAG:-$(TZ=Asia/Kolkata date +%Y-%m-%d-%H-%M)--$(git rev-parse --short HEAD)}"
-          REGISTRY_HOST="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-
-          PRIMARY_IMAGE="${REGISTRY_HOST}/${ECR_REPOSITORY}:${IMAGE_TAG}"
-          STAGING_IMAGE="${REGISTRY_HOST}/${ECR_REPOSITORY}:staging"
-
+          REGISTRY_HOST="${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
+          PRIMARY_IMAGE="${REGISTRY_HOST}/${{ env.ECR_REPOSITORY }}:${IMAGE_TAG}"
+          STAGING_IMAGE="${REGISTRY_HOST}/${{ env.ECR_REPOSITORY }}:staging"
           echo "registry_host=${REGISTRY_HOST}" >> "$GITHUB_OUTPUT"
           echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
-          echo "repo_name=${ECR_REPOSITORY}" >> "$GITHUB_OUTPUT"
+          echo "repo_name=${{ env.ECR_REPOSITORY }}" >> "$GITHUB_OUTPUT"
           echo "primary_image=${PRIMARY_IMAGE}" >> "$GITHUB_OUTPUT"
           echo "staging_image=${STAGING_IMAGE}" >> "$GITHUB_OUTPUT"
 
