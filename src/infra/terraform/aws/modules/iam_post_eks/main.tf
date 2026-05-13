@@ -2,6 +2,7 @@
 // Post-EKS IAM identities for the RAG platform:
 // - IRSA roles for Kubernetes service accounts
 // - GitHub Actions OIDC roles for ECR push/pull
+// - EBS CSI driver IRSA role
 
 variable "name_prefix" {
   description = "Prefix used for IAM role and policy names."
@@ -42,7 +43,7 @@ variable "irsa_roles" {
     service_account = string
     buckets = optional(list(object({
       key    = string
-      access = string # read | read_write
+      access = string
     })), [])
     aws_services = optional(object({
       bedrock = optional(bool, false)
@@ -232,6 +233,51 @@ data "aws_iam_policy_document" "irsa_bedrock_access" {
   }
 }
 
+###############################################################################
+# EBS CSI driver IRSA policy
+###############################################################################
+
+data "aws_iam_policy_document" "ebs_csi_assume_role" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [var.oidc_provider_arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "${var.oidc_provider_issuer}:sub"
+      values = [
+        "system:serviceaccount:kube-system:ebs-csi-controller-sa"
+      ]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "${var.oidc_provider_issuer}:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "ebs_csi_driver" {
+  name               = "${var.name_prefix}-ebs-csi-driver-role"
+  assume_role_policy = data.aws_iam_policy_document.ebs_csi_assume_role.json
+  tags               = local.common_tags
+}
+
+resource "aws_iam_role_policy_attachment" "ebs_csi_driver" {
+  role       = aws_iam_role.ebs_csi_driver.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+}
+
+###############################################################################
+# IRSA roles
+###############################################################################
+
 resource "aws_iam_role" "irsa" {
   for_each = var.irsa_roles
 
@@ -389,6 +435,11 @@ output "irsa_policy_arns" {
   )
 }
 
+output "ebs_csi_driver_role_arn" {
+  description = "EBS CSI driver IAM role ARN."
+  value       = aws_iam_role.ebs_csi_driver.arn
+}
+
 output "github_actions_role_arns" {
   description = "GitHub Actions role ARNs."
   value = {
@@ -411,51 +462,4 @@ output "github_actions_policy_arns" {
     for k, v in aws_iam_policy.github_actions :
     k => v.arn
   }
-}
-
-
-locals {
-  ebs_csi_role_name = "${var.name_prefix}-ebs-csi-driver-role"
-}
-
-data "aws_iam_policy_document" "ebs_csi_assume_role" {
-  statement {
-    effect  = "Allow"
-    actions = ["sts:AssumeRoleWithWebIdentity"]
-
-    principals {
-      type        = "Federated"
-      identifiers = [var.oidc_provider_arn]
-    }
-
-    condition {
-      test     = "StringEquals"
-      variable = "${var.oidc_provider_issuer}:sub"
-      values = [
-        "system:serviceaccount:kube-system:ebs-csi-controller-sa"
-      ]
-    }
-
-    condition {
-      test     = "StringEquals"
-      variable = "${var.oidc_provider_issuer}:aud"
-      values   = ["sts.amazonaws.com"]
-    }
-  }
-}
-
-resource "aws_iam_role" "ebs_csi_driver" {
-  name               = local.ebs_csi_role_name
-  assume_role_policy = data.aws_iam_policy_document.ebs_csi_assume_role.json
-  tags               = local.common_tags
-}
-
-resource "aws_iam_role_policy_attachment" "ebs_csi_driver" {
-  role       = aws_iam_role.ebs_csi_driver.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
-}
-
-output "ebs_csi_driver_role_arn" {
-  description = "IAM role ARN for the EBS CSI driver add-on."
-  value       = aws_iam_role.ebs_csi_driver.arn
 }

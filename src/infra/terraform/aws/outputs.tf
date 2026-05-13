@@ -1,6 +1,16 @@
 // src/infra/terraform/aws/outputs.tf
 // Stable outputs for automation, kubeconfig generation, and downstream consumers.
 
+output "aws_region" {
+  description = "AWS region used by this stack."
+  value       = var.region
+}
+
+output "cluster_name" {
+  description = "EKS cluster name."
+  value       = module.eks.cluster_name
+}
+
 output "vpc_id" {
   description = "VPC ID created by the VPC module."
   value       = module.vpc.vpc_id
@@ -150,6 +160,11 @@ output "irsa_policy_arns" {
   value       = module.iam_post_eks.irsa_policy_arns
 }
 
+output "ebs_csi_driver_role_arn" {
+  description = "IAM role ARN for the EBS CSI driver."
+  value       = module.iam_post_eks.ebs_csi_driver_role_arn
+}
+
 output "github_actions_role_arns" {
   description = "Logical GitHub Actions role key -> IAM role ARN."
   value       = module.iam_post_eks.github_actions_role_arns
@@ -165,23 +180,6 @@ output "github_actions_policy_arns" {
   value       = module.iam_post_eks.github_actions_policy_arns
 }
 
-output "ecr_repository_urls" {
-  description = "Logical repository key -> ECR repository URL."
-  value       = module.ecr.repository_url_map
-}
-
-output "ecr_repository_arns" {
-  description = "Logical repository key -> ECR repository ARN."
-  value       = module.ecr.repository_arn_map
-}
-
-output "ecr_repository_names" {
-  description = "Logical repository key -> ECR repository name."
-  value       = module.ecr.repository_name_map
-}
-
-
-
 output "eks_admin_instance_id" {
   description = "EC2 instance ID for the private EKS admin host."
   value       = aws_instance.eks_admin.id
@@ -190,11 +188,6 @@ output "eks_admin_instance_id" {
 output "eks_admin_private_ip" {
   description = "Private IP of the EKS admin host."
   value       = aws_instance.eks_admin.private_ip
-}
-
-output "eks_admin_availability_zone" {
-  description = "Availability zone of the EKS admin host."
-  value       = aws_instance.eks_admin.availability_zone
 }
 
 output "eks_admin_security_group_id" {
@@ -209,10 +202,14 @@ output "eks_admin_ssm_command" {
 
 output "eks_admin_kubeconfig_command" {
   description = "Command to write kubeconfig from the admin host context."
-  value       = "aws eks update-kubeconfig --region ${var.region} --name ${var.cluster_name}"
+  value       = "aws eks update-kubeconfig --region ${var.region} --name ${module.eks.cluster_name}"
 }
 
-output "eks_admin_kubectl_check_command" {
-  description = "Command to verify cluster access from the admin host."
-  value       = "kubectl get nodes -o wide && kubectl get pods -A -o wide"
+output "eks_admin_quick_check_command" {
+  description = "Quick EKS verification command sequence."
+  value       = <<EOT
+aws eks update-kubeconfig --region ${var.region} --name ${module.eks.cluster_name}
+kubectl get nodes -o wide
+kubectl get pods -A -o wide
+EOT
 }

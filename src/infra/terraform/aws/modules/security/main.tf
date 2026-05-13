@@ -4,32 +4,10 @@
 // Responsibilities:
 // - create the worker-node security group
 // - allow node-to-node and intra-VPC traffic
-// - allow required outbound internet access through NAT
+// - restrict outbound traffic to the VPC CIDR
 // - stay intentionally free of endpoint SGs and control-plane rules
 //
 // The EKS module owns the control-plane <-> node SG rule.
-
-variable "vpc_id" {
-  description = "VPC ID where the node security group will be created."
-  type        = string
-}
-
-variable "vpc_cidr" {
-  description = "Primary IPv4 CIDR block for the VPC."
-  type        = string
-}
-
-variable "name_prefix" {
-  description = "Prefix used for security group names."
-  type        = string
-  default     = "rag"
-}
-
-variable "tags" {
-  description = "Tags applied to all resources created by this module."
-  type        = map(string)
-  default     = {}
-}
 
 locals {
   env_tag = lookup(var.tags, "Environment", "prod")
@@ -60,11 +38,11 @@ resource "aws_security_group" "node" {
   }
 
   egress {
-    description = "Allow outbound traffic to the internet via NAT"
+    description = "Allow outbound traffic within the VPC CIDR only"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = [var.vpc_cidr]
   }
 
   tags = local.merged_tags

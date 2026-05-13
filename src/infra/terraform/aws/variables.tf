@@ -272,7 +272,7 @@ variable "irsa_roles" {
     service_account = string
     buckets = optional(list(object({
       key    = string
-      access = string # read | read_write
+      access = string
     })), [])
     aws_services = optional(object({
       bedrock = optional(bool, false)
@@ -450,7 +450,7 @@ variable "ecr_repositories" {
       contains(["AES256"], upper(v.encryption_type)) &&
       can(regex("^[a-z0-9]+(-[a-z0-9]+)*$", v.name))
     ])
-    error_message = "Each ecr_repositories entry must define a lowercase repository name, immutable tags, AES256 encryption, and retain_last_images > 0."
+    error_message = "Each ecr_repositories entry must define a lowercase hyphenated name, immutable tags, AES256 encryption, and retain_last_images > 0."
   }
 }
 
@@ -469,10 +469,6 @@ variable "launch_template_version" {
   type        = string
   default     = ""
 }
-
-###############################################################################
-# TAGS
-###############################################################################
 
 variable "tags" {
   description = "Additional tags for all resources."

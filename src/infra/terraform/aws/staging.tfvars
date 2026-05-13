@@ -34,13 +34,7 @@ workloads_nodegroup = {
   max_size      = 4
 }
 
-system_node_taints = [
-  {
-    key    = "node-type"
-    value  = "general"
-    effect = "NO_SCHEDULE"
-  }
-]
+system_node_taints = []
 
 workloads_node_taints = [
   {
@@ -207,7 +201,7 @@ cluster_autoscaler = {
   scan_interval_seconds      = 10
   max_node_provision_time    = 600
   expander                   = "least-waste"
-  balance_similar_nodegroups = true
+  balance_similar_nodegroups = false
 }
 
 tags = {

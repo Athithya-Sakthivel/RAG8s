@@ -7,7 +7,7 @@
 // - Cluster Autoscaler policy
 // - EBS CSI managed policy ARN output
 //
-// CI/ECR permissions are now owned post-EKS in iam_post_eks.
+// CI/ECR permissions are owned post-EKS in iam_post_eks.
 
 variable "name_prefix" {
   description = "Prefix used for IAM role and policy names."

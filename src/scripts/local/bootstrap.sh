@@ -98,13 +98,6 @@ sudo apt-get install -y --allow-downgrades "tofu=${CANDIDATE}" || {
 }
 sudo apt-mark hold tofu
 
-log "installing kubectl into /usr/local/bin"
-KUBECTL_VERSION="v1.30.1"
-curl -fsSL -o "${TMPDIR}/kubectl" \
-  "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
-chmod +x "${TMPDIR}/kubectl"
-sudo install -m 0755 "${TMPDIR}/kubectl" /usr/local/bin/kubectl
-
 
 log "installing AWS CLI v2"
 curl -fsSL -o "${TMPDIR}/awscliv2.zip" \
@@ -126,6 +119,16 @@ pip install mlflow==3.11.1 requests==2.33.1 qdrant_client==1.17.1 typing==3.7.4.
 if [[ -d "${HOME}/.local/bin" ]]; then
   export PATH="${HOME}/.local/bin:${PATH}"
 fi
+
+curl "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb" -o "session-manager-plugin.deb"
+sudo dpkg -i session-manager-plugin.deb
+
+
+curl -O https://s3.us-west-2.amazonaws.com/amazon-eks/1.35.3/2026-04-08/bin/linux/amd64/kubectl
+chmod +x ./kubectl
+mkdir -p $HOME/bin && cp ./kubectl $HOME/bin/kubectl && export PATH=$HOME/bin:$PATH
+
+kubectl version --client
 
 if ! grep -qs 'export PATH=$HOME/.local/bin:$PATH' "${HOME}/.bashrc"; then
   echo 'export PATH=$HOME/.local/bin:$PATH' >> "${HOME}/.bashrc"

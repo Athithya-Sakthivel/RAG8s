@@ -1,6 +1,7 @@
 // src/infra/terraform/aws/main.tf
 // Root composition for the E2E RAG platform.
-// This file only wires module contracts together.
+// This file wires module contracts together and installs the EBS CSI add-on
+// through the EKS API rather than through Kubernetes/Helm providers.
 
 terraform {
   backend "s3" {}
@@ -56,7 +57,7 @@ module "eks" {
 
   system_nodegroup      = var.system_nodegroup
   workloads_nodegroup   = var.workloads_nodegroup
-  system_node_taints    = var.system_node_taints
+  system_node_taints    = []
   workloads_node_taints = var.workloads_node_taints
   system_node_labels    = var.system_node_labels
   workloads_node_labels = var.workloads_node_labels
@@ -100,22 +101,8 @@ module "iam_post_eks" {
   ]
 }
 
-
-resource "aws_eks_addon" "ebs_csi_driver" {
-  cluster_name             = module.eks.cluster_name
-  addon_name               = "aws-ebs-csi-driver"
-  service_account_role_arn = module.iam_post_eks.ebs_csi_driver_role_arn
-
-  depends_on = [
-    module.iam_post_eks
-  ]
-
-  tags = var.tags
-}
-
-
 ###############################################################################
-# PRIVATE EKS ADMIN EC2 (SSM-ONLY)
+# PRIVATE ADMIN EC2 FOR EKS ACCESS
 ###############################################################################
 
 data "aws_ssm_parameter" "al2023_x86_64_ami" {
@@ -128,11 +115,11 @@ resource "aws_security_group" "eks_admin" {
   vpc_id      = module.vpc.vpc_id
 
   egress {
-    description = "Allow outbound access for SSM, AWS API calls, and package installs"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+    description = "Allow HTTPS only inside the VPC"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
   }
 
   tags = merge(var.tags, {
@@ -199,4 +186,204 @@ resource "aws_instance" "eks_admin" {
     Name    = "${var.cluster_name}-eks-admin"
     Purpose = "eks-admin"
   })
+}
+
+resource "aws_security_group_rule" "eks_admin_to_cluster" {
+  description              = "Allow the admin host to reach the EKS API server"
+  type                     = "ingress"
+  from_port                = 443
+  to_port                  = 443
+  protocol                 = "tcp"
+  security_group_id        = module.eks.cluster_security_group_id
+  source_security_group_id = aws_security_group.eks_admin.id
+}
+
+###############################################################################
+# VPC INTERFACE ENDPOINTS FOR PRIVATE EKS / SSM / IRSA / IMAGE PULLS
+###############################################################################
+
+resource "aws_security_group" "vpce" {
+  name        = "${var.cluster_name}-vpce-sg"
+  description = "Security group for interface VPC endpoints"
+  vpc_id      = module.vpc.vpc_id
+
+  ingress {
+    description = "HTTPS from admin EC2 and worker nodes"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    security_groups = [
+      aws_security_group.eks_admin.id,
+      module.security.node_security_group_id
+    ]
+  }
+
+  egress {
+    description = "Allow endpoint traffic within the VPC"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
+  tags = merge(var.tags, {
+    Name = "${var.cluster_name}-vpce-sg"
+  })
+}
+
+resource "aws_vpc_endpoint" "ssm" {
+  vpc_id              = module.vpc.vpc_id
+  service_name        = "com.amazonaws.${var.region}.ssm"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = module.vpc.private_subnet_ids
+  security_group_ids  = [aws_security_group.vpce.id]
+  private_dns_enabled = true
+
+  tags = merge(var.tags, {
+    Name = "${var.cluster_name}-ssm-vpce"
+  })
+}
+
+resource "aws_vpc_endpoint" "ssmmessages" {
+  vpc_id              = module.vpc.vpc_id
+  service_name        = "com.amazonaws.${var.region}.ssmmessages"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = module.vpc.private_subnet_ids
+  security_group_ids  = [aws_security_group.vpce.id]
+  private_dns_enabled = true
+
+  tags = merge(var.tags, {
+    Name = "${var.cluster_name}-ssmmessages-vpce"
+  })
+}
+
+resource "aws_vpc_endpoint" "ec2messages" {
+  vpc_id              = module.vpc.vpc_id
+  service_name        = "com.amazonaws.${var.region}.ec2messages"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = module.vpc.private_subnet_ids
+  security_group_ids  = [aws_security_group.vpce.id]
+  private_dns_enabled = true
+
+  tags = merge(var.tags, {
+    Name = "${var.cluster_name}-ec2messages-vpce"
+  })
+}
+
+resource "aws_vpc_endpoint" "ec2" {
+  vpc_id              = module.vpc.vpc_id
+  service_name        = "com.amazonaws.${var.region}.ec2"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = module.vpc.private_subnet_ids
+  security_group_ids  = [aws_security_group.vpce.id]
+  private_dns_enabled = true
+
+  tags = merge(var.tags, {
+    Name = "${var.cluster_name}-ec2-vpce"
+  })
+}
+
+resource "aws_vpc_endpoint" "eks" {
+  vpc_id              = module.vpc.vpc_id
+  service_name        = "com.amazonaws.${var.region}.eks"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = module.vpc.private_subnet_ids
+  security_group_ids  = [aws_security_group.vpce.id]
+  private_dns_enabled = true
+
+  tags = merge(var.tags, {
+    Name = "${var.cluster_name}-eks-vpce"
+  })
+}
+
+resource "aws_vpc_endpoint" "sts" {
+  vpc_id              = module.vpc.vpc_id
+  service_name        = "com.amazonaws.${var.region}.sts"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = module.vpc.private_subnet_ids
+  security_group_ids  = [aws_security_group.vpce.id]
+  private_dns_enabled = true
+
+  tags = merge(var.tags, {
+    Name = "${var.cluster_name}-sts-vpce"
+  })
+}
+
+resource "aws_vpc_endpoint" "ecr_api" {
+  vpc_id              = module.vpc.vpc_id
+  service_name        = "com.amazonaws.${var.region}.ecr.api"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = module.vpc.private_subnet_ids
+  security_group_ids  = [aws_security_group.vpce.id]
+  private_dns_enabled = true
+
+  tags = merge(var.tags, {
+    Name = "${var.cluster_name}-ecr-api-vpce"
+  })
+}
+
+resource "aws_vpc_endpoint" "ecr_dkr" {
+  vpc_id              = module.vpc.vpc_id
+  service_name        = "com.amazonaws.${var.region}.ecr.dkr"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = module.vpc.private_subnet_ids
+  security_group_ids  = [aws_security_group.vpce.id]
+  private_dns_enabled = true
+
+  tags = merge(var.tags, {
+    Name = "${var.cluster_name}-ecr-dkr-vpce"
+  })
+}
+
+resource "aws_vpc_endpoint" "autoscaling" {
+  vpc_id              = module.vpc.vpc_id
+  service_name        = "com.amazonaws.${var.region}.autoscaling"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = module.vpc.private_subnet_ids
+  security_group_ids  = [aws_security_group.vpce.id]
+  private_dns_enabled = true
+
+  tags = merge(var.tags, {
+    Name = "${var.cluster_name}-autoscaling-vpce"
+  })
+}
+
+resource "aws_vpc_endpoint" "s3" {
+  vpc_id            = module.vpc.vpc_id
+  service_name      = "com.amazonaws.${var.region}.s3"
+  vpc_endpoint_type = "Gateway"
+  route_table_ids   = module.vpc.private_route_table_ids
+
+  tags = merge(var.tags, {
+    Name = "${var.cluster_name}-s3-gateway-endpoint"
+  })
+}
+
+###############################################################################
+# EBS CSI DRIVER AS AN EKS ADD-ON
+###############################################################################
+
+resource "aws_eks_addon" "aws_ebs_csi_driver" {
+  cluster_name             = module.eks.cluster_name
+  addon_name               = "aws-ebs-csi-driver"
+  service_account_role_arn = module.iam_post_eks.ebs_csi_driver_role_arn
+
+  resolve_conflicts_on_create = "OVERWRITE"
+  resolve_conflicts_on_update = "OVERWRITE"
+
+  depends_on = [
+    module.eks,
+    module.iam_post_eks,
+    aws_vpc_endpoint.ec2,
+    aws_vpc_endpoint.ec2messages,
+    aws_vpc_endpoint.ecr_api,
+    aws_vpc_endpoint.ecr_dkr,
+    aws_vpc_endpoint.eks,
+    aws_vpc_endpoint.s3,
+    aws_vpc_endpoint.ssm,
+    aws_vpc_endpoint.ssmmessages,
+    aws_vpc_endpoint.sts
+  ]
+
+  tags = var.tags
 }

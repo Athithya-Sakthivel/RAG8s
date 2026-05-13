@@ -13,13 +13,13 @@ spec:
   source:
     repoURL: https://qdrant.github.io/qdrant-helm
     chart: qdrant
-    targetRevision: v1.17.1
+    targetRevision: 1.18.0
     helm:
       values: |
         replicaCount: 1
         image:
           repository: docker.io/qdrant/qdrant
-          tag: v1.17.1
+          tag: v1.18.0-unprivileged@sha256:1da9d326bd559b2a22274be3faa38794e0a8e4f639e4ea5f630d3f9358699320
           pullPolicy: IfNotPresent
         service:
           type: ClusterIP

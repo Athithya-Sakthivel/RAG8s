@@ -5,8 +5,10 @@
 #  - --create    : init backend, fmt/validate (auto-fix), plan, then apply -auto-approve (fully automated)
 #  - --destroy   : init backend, then destroy (destructive; requires --yes-delete)
 #  - --validate  : init backend and validate backend / prereqs
-#  - --find-version / --rollback-state <versionId> : state management helpers. VersionID is created only if a create is successful e2e. 
+#  - --find-version / --rollback-state <versionId> : state management helpers. VersionID is created only if a create is successful e2e.
+#  --env staging --rollback-state mJy09P8lI1XBnjVKjgtHja_rNDhZUOMF --yes-delete
 #
+# 
 # Usage:
 #   bash src/infra/terraform/aws/run.sh --plan  --env staging
 #   bash src/infra/terraform/aws/run.sh --create --env staging

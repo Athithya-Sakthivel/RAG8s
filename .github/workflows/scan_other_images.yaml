@@ -1,0 +1,117 @@
+name: Scan Pinned Images
+
+on:
+  workflow_dispatch:
+    inputs:
+      severity:
+        description: 'Minimum severity to report'
+        required: false
+        default: 'CRITICAL'
+        type: choice
+        options:
+          - 'CRITICAL'
+          - 'HIGH,CRITICAL'
+          - 'MEDIUM,HIGH,CRITICAL'
+          - 'LOW,MEDIUM,HIGH,CRITICAL'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scan-pinned-images-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan-images:
+    name: Scan pinned container images
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - "qdrant | qdrant/qdrant:v1.18.0-unprivileged@sha256:1da9d326bd559b2a22274be3faa38794e0a8e4f639e4ea5f630d3f9358699320"
+          - "busybox | busybox:1.37.0@sha256:1487d0af5f52b4ba31c7e465126ee2123fe3f2305d638e7827681e7cf6c83d5e"
+          - "vector | timberio/vector:0.55.0-distroless-static@sha256:d0e9bcff73d38c408b553683bd230cbc6a204eca399267b40af79f0cd9afc15e"
+          - "valkey | valkey/valkey:9.0.3-alpine3.23@sha256:e1095c6c76ee982cb2d1e07edbb7fb2a53606630a1d810d5a47c9f646b708bf5"
+          - "cloudflared | cloudflare/cloudflared:2026.3.0@sha256:6b599ca3e974349ead3286d178da61d291961182ec3fe9c505e1dd02c8ac31b0"
+          - "clickhouse | clickhouse/clickhouse-server:26.4.1@sha256:1688b8976802967d4754307b408d00ee57fe0396b40c6ffc195be228699e4fc2"
+          - "prometheus | quay.io/prometheus/prometheus:v3.11.3"
+          - "alertmanager | quay.io/prometheus/alertmanager:v0.32.1"
+          - "config-reloader | quay.io/prometheus-operator/prometheus-config-reloader:v0.91.0"
+          - "grafana | docker.io/grafana/grafana:11.1.4"
+          - "bats | docker.io/bats/bats:v1.4.1"
+
+    steps:
+      - name: Parse image info
+        id: parse
+        run: |
+          IMAGE_INFO="${{ matrix.image }}"
+          IMAGE_NAME=$(echo "$IMAGE_INFO" | cut -d'|' -f1 | xargs)
+          IMAGE_REF=$(echo "$IMAGE_INFO" | cut -d'|' -f2 | xargs)
+          echo "name=${IMAGE_NAME}" >> $GITHUB_OUTPUT
+          echo "ref=${IMAGE_REF}" >> $GITHUB_OUTPUT
+
+      - name: Pull Trivy scanner
+        run: docker pull ghcr.io/athithya-sakthivel/trivy:0.69.3-safe
+
+      - name: Scan ${{ steps.parse.outputs.name }}
+        run: |
+          echo "Scanning: ${{ steps.parse.outputs.name }}"
+          echo "Image: ${{ steps.parse.outputs.ref }}"
+          docker run --rm \
+            ghcr.io/athithya-sakthivel/trivy:0.69.3-safe \
+            image \
+            --scanners vuln \
+            --severity ${{ github.event.inputs.severity || 'CRITICAL' }} \
+            --format table \
+            ${{ steps.parse.outputs.ref }}
+
+      - name: Generate JSON report
+        run: |
+          mkdir -p reports
+          docker run --rm \
+            -v ${{ github.workspace }}/reports:/reports \
+            ghcr.io/athithya-sakthivel/trivy:0.69.3-safe \
+            image \
+            --scanners vuln \
+            --severity ${{ github.event.inputs.severity || 'CRITICAL' }} \
+            --format json \
+            --output /reports/${{ steps.parse.outputs.name }}.json \
+            ${{ steps.parse.outputs.ref }}
+
+      - name: Upload scan report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scan-report-${{ steps.parse.outputs.name }}
+          path: reports/${{ steps.parse.outputs.name }}.json
+          retention-days: 30
+
+  summary:
+    name: Generate scan summary
+    runs-on: ubuntu-24.04
+    needs: scan-images
+    if: always()
+    steps:
+      - name: Download all reports
+        uses: actions/download-artifact@v4
+        with:
+          path: all-reports
+          pattern: scan-report-*
+          merge-multiple: true
+
+      - name: Generate summary table
+        run: |
+          echo "## Container Image Scan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | Critical | High | Medium | Low |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|----------|------|--------|-----|" >> $GITHUB_STEP_SUMMARY
+          for report in all-reports/*.json; do
+            IMAGE_NAME=$(basename "$report" .json)
+            CRITICAL=$(jq '[.Results[].Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length' "$report" 2>/dev/null || echo "0")
+            HIGH=$(jq '[.Results[].Vulnerabilities[]? | select(.Severity=="HIGH")] | length' "$report" 2>/dev/null || echo "0")
+            MEDIUM=$(jq '[.Results[].Vulnerabilities[]? | select(.Severity=="MEDIUM")] | length' "$report" 2>/dev/null || echo "0")
+            LOW=$(jq '[.Results[].Vulnerabilities[]? | select(.Severity=="LOW")] | length' "$report" 2>/dev/null || echo "0")
+            echo "| $IMAGE_NAME | $CRITICAL | $HIGH | $MEDIUM | $LOW |" >> $GITHUB_STEP_SUMMARY
+          done
+          echo "Scan completed at: $(date -u)" >> $GITHUB_STEP_SUMMARY

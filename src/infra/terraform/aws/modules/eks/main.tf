@@ -5,8 +5,8 @@
 // - private cluster endpoint only
 // - OIDC provider for IRSA
 // - two managed nodegroups only:
-//   - system    -> on-demand, stateful/control-plane-like services
-//   - workloads  -> Spot, stateless services and jobs
+//   - system    -> on-demand, untainted, stateful/control-plane-like services
+//   - workloads -> Spot, tainted, stateless services and jobs
 // - cluster security group rule is owned here
 // - no CloudWatch dependency required
 
@@ -79,9 +79,7 @@ variable "system_node_taints" {
     value  = string
     effect = string
   }))
-  default = [
-    { key = "node-type", value = "general", effect = "NO_SCHEDULE" }
-  ]
+  default = []
 
   validation {
     condition = alltrue([

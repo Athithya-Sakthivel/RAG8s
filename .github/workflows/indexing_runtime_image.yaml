@@ -1,73 +1,105 @@
-name: Runtime indexing image CI
+name: runtime-indexing-image-ci
+
 on:
   push:
-    branches: [main]
+    branches: [ main ]
     paths:
       - src/indexing_pipeline/**
       - .github/workflows/indexing_runtime_image.yaml
   pull_request:
+    branches: [ main ]
     paths:
       - src/indexing_pipeline/**
+  workflow_dispatch:
 
 permissions:
   contents: read
-  packages: write
+  id-token: write
 
 concurrency:
-  group: runtime-indexing-${{ github.workflow }}-${{ github.ref }}
+  group: runtime-indexing-image-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
-  GHCR_USER: athithya-sakthivel
-  IMAGE_NAME: indexing-pipeline
+  AWS_REGION: ap-south-1
+  AWS_ACCOUNT_ID: 681802563986
+  AWS_ROLE_ARN: arn:aws:iam::681802563986:role/gh-actions-indexer
+
+  ECR_REPOSITORY: indexer
+  IMAGE_NAME: indexer
 
 jobs:
-  build-push-runtime:
-    name: Build and push runtime image
+  build-scan-push:
+    name: Build, scan, publish runtime indexing image
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 35
     environment: staging
-
-    env:
-      GIT_PAT: ${{ secrets.GIT_PAT }}
 
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        uses: actions/checkout@v5.0.0
         with:
           fetch-depth: 1
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
+        uses: docker/setup-buildx-action@v4.0.0
 
-      - name: Compute image tags
-        id: tags
+      - name: Compute image metadata
+        id: image-meta
         shell: bash
         run: |
-          TIMESTAMP_TAG="$(TZ=Asia/Kolkata date +%Y-%m-%d-%H-%M)--$(git rev-parse --short HEAD)"
-          IMAGE="ghcr.io/${GHCR_USER}/${IMAGE_NAME}"
-          echo "image=${IMAGE}" >> $GITHUB_OUTPUT
-          echo "timestamp_tag=${TIMESTAMP_TAG}" >> $GITHUB_OUTPUT
-          echo "staging_tag=staging" >> $GITHUB_OUTPUT
+          set -euo pipefail
 
-      - name: Log in to GHCR (main branch only)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121
-        with:
-          registry: ghcr.io
-          username: ${{ env.GHCR_USER }}
-          password: ${{ env.GIT_PAT }}
+          IMAGE_TAG="$(TZ=Asia/Kolkata date +%Y-%m-%d-%H-%M)--$(git rev-parse --short HEAD)"
+          REGISTRY_HOST="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
-      - name: Build and push runtime image
-        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294
+          PRIMARY_IMAGE="${REGISTRY_HOST}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+          STAGING_IMAGE="${REGISTRY_HOST}/${ECR_REPOSITORY}:staging"
+
+          echo "primary_image=${PRIMARY_IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "staging_image=${STAGING_IMAGE}" >> "$GITHUB_OUTPUT"
+
+      - name: Build image
+        id: build-image
+        uses: docker/build-push-action@v7.1.0
         with:
           context: src/indexing_pipeline
           file: src/indexing_pipeline/Dockerfile
-          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          load: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
+          load: true
+          push: false
           pull: true
           tags: |
-            ${{ steps.tags.outputs.image }}:${{ steps.tags.outputs.timestamp_tag }}
-            ${{ steps.tags.outputs.image }}:${{ steps.tags.outputs.staging_tag }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=min
+            ${{ steps.image-meta.outputs.primary_image }}
+            ${{ steps.image-meta.outputs.staging_image }}
+          cache-from: type=gha,scope=indexing-pipeline
+          cache-to: type=gha,mode=max,scope=indexing-pipeline
+
+      - name: Scan built image with Trivy
+        uses: aquasecurity/trivy-action@v0.35.0
+        with:
+          image-ref: ${{ steps.build-image.outputs.imageid }}
+          format: table
+          scanners: vuln
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: 1
+
+      - name: Configure AWS credentials for ECR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: aws-actions/configure-aws-credentials@v6.1.1
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to ECR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: aws-actions/amazon-ecr-login@v2.1.5
+
+      - name: Push image tags
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          docker push "${{ steps.image-meta.outputs.primary_image }}"
+          docker push "${{ steps.image-meta.outputs.staging_image }}"
