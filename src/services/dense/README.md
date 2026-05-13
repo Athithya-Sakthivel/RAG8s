@@ -77,4 +77,4 @@ curl http://localhost:8200/health
 - The model is **loaded lazily** on first request (unless `PRELOAD_MODEL=1` is set, which loads it at startup).
 - On first use, the model will be **downloaded** from Hugging Face Hub (cache persists in `/models_cache`).
 - For **batch processing**, you can send multiple texts in one request up to the configured batch size.
--
+---

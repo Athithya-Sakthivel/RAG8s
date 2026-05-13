@@ -4,10 +4,11 @@
 // Contract:
 // - private cluster endpoint only
 // - OIDC provider for IRSA
-// - exactly two managed nodegroups:
-//   - system    -> ON_DEMAND, untainted, platform services
-//   - workloads -> SPOT, tainted, stateless workloads and jobs
-// - control-plane security-group rule is owned here
+// - two managed nodegroups only:
+//   - system    -> on-demand, platform services
+//   - workloads -> Spot, stateless services and jobs
+// - cluster security group rule is owned here
+// - access-entry-capable cluster authentication mode enabled
 // - no CloudWatch dependency required
 
 variable "cluster_name" {
@@ -241,6 +242,10 @@ resource "aws_kms_alias" "eks_secrets" {
 resource "aws_eks_cluster" "this" {
   name     = var.cluster_name
   role_arn = var.cluster_role_arn
+
+  access_config {
+    authentication_mode = "API_AND_CONFIG_MAP"
+  }
 
   vpc_config {
     subnet_ids              = var.subnet_ids

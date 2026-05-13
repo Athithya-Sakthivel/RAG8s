@@ -118,12 +118,34 @@ resource "aws_security_group" "eks_admin" {
   description = "Private SSM-only admin host for EKS access"
   vpc_id      = module.vpc.vpc_id
 
+  #tfsec:ignore:aws-ec2-no-public-egress-sgr
+  #trivy:ignore:AVD-AWS-0104
   egress {
-    description = "Allow HTTPS only inside the VPC"
+    description = "Allow outbound HTTPS for AWS APIs, EKS kubectl download, and package access"
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"
-    cidr_blocks = [var.vpc_cidr]
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  #tfsec:ignore:aws-ec2-no-public-egress-sgr
+  #trivy:ignore:AVD-AWS-0104
+  egress {
+    description = "Allow outbound DNS UDP"
+    from_port   = 53
+    to_port     = 53
+    protocol    = "udp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  #tfsec:ignore:aws-ec2-no-public-egress-sgr
+  #trivy:ignore:AVD-AWS-0104
+  egress {
+    description = "Allow outbound DNS TCP"
+    from_port   = 53
+    to_port     = 53
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   tags = merge(var.tags, {
@@ -236,6 +258,35 @@ resource "aws_security_group_rule" "eks_admin_to_cluster" {
   protocol                 = "tcp"
   security_group_id        = module.eks.cluster_security_group_id
   source_security_group_id = aws_security_group.eks_admin.id
+}
+
+###############################################################################
+# EKS ACCESS ENTRY FOR THE ADMIN EC2 ROLE
+###############################################################################
+
+resource "aws_eks_access_entry" "eks_admin" {
+  cluster_name  = module.eks.cluster_name
+  principal_arn = aws_iam_role.eks_admin.arn
+  type          = "STANDARD"
+
+  depends_on = [
+    module.eks,
+    aws_iam_role.eks_admin
+  ]
+}
+
+resource "aws_eks_access_policy_association" "eks_admin_cluster_admin" {
+  cluster_name  = module.eks.cluster_name
+  principal_arn = aws_iam_role.eks_admin.arn
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+
+  access_scope {
+    type = "cluster"
+  }
+
+  depends_on = [
+    aws_eks_access_entry.eks_admin
+  ]
 }
 
 ###############################################################################

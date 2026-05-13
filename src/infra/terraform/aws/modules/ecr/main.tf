@@ -7,6 +7,7 @@
 // - enable scan-on-push by default
 // - enforce AES256 encryption by default
 // - attach exactly one lifecycle policy per repository
+// - allow force deletion during destroy so non-empty repos do not block teardown
 //
 // This module is production-owned, tfvars-driven, and contains no legacy names.
 
@@ -56,17 +57,18 @@ locals {
 resource "aws_ecr_repository" "this" {
   for_each = var.repositories
 
-  name = each.value.name
-
-  image_tag_mutability = "IMMUTABLE"
+  name                 = each.value.name
+  image_tag_mutability = each.value.image_tag_mutability
 
   image_scanning_configuration {
-    scan_on_push = true
+    scan_on_push = each.value.scan_on_push
   }
 
   encryption_configuration {
-    encryption_type = "AES256"
+    encryption_type = each.value.encryption_type
   }
+
+  force_delete = true
 
   tags = merge(local.common_tags, {
     Name = each.value.name

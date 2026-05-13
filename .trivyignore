@@ -10,3 +10,11 @@ AWS-0132 # Ignores â€œbucket does not encrypt data with a customer managed keyâ€
 # fastembed docker images
 CVE-2026-33845 # Debian GnuTLS DTLS vulnerability - app does not use DTLS, temporary until 3.8.13-1 reaches stable
 
+# Private SSM-only EKS admin host requires outbound HTTPS/DNS
+# for EKS API, S3, STS, ECR, SSM, kubectl download, and package repos.
+# Instance has:
+# - no public IP
+# - no inbound rules
+# - private subnet only
+# - NAT-only outbound
+AVD-AWS-0104
