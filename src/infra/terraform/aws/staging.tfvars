@@ -148,51 +148,45 @@ github_actions_roles = {
 
 ecr_repositories = {
   frontend = {
-    name                 = "frontend"
-    image_tag_mutability = "IMMUTABLE"
-    scan_on_push         = true
-    encryption_type      = "AES256"
-    retain_last_images   = 30
+    name               = "frontend"
+    scan_on_push       = true
+    encryption_type    = "AES256"
+    retain_last_images = 30
   }
 
   retriever = {
-    name                 = "retriever"
-    image_tag_mutability = "IMMUTABLE"
-    scan_on_push         = true
-    encryption_type      = "AES256"
-    retain_last_images   = 30
+    name               = "retriever"
+    scan_on_push       = true
+    encryption_type    = "AES256"
+    retain_last_images = 30
   }
 
   dense_model = {
-    name                 = "dense-model"
-    image_tag_mutability = "IMMUTABLE"
-    scan_on_push         = true
-    encryption_type      = "AES256"
-    retain_last_images   = 30
+    name               = "dense-model"
+    scan_on_push       = true
+    encryption_type    = "AES256"
+    retain_last_images = 30
   }
 
   sparse_model = {
-    name                 = "sparse-model"
-    image_tag_mutability = "IMMUTABLE"
-    scan_on_push         = true
-    encryption_type      = "AES256"
-    retain_last_images   = 30
+    name               = "sparse-model"
+    scan_on_push       = true
+    encryption_type    = "AES256"
+    retain_last_images = 30
   }
 
   reranker = {
-    name                 = "reranker"
-    image_tag_mutability = "IMMUTABLE"
-    scan_on_push         = true
-    encryption_type      = "AES256"
-    retain_last_images   = 30
+    name               = "reranker"
+    scan_on_push       = true
+    encryption_type    = "AES256"
+    retain_last_images = 30
   }
 
   indexer = {
-    name                 = "indexer"
-    image_tag_mutability = "IMMUTABLE"
-    scan_on_push         = true
-    encryption_type      = "AES256"
-    retain_last_images   = 30
+    name               = "indexer"
+    scan_on_push       = true
+    encryption_type    = "AES256"
+    retain_last_images = 30
   }
 }
 
