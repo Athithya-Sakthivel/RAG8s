@@ -82,7 +82,8 @@ variable "github_actions_roles" {
   validation {
     condition = alltrue([
       for _, role in var.github_actions_roles :
-      can(regex("^[a-z0-9._-]+/[A-Za-z0-9._-]+$", role.repository)) &&
+      strcontains(role.repository, "/") &&
+      can(regex("^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$", role.repository)) &&
       role.branch == "main" &&
       can(regex("^gh-actions-[a-z0-9-]+$", role.role_name)) &&
       can(regex("^[a-z0-9]+(-[a-z0-9]+)*$", role.ecr_repo))
@@ -139,11 +140,6 @@ locals {
   irsa_s3_roles = {
     for k, role in var.irsa_roles :
     k => role if length(try(role.buckets, [])) > 0
-  }
-
-  irsa_bedrock_roles = {
-    for k, role in var.irsa_roles :
-    k => role if try(role.aws_services.bedrock, false)
   }
 
   irsa_s3_statements = {
@@ -215,13 +211,17 @@ data "aws_iam_policy_document" "irsa_s3_access" {
 }
 
 ###############################################################################
-# IRSA Bedrock access policies
+# IRSA BEDROCK POLICY FOR RETRIEVER (LEAST PRIVILEGE)
 ###############################################################################
 
 data "aws_iam_policy_document" "irsa_bedrock_access" {
-  for_each = local.irsa_bedrock_roles
+  for_each = {
+    for k, role in var.irsa_roles :
+    k => role if try(role.aws_services.bedrock, false)
+  }
 
   statement {
+    sid    = "AllowInvokeSpecificModel"
     effect = "Allow"
 
     actions = [
@@ -229,8 +229,26 @@ data "aws_iam_policy_document" "irsa_bedrock_access" {
       "bedrock:InvokeModelWithResponseStream"
     ]
 
-    resources = ["*"]
+    resources = [
+      "arn:aws:bedrock:${data.aws_region.current.region}::foundation-model/meta.llama3-8b-instruct-v1:0"
+    ]
   }
+}
+
+resource "aws_iam_policy" "irsa_bedrock" {
+  for_each = data.aws_iam_policy_document.irsa_bedrock_access
+
+  name        = "${var.name_prefix}-${each.key}-bedrock-policy"
+  description = "IRSA Bedrock policy for ${each.key}"
+  policy      = each.value.json
+  tags        = local.common_tags
+}
+
+resource "aws_iam_role_policy_attachment" "irsa_bedrock" {
+  for_each = aws_iam_policy.irsa_bedrock
+
+  role       = aws_iam_role.irsa[each.key].name
+  policy_arn = each.value.arn
 }
 
 ###############################################################################
@@ -302,22 +320,6 @@ resource "aws_iam_role_policy_attachment" "irsa_s3" {
   policy_arn = aws_iam_policy.irsa_s3[each.key].arn
 }
 
-resource "aws_iam_policy" "irsa_bedrock" {
-  for_each = local.irsa_bedrock_roles
-
-  name        = "${var.name_prefix}-${each.key}-bedrock-policy"
-  description = "IRSA Bedrock policy for ${each.key}"
-  policy      = data.aws_iam_policy_document.irsa_bedrock_access[each.key].json
-  tags        = local.common_tags
-}
-
-resource "aws_iam_role_policy_attachment" "irsa_bedrock" {
-  for_each = local.irsa_bedrock_roles
-
-  role       = aws_iam_role.irsa[each.key].name
-  policy_arn = aws_iam_policy.irsa_bedrock[each.key].arn
-}
-
 ###############################################################################
 # GitHub Actions trust policies
 ###############################################################################
@@ -378,7 +380,7 @@ data "aws_iam_policy_document" "github_ecr_push" {
     ]
 
     resources = [
-      "arn:${data.aws_partition.current.partition}:ecr:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:repository/${local.github_ecr_repository_names[each.key]}"
+      "arn:aws:ecr:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:repository/${local.github_ecr_repository_names[each.key]}"
     ]
   }
 }

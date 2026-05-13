@@ -1,13 +1,25 @@
 // src/infra/terraform/aws/modules/vpc/main.tf
-// Multi-AZ VPC module for the E2E RAG platform.
+// Multi-AZ VPC for the E2E RAG platform.
 //
-// Goals:
-// - private subnets for worker nodes
-// - public subnets only for NAT gateways
-// - one NAT gateway per AZ by default
-// - deterministic AZ selection
-// - subnet tags required by EKS
-// - no IPv6, no VPC endpoints, no public worker exposure
+// Responsibilities:
+// - create public/private subnets across selected AZs
+// - route private subnets through NAT gateways
+// - provide only the endpoints actually needed for a private, production EKS bootstrap
+// - keep worker nodes in private subnets
+//
+// Endpoints created:
+// - S3 Gateway
+// - SSM / SSMMessages / EC2Messages
+// - STS
+// - ECR API / ECR DKR
+//
+// Intentionally NOT created:
+// - EC2
+// - EKS
+// - Auto Scaling
+// - CloudWatch Logs
+//
+// NAT stays enabled because GHCR and general internet egress are required.
 
 variable "cluster_name" {
   description = "EKS cluster name used for Kubernetes subnet discovery tags."
@@ -40,7 +52,7 @@ variable "private_subnet_cidrs" {
 }
 
 variable "public_subnet_cidrs" {
-  description = "IPv4 CIDRs for public subnets used by NAT gateways, one per AZ."
+  description = "IPv4 CIDRs for public subnets, one per AZ."
   type        = list(string)
 
   validation {
@@ -71,6 +83,8 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 
+data "aws_region" "current" {}
+
 locals {
   azs = slice(data.aws_availability_zones.available.names, 0, var.az_count)
 
@@ -80,7 +94,7 @@ locals {
     {
       Name        = "rag-vpc"
       Environment = local.env_tag
-      ManagedBy   = "rag-platform-terraform"
+      ManagedBy   = "opentofu"
     },
     var.tags
   )
@@ -225,6 +239,121 @@ resource "aws_route_table_association" "private" {
 
   subnet_id      = aws_subnet.private[count.index].id
   route_table_id = aws_route_table.private[count.index].id
+}
+
+resource "aws_security_group" "vpce" {
+  name        = "rag-vpce-sg"
+  description = "Security group for interface VPC endpoints"
+  vpc_id      = aws_vpc.this.id
+
+  ingress {
+    description = "HTTPS from inside the VPC"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
+  egress {
+    description = "Allow endpoint traffic within the VPC"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "rag-vpce-sg"
+  })
+}
+
+resource "aws_vpc_endpoint" "s3" {
+  vpc_id            = aws_vpc.this.id
+  service_name      = "com.amazonaws.${data.aws_region.current.region}.s3"
+  vpc_endpoint_type = "Gateway"
+  route_table_ids   = [for rt in aws_route_table.private : rt.id]
+
+  tags = merge(local.common_tags, {
+    Name = "rag-s3-gateway-endpoint"
+  })
+}
+
+resource "aws_vpc_endpoint" "ssm" {
+  vpc_id              = aws_vpc.this.id
+  service_name        = "com.amazonaws.${data.aws_region.current.region}.ssm"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = aws_subnet.private[*].id
+  security_group_ids  = [aws_security_group.vpce.id]
+  private_dns_enabled = true
+
+  tags = merge(local.common_tags, {
+    Name = "rag-ssm-vpce"
+  })
+}
+
+resource "aws_vpc_endpoint" "ssmmessages" {
+  vpc_id              = aws_vpc.this.id
+  service_name        = "com.amazonaws.${data.aws_region.current.region}.ssmmessages"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = aws_subnet.private[*].id
+  security_group_ids  = [aws_security_group.vpce.id]
+  private_dns_enabled = true
+
+  tags = merge(local.common_tags, {
+    Name = "rag-ssmmessages-vpce"
+  })
+}
+
+resource "aws_vpc_endpoint" "ec2messages" {
+  vpc_id              = aws_vpc.this.id
+  service_name        = "com.amazonaws.${data.aws_region.current.region}.ec2messages"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = aws_subnet.private[*].id
+  security_group_ids  = [aws_security_group.vpce.id]
+  private_dns_enabled = true
+
+  tags = merge(local.common_tags, {
+    Name = "rag-ec2messages-vpce"
+  })
+}
+
+resource "aws_vpc_endpoint" "sts" {
+  vpc_id              = aws_vpc.this.id
+  service_name        = "com.amazonaws.${data.aws_region.current.region}.sts"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = aws_subnet.private[*].id
+  security_group_ids  = [aws_security_group.vpce.id]
+  private_dns_enabled = true
+
+  tags = merge(local.common_tags, {
+    Name = "rag-sts-vpce"
+  })
+}
+
+resource "aws_vpc_endpoint" "ecr_api" {
+  vpc_id              = aws_vpc.this.id
+  service_name        = "com.amazonaws.${data.aws_region.current.region}.ecr.api"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = aws_subnet.private[*].id
+  security_group_ids  = [aws_security_group.vpce.id]
+  private_dns_enabled = true
+
+  tags = merge(local.common_tags, {
+    Name = "rag-ecr-api-vpce"
+  })
+}
+
+resource "aws_vpc_endpoint" "ecr_dkr" {
+  vpc_id              = aws_vpc.this.id
+  service_name        = "com.amazonaws.${data.aws_region.current.region}.ecr.dkr"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = aws_subnet.private[*].id
+  security_group_ids  = [aws_security_group.vpce.id]
+  private_dns_enabled = true
+
+  tags = merge(local.common_tags, {
+    Name = "rag-ecr-dkr-vpce"
+  })
 }
 
 output "vpc_id" {

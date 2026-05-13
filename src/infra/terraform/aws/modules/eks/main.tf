@@ -4,10 +4,10 @@
 // Contract:
 // - private cluster endpoint only
 // - OIDC provider for IRSA
-// - two managed nodegroups only:
-//   - system    -> on-demand, untainted, stateful/control-plane-like services
-//   - workloads -> Spot, tainted, stateless services and jobs
-// - cluster security group rule is owned here
+// - exactly two managed nodegroups:
+//   - system    -> ON_DEMAND, untainted, platform services
+//   - workloads -> SPOT, tainted, stateless workloads and jobs
+// - control-plane security-group rule is owned here
 // - no CloudWatch dependency required
 
 variable "cluster_name" {

@@ -1,5 +1,5 @@
 // src/infra/terraform/aws/outputs.tf
-// Stable outputs for automation, kubeconfig generation, and downstream consumers.
+// Outputs for automation, admin access, and downstream consumers.
 
 output "aws_region" {
   description = "AWS region used by this stack."

@@ -81,4 +81,3 @@ curl http://localhost:8201/health
 - For **batch processing**, send multiple texts up to `SPARSE_BATCH_SIZE` – larger batches are rejected.
 - Sparse vectors are ideal for **keyword‑aware** hybrid search when combined with dense embeddings.
 
----

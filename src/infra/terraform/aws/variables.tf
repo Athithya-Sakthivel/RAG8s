@@ -151,13 +151,7 @@ variable "system_node_taints" {
     effect = string
   }))
 
-  default = [
-    {
-      key    = "node-type"
-      value  = "general"
-      effect = "NO_SCHEDULE"
-    }
-  ]
+  default = []
 
   validation {
     condition = alltrue([
@@ -301,7 +295,7 @@ variable "irsa_roles" {
       buckets = [
         {
           key    = "DATA_S3_BUCKET"
-          access = "read_write"
+          access = "read"
         }
       ]
     }
@@ -344,42 +338,42 @@ variable "github_actions_roles" {
 
   default = {
     frontend = {
-      repository = "athithya-sakthivel/E2E-RAG-System"
+      repository = "Athithya-Sakthivel/E2E-RAG-System"
       branch     = "main"
       role_name  = "gh-actions-frontend"
       ecr_repo   = "frontend"
     }
 
     retriever = {
-      repository = "athithya-sakthivel/E2E-RAG-System"
+      repository = "Athithya-Sakthivel/E2E-RAG-System"
       branch     = "main"
       role_name  = "gh-actions-retriever"
       ecr_repo   = "retriever"
     }
 
     dense_model = {
-      repository = "athithya-sakthivel/E2E-RAG-System"
+      repository = "Athithya-Sakthivel/E2E-RAG-System"
       branch     = "main"
       role_name  = "gh-actions-dense-model"
       ecr_repo   = "dense-model"
     }
 
     sparse_model = {
-      repository = "athithya-sakthivel/E2E-RAG-System"
+      repository = "Athithya-Sakthivel/E2E-RAG-System"
       branch     = "main"
       role_name  = "gh-actions-sparse-model"
       ecr_repo   = "sparse-model"
     }
 
     reranker = {
-      repository = "athithya-sakthivel/E2E-RAG-System"
+      repository = "Athithya-Sakthivel/E2E-RAG-System"
       branch     = "main"
       role_name  = "gh-actions-reranker"
       ecr_repo   = "reranker"
     }
 
     indexer = {
-      repository = "athithya-sakthivel/E2E-RAG-System"
+      repository = "Athithya-Sakthivel/E2E-RAG-System"
       branch     = "main"
       role_name  = "gh-actions-indexer"
       ecr_repo   = "indexer"
@@ -388,16 +382,17 @@ variable "github_actions_roles" {
 
   validation {
     condition = alltrue([
-      for _, v in var.github_actions_roles :
-      length(trimspace(v.repository)) > 0 &&
+      for v in var.github_actions_roles :
+      strcontains(v.repository, "/") &&
+      can(regex("^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$", v.repository)) &&
       length(trimspace(v.branch)) > 0 &&
+      v.branch == "main" &&
       length(trimspace(v.role_name)) > 0 &&
-      length(trimspace(v.ecr_repo)) > 0 &&
-      can(regex("^[a-z0-9._-]+/[A-Za-z0-9._-]+$", v.repository)) &&
       can(regex("^gh-actions-[a-z0-9-]+$", v.role_name)) &&
+      length(trimspace(v.ecr_repo)) > 0 &&
       can(regex("^[a-z0-9]+(-[a-z0-9]+)*$", v.ecr_repo))
     ])
-    error_message = "github_actions_roles entries must define a valid owner/repo, branch, role_name, and ecr_repo."
+    error_message = "github_actions_roles entries must define repository in owner/repo format, branch 'main', a gh-actions-* role_name, and a lowercase hyphenated ecr_repo."
   }
 }
 

@@ -104,42 +104,42 @@ irsa_roles = {
 
 github_actions_roles = {
   frontend = {
-    repository = "athithya-sakthivel/E2E-RAG-System"
+    repository = "Athithya-Sakthivel/E2E-RAG-System"
     branch     = "main"
     role_name  = "gh-actions-frontend"
     ecr_repo   = "frontend"
   }
 
   retriever = {
-    repository = "athithya-sakthivel/E2E-RAG-System"
+    repository = "Athithya-Sakthivel/E2E-RAG-System"
     branch     = "main"
     role_name  = "gh-actions-retriever"
     ecr_repo   = "retriever"
   }
 
   dense_model = {
-    repository = "athithya-sakthivel/E2E-RAG-System"
+    repository = "Athithya-Sakthivel/E2E-RAG-System"
     branch     = "main"
     role_name  = "gh-actions-dense-model"
     ecr_repo   = "dense-model"
   }
 
   sparse_model = {
-    repository = "athithya-sakthivel/E2E-RAG-System"
+    repository = "Athithya-Sakthivel/E2E-RAG-System"
     branch     = "main"
     role_name  = "gh-actions-sparse-model"
     ecr_repo   = "sparse-model"
   }
 
   reranker = {
-    repository = "athithya-sakthivel/E2E-RAG-System"
+    repository = "Athithya-Sakthivel/E2E-RAG-System"
     branch     = "main"
     role_name  = "gh-actions-reranker"
     ecr_repo   = "reranker"
   }
 
   indexer = {
-    repository = "athithya-sakthivel/E2E-RAG-System"
+    repository = "Athithya-Sakthivel/E2E-RAG-System"
     branch     = "main"
     role_name  = "gh-actions-indexer"
     ecr_repo   = "indexer"
@@ -201,7 +201,7 @@ cluster_autoscaler = {
   scan_interval_seconds      = 10
   max_node_provision_time    = 600
   expander                   = "least-waste"
-  balance_similar_nodegroups = false
+  balance_similar_nodegroups = true
 }
 
 tags = {
