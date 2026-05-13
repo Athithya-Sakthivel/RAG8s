@@ -102,8 +102,9 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: aws-actions/configure-aws-credentials@v6.1.1
         with:
-          role-to-assume: ${{ env.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: arn:aws:iam::681802563986:role/gh-actions-dense-model
+          aws-region: ap-south-1
+          role-session-name: github-actions-dense
 
       - name: Log in to ECR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
