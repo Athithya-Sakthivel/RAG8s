@@ -80,3 +80,5 @@ curl http://localhost:8201/health
 - On first use, the model is **downloaded** from Hugging Face Hub (cache in `/models_cache`).
 - For **batch processing**, send multiple texts up to `SPARSE_BATCH_SIZE` – larger batches are rejected.
 - Sparse vectors are ideal for **keyword‑aware** hybrid search when combined with dense embeddings.
+
+---

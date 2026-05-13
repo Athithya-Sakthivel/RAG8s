@@ -303,4 +303,3 @@ Starts Valkey, starts a mock retriever, generates a signing key, and validates:
 | Secrets in browser | JWT only; no refresh tokens or secrets stored |
 | Presigned URLs | Read-only (GET only), short-lived, generated server-side |
 | Fail-fast startup | Refuses to start if REQUIRE_AUTH=true and secrets are missing |
----

@@ -174,3 +174,5 @@ src/infra/indexing_pipeline/
 - **Resilient**: recursive batch splitting on embedder failures; exponential backoff with jitter on S3/Qdrant/embedder calls.
 - **Traceable**: full reverse mapping from any chunk back to original S3 bytes via `source_url` + offset fields; parser version and timestamp in every Parquet.
 - **Observable**: structured logging to stdout/stderr captured by CronJob for centralized monitoring.
+
+---
