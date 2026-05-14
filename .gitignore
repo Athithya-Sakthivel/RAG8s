@@ -136,7 +136,7 @@ celerybeat.pid
 
 # SageMath parsed files
 *.sage.py
-
+.trivy_cache
 # Environments
 .env
 .envrc

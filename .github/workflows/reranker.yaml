@@ -8,6 +8,7 @@ on:
   pull_request:
     paths:
       - src/services/reranker/**
+      - .github/workflows/reranker.yaml
 
 permissions:
   contents: read
