@@ -67,7 +67,7 @@ env:
   SPARSE_URL: http://sparse-svc.fastembed.svc.cluster.local:8201
   S3_BUCKET: ""                # overridden at deploy time
   DATA_S3_BUCKET: ""           # overridden at deploy time
-  DATA_S3_PREFIX: data/chunked/
+  DATA_S3_PREFIX: data/
   STORAGE_RAW_PREFIX: data/raw/
   STORAGE_CHUNKED_PREFIX: data/chunked/
   MAX_TOKENS_PER_CHUNK: "320"

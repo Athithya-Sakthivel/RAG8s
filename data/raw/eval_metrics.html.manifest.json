@@ -1,8 +1,0 @@
-{
-  "file_hash": "4e4744576f25c5484e0e7287e71eee880fb5b10225ab2a2614f57f5931a9789d",
-  "mime_type": "text/html",
-  "parser_version": "2.42.1",
-  "pipeline_run_id": "d0ca7174-2df4-4f9a-9ec9-9cc12a0c7ae6",
-  "s3_key": "data/raw/eval_metrics.html",
-  "timestamp": "2026-05-09T10:40:08.222886Z"
-}

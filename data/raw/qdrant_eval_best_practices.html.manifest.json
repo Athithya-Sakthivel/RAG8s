@@ -1,8 +1,0 @@
-{
-  "file_hash": "0a9c7f743089e344c014e071eb92e1ed78e04f829d1f2a485bda2c6278292163",
-  "mime_type": "text/html",
-  "parser_version": "2.42.1",
-  "pipeline_run_id": "d0ca7174-2df4-4f9a-9ec9-9cc12a0c7ae6",
-  "s3_key": "data/raw/qdrant_eval_best_practices.html",
-  "timestamp": "2026-05-09T10:40:11.566329Z"
-}
