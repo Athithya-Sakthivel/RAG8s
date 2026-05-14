@@ -1,24 +1,19 @@
 # Default values for indexing-cronjob.
 
-# Namespace creation
-# createNamespace: true
 namespace: indexing
 
-# ServiceAccount configuration
 serviceAccount:
   name: indexer
-  annotations:
-    eks.amazonaws.com/role-arn: ""   # set to ARN if using IRSA, e.g. arn:aws:iam::681802563986:role/rag-indexer-irsa-role
+  annotations: {}
+  # eks.amazonaws.com/role-arn: ""
 
-# Container image
 image:
   registry: ghcr.io
   repository: athithya-sakthivel/indexing-pipeline
   tag: "2026-05-09-16-28--d613be2"
   digest: "sha256:f293916991de710b8d725dfe71aaa74e2148c45913e420d76c77829a5482df69"
   pullPolicy: IfNotPresent
-  
-# NetworkPolicy configuration
+
 networkPolicy:
   enabled: true
   name: indexing-cronjob-egress
@@ -39,7 +34,6 @@ networkPolicy:
     enabled: true
     port: 443
 
-# CronJob configuration
 cronjob:
   name: indexing-backup-cronjob
   schedule: "0 */6 * * *"
@@ -48,19 +42,11 @@ cronjob:
   failedJobsHistoryLimit: 1
   backoffLimit: 1
   restartPolicy: Never
-  serviceAccountName: indexer   # should match serviceAccount.name
+  serviceAccountName: indexer
   labels:
     app.kubernetes.io/name: indexing-backup-cronjob
     app.kubernetes.io/component: indexing
 
-# Container image
-image:
-  repository: ghcr.io/athithya-sakthivel/indexing-pipeline
-  tag: "2026-05-09-16-28--d613be2"
-  digest: "sha256:f293916991de710b8d725dfe71aaa74e2148c45913e420d76c77829a5482df69"
-  pullPolicy: IfNotPresent
-
-# Container command & args
 command:
   - /opt/venv/bin/python
   - /indexing_pipeline/indexing_pipeline.py
@@ -68,7 +54,6 @@ args:
   - --workdir
   - /indexing_pipeline
 
-# Environment variables – all values will be quoted automatically
 env:
   PYTHONUNBUFFERED: "1"
   TMPDIR: /tmp
@@ -79,8 +64,8 @@ env:
   QDRANT_URL: http://qdrant.qdrant.svc.cluster.local:6333
   DENSE_URL: http://dense-svc.fastembed.svc.cluster.local:8200
   SPARSE_URL: http://sparse-svc.fastembed.svc.cluster.local:8201
-  S3_BUCKET: s3-temp-bucket-mlsecops-681802563986
-  DATA_S3_BUCKET: s3-temp-bucket-mlsecops-681802563986
+  S3_BUCKET: ""
+  DATA_S3_BUCKET: ""
   DATA_S3_PREFIX: data/chunked/
   STORAGE_RAW_PREFIX: data/raw/
   STORAGE_CHUNKED_PREFIX: data/chunked/
@@ -123,27 +108,24 @@ env:
   MIN_INDEXED_POINTS_FOR_BACKUP: "100"
   MIN_INDEX_DELTA_RATIO_FOR_BACKUP: "0.0"
 
-# Pod resources
 resources:
   requests:
-    cpu: "1"
-    memory: 1Gi
+    cpu: "500m"
+    memory: 512Mi
   limits:
-    cpu: "1"
+    cpu: "2"
     memory: 2Gi
 
-# Node selector
+# Target only compute nodes and tolerate their taint
 nodeSelector:
   node-type: compute
 
-# Tolerations
 tolerations:
   - key: "node-type"
     operator: "Equal"
     value: "compute"
     effect: "NoSchedule"
 
-# Pod security context
 podSecurityContext:
   runAsNonRoot: true
   runAsUser: 10001
@@ -151,7 +133,6 @@ podSecurityContext:
   seccompProfile:
     type: RuntimeDefault
 
-# Container security context
 containerSecurityContext:
   runAsNonRoot: true
   runAsUser: 10001
