@@ -56,6 +56,22 @@ args:
   - /indexing_pipeline
 
 env:
+  # --- S3 Buckets ---
+  S3_BUCKET: ""                         # overridden to DATA_S3_BUCKET at deploy time
+  DATA_S3_BUCKET: ""                    # overridden to DATA_S3_BUCKET at deploy time
+  BACKUP_S3_BUCKET: ""                  # separate backup bucket, if desired
+
+  # --- Router prefixes (parse & chunk) ---
+  S3_RAW_PREFIX: data/raw/
+  S3_CHUNKED_PREFIX: data/chunked/
+
+  # --- Indexer prefix ---
+  DATA_S3_PREFIX: data/chunked/
+
+  # --- Backup prefix (inside backup bucket) ---
+  BACKUP_S3_PREFIX: qdrant/backups
+
+  # --- other env vars (unchanged) ---
   PYTHONUNBUFFERED: "1"
   TMPDIR: /tmp
   LOG_LEVEL: INFO
@@ -65,11 +81,6 @@ env:
   QDRANT_URL: http://qdrant.qdrant.svc.cluster.local:6333
   DENSE_URL: http://dense-svc.fastembed.svc.cluster.local:8200
   SPARSE_URL: http://sparse-svc.fastembed.svc.cluster.local:8201
-  S3_BUCKET: ""                # overridden at deploy time
-  DATA_S3_BUCKET: ""           # overridden at deploy time
-  DATA_S3_PREFIX: data/chunked/
-  STORAGE_RAW_PREFIX: data/raw/
-  STORAGE_CHUNKED_PREFIX: data/chunked/
   MAX_TOKENS_PER_CHUNK: "320"
   MIN_TOKENS_PER_CHUNK: "100"
   NUMBER_OF_OVERLAPPING_SENTENCES: "2"
@@ -108,7 +119,7 @@ env:
   ENABLE_QDRANT_BACKUP: "true"
   MIN_INDEXED_POINTS_FOR_BACKUP: "100"
   MIN_INDEX_DELTA_RATIO_FOR_BACKUP: "0.0"
-
+  
 resources:
   requests:
     cpu: "500m"
