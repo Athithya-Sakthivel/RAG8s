@@ -104,3 +104,4 @@ curl http://localhost:8202/metrics
 - The request fails if `len(documents) > RERANKER_MAX_DOCS`. Adjust the variable for your needs.
 - Reranking is **CPU‑bound**; the service uses a thread pool to keep the async event loop responsive. For high throughput, increase `UVICORN_WORKERS` (set in the container) and allocate enough CPU cores.
 - Prometheus metrics are exported on port 8202 at `/metrics`. Ensure your Prometheus scrape configuration points to `rag-reranker-model.inference:8202/metrics`
+---

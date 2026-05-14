@@ -93,3 +93,4 @@ curl http://localhost:8201/metrics
 - For **batch processing**, send multiple texts up to `SPARSE_BATCH_SIZE` – larger batches are rejected.
 - Sparse vectors are ideal for **keyword‑aware** hybrid search when combined with dense embeddings.
 - Prometheus metrics are exported on port 8201 at `/metrics`. Ensure your scrape configuration points to `rag-sparse-model.inference:8201/metrics`.
+---
