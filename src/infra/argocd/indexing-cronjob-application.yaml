@@ -9,8 +9,7 @@ metadata:
     app.kubernetes.io/part-of: e2e-rag-system
   annotations:
     description: Indexing CronJob Helm deployment
-    deployed-at: "2026-05-14T10:52:38Z"
-    deployed-by: "user"
+    deployed-at: "2026-05-14T11:33:36Z"
     aws-region: "ap-south-1"
     ecr-repository: "681802563986.dkr.ecr.ap-south-1.amazonaws.com/indexer"
 spec:
@@ -33,6 +32,15 @@ spec:
         env:
           S3_BUCKET: "rag-staging-qdrant-backups-681802563986"
           DATA_S3_BUCKET: "rag-staging-data-681802563986"
+        resources:
+          requests:
+            cpu: "500m"
+            memory: 512Mi
+          limits:
+            cpu: "2"
+            memory: 2Gi
+        nodeSelector: {}
+        tolerations: []
   destination:
     server: https://kubernetes.default.svc
     namespace: indexing
