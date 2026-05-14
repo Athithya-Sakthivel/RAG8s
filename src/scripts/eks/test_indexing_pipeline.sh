@@ -149,6 +149,12 @@ spec:
         env:
           S3_BUCKET: "${BACKUP_S3_BUCKET}"
           DATA_S3_BUCKET: "${DATA_S3_BUCKET}"
+
+          # In the generated ArgoCD values, set S3_BUCKET to the data bucket, not the backup bucket
+env:
+  S3_BUCKET: "${DATA_S3_BUCKET}"       # was BACKUP_S3_BUCKET - WRONG
+  DATA_S3_BUCKET: "${DATA_S3_BUCKET}"
+  
         resources:
           requests:
             cpu: "500m"

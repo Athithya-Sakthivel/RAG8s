@@ -46,7 +46,7 @@ _h.setFormatter(ColorFormatter("%(asctime)s %(levelname)s %(message)s"))
 log.handlers[:] = [_h]
 
 # config (read lazily where necessary)
-S3_BUCKET = os.getenv("S3_BUCKET")
+S3_BUCKET = os.getenv("DATA_S3_BUCKET")
 S3_RAW_PREFIX = os.getenv("S3_RAW_PREFIX", "data/raw/").rstrip("/") + "/"
 S3_CHUNKED_PREFIX = os.getenv("S3_CHUNKED_PREFIX", "data/chunked/").rstrip("/") + "/"
 FORCE_OVERWRITE = os.getenv("FORCE_OVERWRITE", "false").lower() == "true"

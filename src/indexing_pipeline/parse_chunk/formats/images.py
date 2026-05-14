@@ -46,7 +46,7 @@ def _env_bool(name: str, default: bool) -> bool:
     return default
 
 # Read env defaults (but do not fail here)
-S3_BUCKET = os.getenv("S3_BUCKET")  # validated inside parse_file()
+S3_BUCKET = os.getenv("DATA_S3_BUCKET")  # validated inside parse_file()
 S3_RAW_PREFIX = os.getenv("S3_RAW_PREFIX", "data/raw/").rstrip("/") + "/"
 S3_CHUNKED_PREFIX = os.getenv("S3_CHUNKED_PREFIX", "data/chunked/").rstrip("/") + "/"
 FORCE_OVERWRITE = os.getenv("FORCE_OVERWRITE", "false").lower() == "true"

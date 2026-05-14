@@ -41,8 +41,7 @@ RETRY_BASE_SECONDS = float(os.environ.get("BACKUP_RETRY_BASE", "1.5") or "1.5")
 RETRY_CAP_SECONDS = float(os.environ.get("BACKUP_RETRY_CAP", "60") or "60")
 
 S3_BUCKET = (
-    (os.environ.get("DATA_S3_BUCKET") or "").strip()
-    or (os.environ.get("BACKUP_S3_BUCKET") or "").strip()
+    (os.environ.get("BACKUP_S3_BUCKET") or "").strip()
     or (os.environ.get("BACKUP_BUCKET") or "").strip()
 )
 

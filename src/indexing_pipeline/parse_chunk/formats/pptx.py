@@ -81,7 +81,7 @@ def _init_env():
 
     if getattr(_init_env, "done", False):
         return
-    S3_BUCKET = os.getenv("S3_BUCKET") or S3_BUCKET
+    S3_BUCKET = os.getenv("DATA_S3_BUCKET") or S3_BUCKET
     S3_RAW_PREFIX = os.getenv("S3_RAW_PREFIX", S3_RAW_PREFIX).rstrip("/") + "/"
     S3_CHUNKED_PREFIX = os.getenv("S3_CHUNKED_PREFIX", S3_CHUNKED_PREFIX).rstrip("/") + "/"
     SLIDES_PER_CHUNK = int(os.getenv("PPTX_SLIDES_PER_CHUNK", str(SLIDES_PER_CHUNK)))

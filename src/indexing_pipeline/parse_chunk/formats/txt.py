@@ -47,7 +47,7 @@ log.handlers[:] = [_handler]
 
 # ---------- config (read, but do not validate here) ------------------------
 # keep values readable at import; validation happens inside parse_file()
-S3_BUCKET = os.getenv("S3_BUCKET")
+S3_BUCKET = os.getenv("DATA_S3_BUCKET")
 S3_RAW_PREFIX = os.getenv("S3_RAW_PREFIX", "data/raw/").rstrip("/") + "/"
 S3_CHUNKED_PREFIX = os.getenv("S3_CHUNKED_PREFIX", "data/chunked/").rstrip("/") + "/"
 ENC_NAME = os.getenv("TOKEN_ENCODER", "cl100k_base")

@@ -61,7 +61,7 @@ logger.handlers[:] = [handler]
 log = logger
 
 # --- basic config (read from env but do not fail on import) ---
-S3_BUCKET = os.getenv("S3_BUCKET")
+S3_BUCKET = os.getenv("DATA_S3_BUCKET")
 S3_RAW_PREFIX = os.getenv("S3_RAW_PREFIX", "").rstrip("/") + "/"
 S3_CHUNKED_PREFIX = os.getenv("S3_CHUNKED_PREFIX", "").rstrip("/") + "/"
 PARSER_VERSION = os.getenv("PARSER_VERSION_JSONL", "polars-jsonl-v1")

@@ -24,7 +24,7 @@ logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 log = logging.getLogger("html_trafilatura")
 
 # ---- config from env (safe to read at import) --------------------------------
-S3_BUCKET = os.getenv("S3_BUCKET")
+S3_BUCKET = os.getenv("DATA_S3_BUCKET")
 S3_RAW_PREFIX = os.getenv("S3_RAW_PREFIX", "data/raw/").rstrip("/") + "/"
 S3_CHUNKED_PREFIX = os.getenv("S3_CHUNKED_PREFIX", "data/chunked/").rstrip("/") + "/"
 PARSER_VERSION = os.getenv("PARSER_VERSION_HTML", "trafilatura-only-v2")

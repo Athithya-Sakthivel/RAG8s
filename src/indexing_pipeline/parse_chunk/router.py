@@ -81,7 +81,7 @@ def env_or_fail(var, default=None, mandatory=True):
     return val
 
 # -------------------- config/env --------------------------------------------
-S3_BUCKET = env_or_fail("S3_BUCKET")
+S3_BUCKET = env_or_fail("DATA_S3_BUCKET")
 S3_RAW_PREFIX = os.getenv("S3_RAW_PREFIX", "data/raw/").rstrip("/") + "/"
 S3_CHUNKED_PREFIX = os.getenv("S3_CHUNKED_PREFIX", "data/chunked/").rstrip("/") + "/"
 CHUNK_FORMAT = os.getenv("CHUNK_FORMAT", "json").lower()
