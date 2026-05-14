@@ -21,13 +21,12 @@ global:
 # Metrics exposed at: /metrics on port 8200
 dense:
   enabled: true
-  embedderImage: ghcr.io/athithya-sakthivel/sparse:2026-05-06-06-26--13b7433@sha256:e977f4eedd896f28de999809eefe8db7c2048dc7fb9f7700d450a333449d334b
-  namespace: inference
+  embedderImage: ghcr.io/athithya-sakthivel/dense:2026-05-14-11-57--a5e0c92@sha256:15299ccf652748eddf148f1c26aacef467cf25aedb13cadf6b5b8a06b207cd8b
   modelName: "BAAI/bge-small-en-v1.5"  # HuggingFace model: https://qdrant.github.io/fastembed/examples/Supported_Models/#supported-text-embedding-models
   dim: 384  # Vector dimensions. Must match model output size
   batchSize: 16  # Texts processed at once. Higher = faster, more memory
   gpuCount: 1  # GPUs requested. ONLY used if global.cuda is true
-  replicas: 2  # Pod copies for HA. IGNORED if hpa.enabled is true
+  replicas: 1  # Pod copies for HA. IGNORED if hpa.enabled is true
   hpa:
     enabled: false  # Auto-scale replicas based on CPU
     min: 1  # Minimum pods when idle
@@ -35,19 +34,18 @@ dense:
     targetCPU: 60  # Scale up when CPU exceeds 60%
     resources:
       requests:
-        cpu: 500m  # CPU requested per pod (guaranteed)
-        memory: 1Gi  # Memory requested per pod (guaranteed)
+        cpu: 200m      # Lightweight model, 200m is plenty for moderate traffic
+        memory: 256Mi   # Model is ~130MB in memory, 256Mi gives comfortable headroom
       limits:
-        cpu: 2000m  # CPU limit per pod (burstable)
-        memory: 2Gi  # Memory limit per pod (max allowed)
+        cpu: 2000m      # Allow bursting for batch processing
+        memory: 1Gi     # Upper bound, model rarely exceeds 400Mi
 
 # SPARSE EMBEDDING - Converts text to sparse (mostly zeros) vectors
 # ServiceAccount: rag-sparse-model (auto-created, immutable)
 # Metrics exposed at: /metrics on port 8201
 sparse:
   enabled: true
-  embedderImage: "myregistry/sparse-embedder:latest"
-  namespace: inference
+  embedderImage: ghcr.io/athithya-sakthivel/sparse:2026-05-14-11-57--a5e0c92@sha256:102eadbf834671f59f7af85eadbb623c262b765f76cb0800a1d6195cb949e589
   modelName: "Qdrant/minicoil-v1"  # HuggingFace model: https://qdrant.github.io/fastembed/examples/Supported_Models/#supported-sparse-text-embedding-models
   batchSize: 16  # Texts processed at once. Higher = faster, more memory
   gpuCount: 0  # CPU only (sparse models don't need GPU)
@@ -59,23 +57,22 @@ sparse:
     targetCPU: 60  # Scale up when CPU exceeds 60%
     resources:
       requests:
-        cpu: 500m  # CPU requested per pod (guaranteed)
-        memory: 1Gi  # Memory requested per pod (guaranteed)
+        cpu: 500m      # SPLADE models are more compute-intensive
+        memory: 512Mi   # MiniCoIL has larger vocabulary, needs more memory
       limits:
-        cpu: 2000m  # CPU limit per pod (burstable)
-        memory: 2Gi  # Memory limit per pod (max allowed)
+        cpu: 4000m      # Allow full CPU usage for sparse encoding
+        memory: 2Gi     # Upper bound for larger batches
 
 # RERANKER - Re-orders search results by relevance
 # ServiceAccount: rag-reranker-model (auto-created, immutable)
 # Metrics exposed at: /metrics on port 8202
 reranker:
   enabled: true
-  embedderImage: ghcr.io/athithya-sakthivel/reranker:2026-05-07-06-10--5e0b28b@sha256:60475c50371406a2f43ef9b5c2e5a0a32f9b953a02ecbe7f622ad9c1ddd92495
-  namespace: inference
+  embedderImage:  ghcr.io/athithya-sakthivel/reranker:2026-05-14-11-57--a5e0c92@sha256:c1508c2b2a757bc7ade5a74098f669ab281e44eb9073aa3268049f4f6e3ec467
   modelName: "Xenova/ms-marco-MiniLM-L-6-v2"  # HuggingFace model: https://qdrant.github.io/fastembed/examples/Supported_Models/#supported-rerank-cross-encoder-models
   batchSize: 16  # Document pairs scored at once. Higher = faster, more memory
   gpuCount: 1  # Rerankers benefit significantly from GPU
-  replicas: 2  # Pod copies for HA. IGNORED if hpa.enabled is true
+  replicas: 1  # Pod copies for HA. IGNORED if hpa.enabled is true
   hpa:
     enabled: false  # Auto-scale replicas based on CPU
     min: 1  # Minimum pods when idle
@@ -83,13 +80,13 @@ reranker:
     targetCPU: 60  # Scale up when CPU exceeds 60%
     resources:
       requests:
-        cpu: 500m  # CPU requested per pod (guaranteed)
-        memory: 1Gi  # Memory requested per pod (guaranteed)
+        cpu: 500m      # Reranking is the most CPU-intensive operation
+        memory: 512Mi   # Cross-encoder model ~90MB, plus working memory
       limits:
-        cpu: 2000m  # CPU limit per pod (burstable)
-        memory: 2Gi  # Memory limit per pod (max allowed)
+        cpu: 4000m      # Allow maximum CPU for scoring document pairs
+        memory: 2Gi     # Upper bound for large document batches
 
-### PROMETHEUS SCRAPING CONFIGURATION
+### PROMETHEUS SCRAPING CONFIGURATION EXAMPLE
 ### Each service exposes these metrics at /metrics:
 ###   {service}_requests_total{model, cuda, status}  - Request count by outcome
 ###   {service}_request_duration_seconds{model, cuda} - Latency histogram
@@ -97,18 +94,3 @@ reranker:
 ###   {service}_errors_total{model, cuda, error_type} - Errors by type
 ###
 ### PORT, /metrics, serviceaccount names are fixed but namespace may vary.
-scrape_configs:
-  - job_name: 'fastembed'
-    metrics_path: '/metrics'
-    scrape_interval: 15s
-    scrape_timeout: 10s
-    static_configs:
-      - targets:
-        - 'rag-dense-model.inference:8200'
-        - 'rag-sparse-model.inference:8201'
-        - 'rag-reranker-model.inference:8202'
-    metric_relabel_configs:
-      # Keep all metrics from these services
-      - source_labels: [__name__]
-        regex: '(dense|sparse|reranker)_.*'
-        action: keep

@@ -1,20 +1,20 @@
-{{- if .Values.reranker.enabled }}
-{{- $service := "reranker" }}
-{{- $component := "reranker" }}
-{{- $name := "reranker" }}
+{{- if .Values.sparse.enabled }}
+{{- $service := "sparse" }}
+{{- $component := "embedder" }}
+{{- $name := "sparse" }}
 {{- $labels := dict "name" $name "component" $component "instance" $name }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "fastembed.deploymentName" (dict "service" $service) }}
-  namespace: {{ .Values.reranker.namespace }}
+  namespace: {{ .Values.sparse.namespace }}
   labels:
     {{- include "fastembed.labels" (dict "Chart" .Chart "Release" .Release "name" $name "component" $component "instance" $name) | nindent 4 }}
 spec:
-  {{- if not .Values.reranker.hpa.enabled }}
-  replicas: {{ .Values.reranker.replicas }}
+  {{- if not .Values.sparse.hpa.enabled }}
+  replicas: {{ .Values.sparse.replicas }}
   {{- else }}
-  replicas: {{ .Values.reranker.hpa.min }}
+  replicas: {{ .Values.sparse.hpa.min }}
   {{- end }}
   selector:
     matchLabels:
@@ -39,30 +39,38 @@ spec:
         runAsNonRoot: true
       containers:
       - name: {{ $name }}
-        image: {{ .Values.reranker.embedderImage }}
+        image: {{ .Values.sparse.embedderImage }}
         ports:
-        - containerPort: 8202
+        - containerPort: 8201
         env:
         - name: ENV
           value: {{ .Values.global.logLevel | upper | quote }}
-        - name: RERANKER_HOST
+        - name: SPARSE_HOST
           value: "0.0.0.0"
-        - name: RERANKER_PORT
-          value: "8202"
-        - name: RERANKER_LOGLEVEL
+        - name: SPARSE_PORT
+          value: "8201"
+        - name: SPARSE_LOGLEVEL
           value: {{ .Values.global.logLevel | upper | quote }}
-        - name: RERANKER_MODEL_NAME
-          value: {{ .Values.reranker.modelName | quote }}
-        - name: RERANKER_MAX_DOCS
-          value: {{ .Values.reranker.batchSize | quote }}
-        - name: RERANKER_CUDA
-          value: {{ if and .Values.global.cuda (gt (int .Values.reranker.gpuCount) 0) }}"1"{{ else }}"0"{{ end }}
+        - name: SPARSE_MODEL_NAME
+          value: {{ .Values.sparse.modelName | quote }}
+        - name: SPARSE_BATCH_SIZE
+          value: {{ .Values.sparse.batchSize | quote }}
+        - name: SPARSE_CUDA
+          value: {{ if and .Values.global.cuda (gt (int .Values.sparse.gpuCount) 0) }}"1"{{ else }}"0"{{ end }}
         - name: PRELOAD_MODEL
-          value: {{ if .Values.global.cuda }}"1"{{ else }}"0"{{ end }}
+          value: "1"
+        - name: FASTEMBED_CACHE
+          value: /models_cache
+        - name: HF_HOME
+          value: /models_cache
+        - name: HUGGINGFACE_HUB_CACHE
+          value: /models_cache
+        - name: TRANSFORMERS_CACHE
+          value: /models_cache
         livenessProbe:
           httpGet:
             path: /health
-            port: 8202
+            port: 8201
           initialDelaySeconds: 30
           periodSeconds: 5
           timeoutSeconds: 3
@@ -70,7 +78,7 @@ spec:
         readinessProbe:
           httpGet:
             path: /readyz
-            port: 8202
+            port: 8201
           initialDelaySeconds: 10
           periodSeconds: 5
           timeoutSeconds: 3
@@ -78,12 +86,12 @@ spec:
         startupProbe:
           httpGet:
             path: /readyz
-            port: 8202
+            port: 8201
           periodSeconds: 5
           timeoutSeconds: 3
           failureThreshold: 60
         resources:
-          {{- toYaml .Values.reranker.hpa.resources | nindent 10 }}
+          {{- toYaml .Values.sparse.hpa.resources | nindent 10 }}
         securityContext:
           runAsNonRoot: true
           runAsUser: 1000

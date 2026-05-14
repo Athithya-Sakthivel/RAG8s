@@ -29,6 +29,18 @@ spec:
       terminationGracePeriodSeconds: 30
       securityContext:
         fsGroup: 1000
+      
+      # === NODE SELECTOR ===
+      nodeSelector:
+        node-type: compute  # Schedule only on compute nodes
+      
+      # === TOLERATIONS ===
+      tolerations:
+        - key: "node-type"
+          operator: "Equal"
+          value: "compute"
+          effect: "NoSchedule"
+      
       volumes:
         - name: tmp
           emptyDir: {}

@@ -30,6 +30,18 @@ spec:
       terminationGracePeriodSeconds: 30
       securityContext:
         fsGroup: 1000
+      
+      # === NODE SELECTOR ===
+      nodeSelector:
+        node-type: compute  # Schedule only on compute nodes
+      
+      # === TOLERATIONS ===
+      tolerations:
+        - key: "node-type"
+          operator: "Equal"
+          value: "compute"
+          effect: "NoSchedule"
+      
       volumes:
         - name: tmp
           emptyDir: {}
@@ -66,6 +78,14 @@ spec:
               value: meta.llama3-8b-instruct-v1:0
             - name: COLLECTION_NAME
               value: default_rag_collection1
+            # Service URLs for embedding and reranker services
+            - name: DENSE_URL
+              value: "http://dense-svc.fastembed.svc.cluster.local:8200"
+            - name: SPARSE_URL
+              value: "http://sparse-svc.fastembed.svc.cluster.local:8201"
+            - name: RERANKER_URL
+              value: "http://reranker-svc.fastembed.svc.cluster.local:8202"
+            # Presigned URL configuration
             - name: ENABLE_PRESIGNED_URLS
               value: "true"
             - name: PRESIGNED_URL_TTL_SECONDS

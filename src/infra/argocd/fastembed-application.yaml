@@ -1,0 +1,38 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: fastembed
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: fastembed
+    app.kubernetes.io/managed-by: argocd
+  annotations:
+    description: FastEmbed services (dense, sparse, reranker) Helm deployment
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Athithya-Sakthivel/E2E-RAG-System.git
+    targetRevision: main
+    path: src/infra/helm/fastembed_svc
+    helm:
+      valueFiles:
+        - values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: fastembed
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m

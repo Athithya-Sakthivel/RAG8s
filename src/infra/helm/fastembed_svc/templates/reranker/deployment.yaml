@@ -1,20 +1,20 @@
-{{- if .Values.dense.enabled }}
-{{- $service := "dense" }}
-{{- $component := "embedder" }}
-{{- $name := "dense" }}
+{{- if .Values.reranker.enabled }}
+{{- $service := "reranker" }}
+{{- $component := "reranker" }}
+{{- $name := "reranker" }}
 {{- $labels := dict "name" $name "component" $component "instance" $name }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "fastembed.deploymentName" (dict "service" $service) }}
-  namespace: {{ .Values.dense.namespace }}
+  namespace: {{ .Values.reranker.namespace }}
   labels:
     {{- include "fastembed.labels" (dict "Chart" .Chart "Release" .Release "name" $name "component" $component "instance" $name) | nindent 4 }}
 spec:
-  {{- if not .Values.dense.hpa.enabled }}
-  replicas: {{ .Values.dense.replicas }}
+  {{- if not .Values.reranker.hpa.enabled }}
+  replicas: {{ .Values.reranker.replicas }}
   {{- else }}
-  replicas: {{ .Values.dense.hpa.min }}
+  replicas: {{ .Values.reranker.hpa.min }}
   {{- end }}
   selector:
     matchLabels:
@@ -39,34 +39,38 @@ spec:
         runAsNonRoot: true
       containers:
       - name: {{ $name }}
-        image: {{ .Values.dense.embedderImage }}
+        image: {{ .Values.reranker.embedderImage }}
         ports:
-        - containerPort: 8200
+        - containerPort: 8202
         env:
         - name: ENV
           value: {{ .Values.global.logLevel | upper | quote }}
-        - name: DENSE_HOST
+        - name: RERANKER_HOST
           value: "0.0.0.0"
-        - name: DENSE_PORT
-          value: "8200"
-        - name: DENSE_LOGLEVEL
+        - name: RERANKER_PORT
+          value: "8202"
+        - name: RERANKER_LOGLEVEL
           value: {{ .Values.global.logLevel | upper | quote }}
-        - name: DENSE_MODEL_NAME
-          value: {{ .Values.dense.modelName | quote }}
-        - name: DENSE_DIM
-          value: {{ .Values.dense.dim | quote }}
-        - name: DENSE_BATCH_SIZE
-          value: {{ .Values.dense.batchSize | quote }}
-        - name: DENSE_NORMALIZE
-          value: "1"
-        - name: DENSE_CUDA
-          value: {{ if and .Values.global.cuda (gt (int .Values.dense.gpuCount) 0) }}"1"{{ else }}"0"{{ end }}
+        - name: RERANKER_MODEL_NAME
+          value: {{ .Values.reranker.modelName | quote }}
+        - name: RERANKER_MAX_DOCS
+          value: {{ .Values.reranker.batchSize | quote }}
+        - name: RERANKER_CUDA
+          value: {{ if and .Values.global.cuda (gt (int .Values.reranker.gpuCount) 0) }}"1"{{ else }}"0"{{ end }}
         - name: PRELOAD_MODEL
-          value: "1"
+          value: {{ if .Values.global.cuda }}"1"{{ else }}"0"{{ end }}
+        - name: FASTEMBED_CACHE
+          value: /models_cache
+        - name: HF_HOME
+          value: /models_cache
+        - name: HUGGINGFACE_HUB_CACHE
+          value: /models_cache
+        - name: TRANSFORMERS_CACHE
+          value: /models_cache
         livenessProbe:
           httpGet:
             path: /health
-            port: 8200
+            port: 8202
           initialDelaySeconds: 30
           periodSeconds: 5
           timeoutSeconds: 3
@@ -74,7 +78,7 @@ spec:
         readinessProbe:
           httpGet:
             path: /readyz
-            port: 8200
+            port: 8202
           initialDelaySeconds: 10
           periodSeconds: 5
           timeoutSeconds: 3
@@ -82,12 +86,12 @@ spec:
         startupProbe:
           httpGet:
             path: /readyz
-            port: 8200
+            port: 8202
           periodSeconds: 5
           timeoutSeconds: 3
           failureThreshold: 60
         resources:
-          {{- toYaml .Values.dense.hpa.resources | nindent 10 }}
+          {{- toYaml .Values.reranker.hpa.resources | nindent 10 }}
         securityContext:
           runAsNonRoot: true
           runAsUser: 1000

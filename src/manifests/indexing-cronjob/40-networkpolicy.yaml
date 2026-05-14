@@ -27,17 +27,25 @@ spec:
     ports:
     - protocol: TCP
       port: 6333
+  # Dense embedding service in fastembed namespace
   - to:
     - namespaceSelector:
         matchLabels:
-          kubernetes.io/metadata.name: inference
+          kubernetes.io/metadata.name: fastembed
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: dense
     ports:
     - protocol: TCP
       port: 8200
+  # Sparse embedding service in fastembed namespace
   - to:
     - namespaceSelector:
         matchLabels:
-          kubernetes.io/metadata.name: inference
+          kubernetes.io/metadata.name: fastembed
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: sparse
     ports:
     - protocol: TCP
       port: 8201

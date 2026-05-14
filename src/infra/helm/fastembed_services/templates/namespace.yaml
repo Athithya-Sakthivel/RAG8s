@@ -1,8 +1,0 @@
-{{- if .Values.global.createNamespace }}
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: {{ .Values.dense.namespace | default "inference" }}
-  labels:
-    app.kubernetes.io/managed-by: {{ .Release.Service }}
-{{- end }}

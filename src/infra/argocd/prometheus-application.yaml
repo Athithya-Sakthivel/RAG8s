@@ -181,6 +181,14 @@ spec:
             static_configs:
               - targets:
                   - 'prometheus-alertmanager.monitoring.svc.cluster.local:9093'
+                  
+          - job_name: 'fastembed'
+            scrape_interval: 30s
+            static_configs:
+              - targets:
+                  - 'rag-dense-model.fastembed:8200'
+                  - 'rag-sparse-model.fastembed:8201'
+                  - 'rag-reranker-model.fastembed:8202'
 
         serverFiles:
           alerts:

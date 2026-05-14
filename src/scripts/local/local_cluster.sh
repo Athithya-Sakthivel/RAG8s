@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# echo 'export KUBECONFIG=$HOME/.kube/config' >> ~/.bashrc && source ~/.bashrc
 
 # ---------- ensure we have sudo when not root ----------
 if [ "$EUID" -ne 0 ]; then
@@ -72,6 +73,12 @@ if ! kubectl get node "$NODE_NAME" &>/dev/null; then
     echo "Check the k3s logs with: sudo journalctl -u k3s -f"
     exit 1
 fi
+
+kubectl label node k3s-local node-type=compute
+
+sudo k3s kubectl config view --raw > ~/.kube/config
+chmod 600 ~/.kube/config
+export KUBECONFIG=$HOME/.kube/config
 
 # ============================================================================
 # 5. DONE
