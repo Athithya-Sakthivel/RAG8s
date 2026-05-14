@@ -13,13 +13,13 @@ spec:
   source:
     repoURL: https://qdrant.github.io/qdrant-helm
     chart: qdrant
-    targetRevision: 1.18.0
+    targetRevision: v1.17.1
     helm:
       values: |
         replicaCount: 1
         image:
           repository: docker.io/qdrant/qdrant
-          tag: v1.18.0-unprivileged
+          tag: v1.17.1
           pullPolicy: IfNotPresent
         service:
           type: ClusterIP
@@ -30,11 +30,11 @@ spec:
           - ReadWriteOnce
         resources:
           requests:
-            cpu: '0.5'
+            cpu: '1'
             memory: 512Mi
           limits:
             cpu: '1'
-            memory: 1Gi
+            memory: 2Gi
         config:
           cluster:
             enabled: true
@@ -84,87 +84,3 @@ spec:
     kind: ConfigMap
     jsonPointers:
     - /data
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: qdrant-ingress-balanced
-  namespace: qdrant
-spec:
-  podSelector: {}
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    # Allow all pods in the inference namespace to query Qdrant
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: inference
-      ports:
-        - protocol: TCP
-          port: 6333
-        - protocol: TCP
-          port: 6334
-
-    # Allow indexing jobs in the indexing namespace to upsert and back up data
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: indexing
-      ports:
-        - protocol: TCP
-          port: 6333
-        - protocol: TCP
-          port: 6334
-
-    # Allow same-namespace traffic for cluster peer communication
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: qdrant
-      ports:
-        - protocol: TCP
-          port: 6333
-        - protocol: TCP
-          port: 6334
-        - protocol: TCP
-          port: 6335
-
-    # Allow Prometheus (monitoring namespace) to scrape metrics
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: monitoring
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: prometheus
-      ports:
-        - protocol: TCP
-          port: 6333
-
-  egress:
-    # DNS
-    - to:
-        - namespaceSelector: {}
-          podSelector:
-            matchLabels:
-              k8s-app: kube-dns
-      ports:
-        - protocol: UDP
-          port: 53
-        - protocol: TCP
-          port: 53
-    # Allow Qdrant cluster communication (self + peers)
-    - to:
-        - podSelector:
-            matchLabels:
-              app: qdrant
-    # Allow outbound internet access (for updates, external backups, etc.)
-    - to:
-        - ipBlock:
-            cidr: 0.0.0.0/0
-            except:
-              - 10.0.0.0/8
-              - 172.16.0.0/12
-              - 192.168.0.0/16
