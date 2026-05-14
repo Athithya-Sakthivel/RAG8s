@@ -4,18 +4,6 @@ for ns in indexing inference logging grafana monitoring; do
   kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f -
 done
 
-# Retriever secrets
-kubectl create secret generic retriever-secrets -n inference \
-  --from-literal=AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-}" \
-  --from-literal=AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-}" \
-  --dry-run=client -o yaml | kubectl apply -f -
-
-# Indexing cronjob secrets
-kubectl create secret generic indexer-aws-creds -n indexing \
-  --from-literal=AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-}" \
-  --from-literal=AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-}" \
-  --dry-run=client -o yaml | kubectl apply -f -
-
 # Frontend secrets
 SESSION_SECRET="${SESSION_SECRET:-$(openssl rand -hex 32)}"
 JWT_PRIVATE_KEY_PEM="${JWT_PRIVATE_KEY_PEM:-$(openssl ecparam -genkey -name prime256v1 -noout 2>/dev/null | openssl pkcs8 -topk8 -nocrypt -outform PEM 2>/dev/null)}"

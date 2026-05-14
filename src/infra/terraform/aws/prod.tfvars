@@ -3,6 +3,12 @@ environment  = "prod"
 region       = "ap-south-1"
 cluster_name = "rag-eks-prod"
 
+create_admin_ec2 = true
+
+cluster_endpoint_public_access       = false
+cluster_endpoint_private_access      = true
+cluster_endpoint_public_access_cidrs = []
+
 vpc_cidr = "10.0.0.0/16"
 
 az_count = 2

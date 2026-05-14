@@ -2,7 +2,8 @@
 // EKS cluster + managed nodegroups for the RAG platform.
 //
 // Contract:
-// - private cluster endpoint only
+// - private cluster endpoint by default
+// - public endpoint can be enabled for staging
 // - OIDC provider for IRSA
 // - two managed nodegroups only:
 //   - system    -> on-demand, platform services
@@ -51,6 +52,30 @@ variable "cluster_role_arn" {
 variable "node_role_arn" {
   description = "IAM role ARN for EKS worker nodes."
   type        = string
+}
+
+variable "cluster_endpoint_public_access" {
+  description = "Enable a public EKS API endpoint."
+  type        = bool
+}
+
+variable "cluster_endpoint_private_access" {
+  description = "Enable a private EKS API endpoint."
+  type        = bool
+}
+
+variable "cluster_endpoint_public_access_cidrs" {
+  description = "CIDR blocks allowed to reach the public EKS API endpoint."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition = (
+      length(var.cluster_endpoint_public_access_cidrs) == 0 ||
+      alltrue([for cidr in var.cluster_endpoint_public_access_cidrs : length(trimspace(cidr)) > 0])
+    )
+    error_message = "cluster_endpoint_public_access_cidrs must be empty or contain only non-empty CIDR strings."
+  }
 }
 
 variable "system_nodegroup" {
@@ -244,13 +269,15 @@ resource "aws_eks_cluster" "this" {
   role_arn = var.cluster_role_arn
 
   access_config {
-    authentication_mode = "API_AND_CONFIG_MAP"
+    authentication_mode                         = "API_AND_CONFIG_MAP"
+    bootstrap_cluster_creator_admin_permissions = true
   }
 
   vpc_config {
     subnet_ids              = var.subnet_ids
-    endpoint_public_access  = false
-    endpoint_private_access = true
+    endpoint_public_access  = var.cluster_endpoint_public_access
+    endpoint_private_access = var.cluster_endpoint_private_access
+    public_access_cidrs     = var.cluster_endpoint_public_access_cidrs
   }
 
   encryption_config {

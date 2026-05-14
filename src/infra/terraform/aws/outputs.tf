@@ -1,92 +1,24 @@
-// src/infra/terraform/aws/outputs.tf
-// Outputs for automation, admin access, and downstream consumers.
-
-output "aws_region" {
-  description = "AWS region used by this stack."
-  value       = var.region
-}
-
-output "cluster_name" {
-  description = "EKS cluster name."
-  value       = module.eks.cluster_name
-}
-
-output "vpc_id" {
-  description = "VPC ID created by the VPC module."
-  value       = module.vpc.vpc_id
-}
-
 output "availability_zones" {
-  description = "Availability zones selected by the VPC module."
+  description = "Selected Availability Zones."
   value       = module.vpc.availability_zones
 }
 
-output "public_subnet_ids" {
-  description = "Public subnet IDs, one per AZ."
-  value       = module.vpc.public_subnet_ids
+output "aws_region" {
+  description = "AWS region."
+  value       = var.region
 }
 
-output "private_subnet_ids" {
-  description = "Private subnet IDs, one per AZ."
-  value       = module.vpc.private_subnet_ids
+output "s3_bucket_name_map" {
+  description = "Logical S3 bucket key -> bucket name."
+  value       = module.s3.bucket_name_map
 }
 
-output "public_route_table_id" {
-  description = "Shared public route table ID."
-  value       = module.vpc.public_route_table_id
+output "s3_bucket_arn_map" {
+  description = "Logical S3 bucket key -> bucket ARN."
+  value       = module.s3.bucket_arn_map
 }
 
-output "private_route_table_ids" {
-  description = "Private route table IDs, one per AZ."
-  value       = module.vpc.private_route_table_ids
-}
-
-output "nat_gateway_ids" {
-  description = "NAT gateway IDs."
-  value       = module.vpc.nat_gateway_ids
-}
-
-output "internet_gateway_id" {
-  description = "Internet gateway ID."
-  value       = module.vpc.internet_gateway_id
-}
-
-output "node_security_group_id" {
-  description = "Worker node security group ID."
-  value       = module.security.node_security_group_id
-}
-
-output "node_security_group_arn" {
-  description = "Worker node security group ARN."
-  value       = module.security.node_security_group_arn
-}
-
-output "node_security_group_name" {
-  description = "Worker node security group name."
-  value       = module.security.node_security_group_name
-}
-
-output "iam_cluster_role_arn" {
-  description = "EKS control plane IAM role ARN."
-  value       = module.iam_pre_eks.cluster_role_arn
-}
-
-output "iam_node_role_arn" {
-  description = "EKS worker node IAM role ARN."
-  value       = module.iam_pre_eks.node_role_arn
-}
-
-output "cluster_autoscaler_policy_arn" {
-  description = "Cluster Autoscaler IAM policy ARN."
-  value       = module.iam_pre_eks.cluster_autoscaler_policy_arn
-}
-
-output "ebs_csi_managed_policy_arn" {
-  description = "AWS-managed EBS CSI driver policy ARN."
-  value       = module.iam_pre_eks.ebs_csi_managed_policy_arn
-}
-
-output "eks_cluster_name" {
+output "cluster_name" {
   description = "EKS cluster name."
   value       = module.eks.cluster_name
 }
@@ -97,12 +29,12 @@ output "eks_cluster_endpoint" {
 }
 
 output "eks_cluster_ca_data" {
-  description = "Base64-encoded cluster CA data."
+  description = "Base64-encoded CA data for the cluster."
   value       = module.eks.cluster_ca_data
 }
 
 output "eks_cluster_security_group_id" {
-  description = "EKS control-plane security group ID."
+  description = "EKS cluster security group ID."
   value       = module.eks.cluster_security_group_id
 }
 
@@ -112,7 +44,7 @@ output "eks_oidc_provider_arn" {
 }
 
 output "eks_oidc_provider_issuer" {
-  description = "EKS OIDC issuer without the https:// prefix."
+  description = "EKS OIDC issuer host/path without https:// prefix."
   value       = module.eks.oidc_provider_issuer
 }
 
@@ -121,92 +53,78 @@ output "eks_secrets_encryption_kms_key_arn" {
   value       = module.eks.secrets_encryption_kms_key_arn
 }
 
-output "kubeconfig_data" {
-  description = "Cluster connection data for downstream automation."
-  value = {
-    cluster_name = module.eks.cluster_name
-    endpoint     = module.eks.cluster_endpoint
-    ca_data      = module.eks.cluster_ca_data
-  }
+output "iam_cluster_role_arn" {
+  description = "EKS control plane IAM role ARN."
+  value       = module.iam_pre_eks.cluster_role_arn
 }
 
-output "s3_bucket_names" {
-  description = "Logical bucket key -> bucket name."
-  value       = module.s3.bucket_name_map
-}
-
-output "s3_bucket_arns" {
-  description = "Logical bucket key -> bucket ARN."
-  value       = module.s3.bucket_arn_map
-}
-
-output "s3_bucket_ids" {
-  description = "Logical bucket key -> bucket ID."
-  value       = module.s3.bucket_id_map
-}
-
-output "irsa_role_arns" {
-  description = "Logical IRSA role key -> IAM role ARN."
-  value       = module.iam_post_eks.irsa_role_arns
-}
-
-output "irsa_role_names" {
-  description = "Logical IRSA role key -> IAM role name."
-  value       = module.iam_post_eks.irsa_role_names
-}
-
-output "irsa_policy_arns" {
-  description = "Logical IRSA role key -> IAM policy ARN."
-  value       = module.iam_post_eks.irsa_policy_arns
+output "iam_node_role_arn" {
+  description = "EKS node IAM role ARN."
+  value       = module.iam_pre_eks.node_role_arn
 }
 
 output "ebs_csi_driver_role_arn" {
-  description = "IAM role ARN for the EBS CSI driver."
+  description = "EBS CSI driver IAM role ARN."
   value       = module.iam_post_eks.ebs_csi_driver_role_arn
 }
 
 output "github_actions_role_arns" {
-  description = "Logical GitHub Actions role key -> IAM role ARN."
+  description = "GitHub Actions IAM role ARNs."
   value       = module.iam_post_eks.github_actions_role_arns
 }
 
 output "github_actions_role_names" {
-  description = "Logical GitHub Actions role key -> IAM role name."
+  description = "GitHub Actions IAM role names."
   value       = module.iam_post_eks.github_actions_role_names
 }
 
 output "github_actions_policy_arns" {
-  description = "Logical GitHub Actions role key -> IAM policy ARN."
+  description = "GitHub Actions IAM policy ARNs."
   value       = module.iam_post_eks.github_actions_policy_arns
 }
 
+output "irsa_role_arns" {
+  description = "IRSA role ARNs."
+  value       = module.iam_post_eks.irsa_role_arns
+}
+
+output "irsa_role_names" {
+  description = "IRSA role names."
+  value       = module.iam_post_eks.irsa_role_names
+}
+
+output "irsa_policy_arns" {
+  description = "IRSA policy ARNs."
+  value       = module.iam_post_eks.irsa_policy_arns
+}
+
 output "eks_admin_instance_id" {
-  description = "EC2 instance ID for the private EKS admin host."
-  value       = aws_instance.eks_admin.id
+  description = "Admin EC2 instance ID if enabled."
+  value       = try(aws_instance.eks_admin[0].id, null)
 }
 
 output "eks_admin_private_ip" {
-  description = "Private IP of the EKS admin host."
-  value       = aws_instance.eks_admin.private_ip
+  description = "Admin EC2 private IP if enabled."
+  value       = try(aws_instance.eks_admin[0].private_ip, null)
 }
 
 output "eks_admin_security_group_id" {
-  description = "Security group ID attached to the EKS admin host."
-  value       = aws_security_group.eks_admin.id
-}
-
-output "eks_admin_ssm_command" {
-  description = "Command to start an SSM shell session on the admin host."
-  value       = "aws ssm start-session --region ${var.region} --target ${aws_instance.eks_admin.id}"
+  description = "Admin EC2 security group ID if enabled."
+  value       = try(aws_security_group.eks_admin[0].id, null)
 }
 
 output "eks_admin_kubeconfig_command" {
-  description = "Command to write kubeconfig from the admin host context."
+  description = "Command to configure kubeconfig."
   value       = "aws eks update-kubeconfig --region ${var.region} --name ${module.eks.cluster_name}"
 }
 
+output "eks_admin_ssm_command" {
+  description = "SSM start-session command for the admin EC2 if enabled."
+  value       = var.create_admin_ec2 ? "aws ssm start-session --region ${var.region} --target ${aws_instance.eks_admin[0].id}" : null
+}
+
 output "eks_admin_quick_check_command" {
-  description = "Quick EKS verification command sequence."
+  description = "Quick kubectl check command."
   value       = <<EOT
 aws eks update-kubeconfig --region ${var.region} --name ${module.eks.cluster_name}
 kubectl get nodes -o wide

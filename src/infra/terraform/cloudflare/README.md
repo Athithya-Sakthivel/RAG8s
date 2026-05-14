@@ -138,7 +138,7 @@ export CLOUDFLARE_SECRET_NAME="cloudflared-token"
 export CLOUDFLARE_SECRET_KEY="token"
 export DOMAIN="athithya.site"
 
-python3 src/infra/core/cloudflared.py --rollout
+python3 src/infra/core/cloudflared_setup.py --rollout
 ```
 
 ## Idempotency

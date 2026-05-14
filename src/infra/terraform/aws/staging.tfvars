@@ -1,7 +1,14 @@
-# src/infra/terraform/aws/staging.tfvars
 environment  = "staging"
 region       = "ap-south-1"
 cluster_name = "rag-eks-staging"
+
+create_admin_ec2 = false
+
+cluster_endpoint_public_access       = true
+cluster_endpoint_private_access      = true
+cluster_endpoint_public_access_cidrs = ["183.82.177.77/32"]
+
+# curl -s https://checkip.amazonaws.com
 
 vpc_cidr = "10.1.0.0/16"
 
