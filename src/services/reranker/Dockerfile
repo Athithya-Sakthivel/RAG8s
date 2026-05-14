@@ -43,8 +43,8 @@ RUN if [ "$FASTEMBED_GPU" = "1" ]; then \
       python -m pip install --no-cache-dir fastembed==0.8.0 numpy==2.4.4 onnxruntime==1.25.0 huggingface-hub==1.11.0; \
     fi
 
-# Install API deps + uvloop (removed prometheus-client)
-RUN python -m pip install --no-cache-dir fastapi==0.136.1 "uvicorn[standard]==0.46.0" uvloop==0.21.0
+# Install API deps, uvloop, and prometheus-client for metrics
+RUN python -m pip install --no-cache-dir fastapi==0.136.1 "uvicorn[standard]==0.46.0" uvloop==0.21.0 prometheus-client==0.21.0
 
 # Copy app and entrypoint
 WORKDIR /app

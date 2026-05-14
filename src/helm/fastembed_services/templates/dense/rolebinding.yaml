@@ -1,0 +1,17 @@
+{{- if .Values.dense.enabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "fastembed.roleBindingName" (dict "service" "dense") }}
+  namespace: {{ .Values.dense.namespace }}
+  labels:
+    {{- include "fastembed.labels" (dict "Chart" .Chart "Release" .Release "name" "dense" "component" "embedder" "instance" "dense") | nindent 4 }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "fastembed.serviceAccountName" (dict "service" "dense") }}
+  namespace: {{ .Values.dense.namespace }}
+roleRef:
+  kind: Role
+  name: {{ include "fastembed.roleName" (dict "service" "dense") }}
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}

@@ -24,7 +24,7 @@ Configure the service via environment variables:
 | `DENSE_MODEL_NAME` | `BAAI/bge-small-en-v1.5` | Model ID from Hugging Face Hub |
 | `DENSE_DIM` | `384` | Expected embedding dimension (must match model) |
 | `DENSE_BATCH_SIZE` | `32` | Max texts per batch |
-| `DENSE_NORMALIZE` | `TRUE` | L2-normalize embeddings(Always) |
+| `DENSE_NORMALIZE` | `TRUE` | L2-normalize embeddings (Always) |
 | `DENSE_CUDA` | `0` | Set `1` to enable GPU (CUDA) |
 | `PRELOAD_MODEL` | `0` | Preload model on startup (`1` to enable) |
 | `DENSE_HOST` | `0.0.0.0` | HTTP bind address |
@@ -55,6 +55,13 @@ Returns service status, model name, dimension, and configuration.
 ### `GET /readyz` – Readiness probe
 Returns `200 OK` when the model is fully loaded and warmed up.
 
+### `GET /metrics` – Prometheus metrics
+Exposes the following metrics (sample):
+- `dense_requests_total{model, cuda, status}` — total requests (success/client_error/model_error/server_error)
+- `dense_request_duration_seconds{model, cuda}` — latency histogram
+- `dense_requests_in_progress{model, cuda}` — current in-flight requests
+- `dense_errors_total{model, cuda, error_type}` — error count by type
+
 ## Usage Examples
 
 **Generate embeddings (with `curl`):**
@@ -72,8 +79,14 @@ curl -X POST http://localhost:8200/embed \
 curl http://localhost:8200/health
 ```
 
+**Scrape metrics:**
+```bash
+curl http://localhost:8200/metrics
+```
+
 ## Notes
 
 - The model is **loaded lazily** on first request (unless `PRELOAD_MODEL=1` is set, which loads it at startup).
 - On first use, the model will be **downloaded** from Hugging Face Hub (cache persists in `/models_cache`).
 - For **batch processing**, you can send multiple texts in one request up to the configured batch size.
+- Prometheus metrics are exported on port 8200 at `/metrics`. Ensure your scrape configuration targets `rag-dense-model.inference:8200/metrics`.

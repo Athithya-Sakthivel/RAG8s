@@ -13,6 +13,8 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from fastembed import SparseTextEmbedding
 from pydantic import BaseModel
+from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
+from starlette.responses import Response
 
 
 def _env_bool(name: str, default: str = "0") -> bool:
@@ -50,6 +52,34 @@ _MAX_WORKERS = max(1, os.cpu_count() or 4)
 _EMBED_EXECUTOR = ThreadPoolExecutor(max_workers=_MAX_WORKERS)
 
 app = FastAPI(title="sparse-embedder")
+
+# ------------------ Prometheus Metrics ------------------
+_MODEL_LABELS = {"model": SPARSE_MODEL_NAME, "cuda": str(SPARSE_CUDA).lower()}
+
+REQUESTS = Counter(
+    "sparse_requests_total",
+    "Total number of sparse embed requests",
+    ["model", "cuda", "status"]
+)
+
+DURATION = Histogram(
+    "sparse_request_duration_seconds",
+    "Sparse embed request latency in seconds",
+    ["model", "cuda"],
+    buckets=[0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0]
+)
+
+IN_PROGRESS = Gauge(
+    "sparse_requests_in_progress",
+    "Number of sparse embed requests currently being processed",
+    ["model", "cuda"]
+)
+
+ERRORS = Counter(
+    "sparse_errors_total",
+    "Total number of sparse embed request errors",
+    ["model", "cuda", "error_type"]
+)
 
 
 class SparseOut(BaseModel):
@@ -195,15 +225,30 @@ async def embed(req: SparseRequest):
     if len(req.texts) > SPARSE_BATCH_SIZE:
         raise HTTPException(status_code=400, detail=f"batch too large max={SPARSE_BATCH_SIZE}")
 
+    IN_PROGRESS.labels(**_MODEL_LABELS).inc()
+    start = time.perf_counter()
+    status = "success"
     try:
         loop = asyncio.get_running_loop()
         vecs = await loop.run_in_executor(_EMBED_EXECUTOR, _do_embed, req.texts)
         return {"vectors": vecs}
+    except HTTPException:
+        status = "client_error"
+        raise
     except RuntimeError as e:
+        status = "model_error"
+        ERRORS.labels(**{**_MODEL_LABELS, "error_type": "runtime"}).inc()
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
+        status = "server_error"
+        ERRORS.labels(**{**_MODEL_LABELS, "error_type": "exception"}).inc()
         log.exception("sparse embed failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        elapsed = time.perf_counter() - start
+        REQUESTS.labels(**{**_MODEL_LABELS, "status": status}).inc()
+        DURATION.labels(**_MODEL_LABELS).observe(elapsed)
+        IN_PROGRESS.labels(**_MODEL_LABELS).dec()
 
 
 @app.get("/health")
@@ -233,6 +278,12 @@ def readyz():
         return {"status": "ready", "ready_at": _READY_AT, "model": SPARSE_MODEL_NAME}
 
     raise HTTPException(status_code=503, detail={"status": "not_ready", "model_error": _MODEL_ERROR})
+
+
+@app.get("/metrics")
+def metrics():
+    """Prometheus metrics endpoint."""
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.on_event("startup")

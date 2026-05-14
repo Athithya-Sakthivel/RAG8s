@@ -10,6 +10,8 @@ import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastembed import TextEmbedding
 from pydantic import BaseModel
+from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
+from starlette.responses import Response
 
 # Logging
 logging.basicConfig(level=os.getenv("DENSE_LOGLEVEL", "WARN"))
@@ -33,9 +35,36 @@ PRELOAD_MODEL = os.getenv("PRELOAD_MODEL", "0").upper() in ("1", "TRUE", "YES")
 app = FastAPI(title="dense-embedder")
 
 # Thread pool for CPU-bound embedding tasks
-# Limit to number of CPU cores to avoid oversubscription
 _MAX_WORKERS = max(1, os.cpu_count() or 4)
 _EMBED_EXECUTOR = ThreadPoolExecutor(max_workers=_MAX_WORKERS)
+
+# ------------------ Prometheus Metrics ------------------
+_MODEL_LABELS = {"model": DENSE_MODEL_NAME, "cuda": str(DENSE_CUDA).lower()}
+
+REQUESTS = Counter(
+    "dense_requests_total",
+    "Total number of embed requests",
+    ["model", "cuda", "status"]
+)
+
+DURATION = Histogram(
+    "dense_request_duration_seconds",
+    "Embed request latency in seconds",
+    ["model", "cuda"],
+    buckets=[0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0]
+)
+
+IN_PROGRESS = Gauge(
+    "dense_requests_in_progress",
+    "Number of embed requests currently being processed",
+    ["model", "cuda"]
+)
+
+ERRORS = Counter(
+    "dense_errors_total",
+    "Total number of embed request errors",
+    ["model", "cuda", "error_type"]
+)
 
 # Models
 class EmbedRequest(BaseModel):
@@ -58,7 +87,6 @@ def _l2_normalize(v: list[float]) -> list[float]:
     return a.astype(float).tolist()
 
 def _resolve_model_source() -> str:
-    # Prefer explicit local path, then treat DENSE_MODEL_NAME as repo id or local path
     if LOCAL_DENSE_MODEL_PATH and Path(LOCAL_DENSE_MODEL_PATH).exists():
         return LOCAL_DENSE_MODEL_PATH
     if Path(DENSE_MODEL_NAME).exists():
@@ -79,7 +107,6 @@ def _load_model_if_needed():
                 try:
                     _MODEL = TextEmbedding(model_name=model_source, providers=["CUDAExecutionProvider"])
                 except TypeError:
-                    # older fastembed may not accept providers kwarg
                     _MODEL = TextEmbedding(model_name=model_source)
                     log.warning("providers kwarg not supported; falling back to default provider")
             else:
@@ -98,7 +125,6 @@ def _do_embed(texts: list[str]) -> list[list[float]]:
     """Synchronous embedding work to be run in thread pool."""
     global _MODEL, _MODEL_ERROR, _READY_AT
 
-    # Ensure model is loaded (this is thread-safe due to the lock inside)
     _load_model_if_needed()
     if _MODEL is None:
         raise RuntimeError(f"model not loaded: {_MODEL_ERROR or 'unknown error'}")
@@ -121,24 +147,35 @@ def _do_embed(texts: list[str]) -> list[list[float]]:
 @app.post("/embed", response_model=EmbedResponse)
 async def embed(req: EmbedRequest):
     """Async endpoint that offloads embedding to a thread pool."""
-    start_time = time.time()
     if not req.texts or not isinstance(req.texts, list):
         raise HTTPException(status_code=400, detail="texts must be a non-empty list")
     if len(req.texts) > DENSE_BATCH_SIZE:
         raise HTTPException(status_code=400, detail=f"batch too large max={DENSE_BATCH_SIZE}")
 
+    IN_PROGRESS.labels(**_MODEL_LABELS).inc()
+    start = time.perf_counter()
+    status = "success"
     try:
-        # Run the blocking embedding in the thread pool
         loop = asyncio.get_running_loop()
         vecs = await loop.run_in_executor(_EMBED_EXECUTOR, _do_embed, req.texts)
         return {"vectors": vecs}
+    except HTTPException:
+        status = "client_error"
+        raise
     except RuntimeError as e:
+        status = "model_error"
+        ERRORS.labels(**{**_MODEL_LABELS, "error_type": "runtime"}).inc()
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
+        status = "server_error"
+        ERRORS.labels(**{**_MODEL_LABELS, "error_type": "exception"}).inc()
         log.exception("embed failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        elapsed = time.time() - start_time
+        elapsed = time.perf_counter() - start
+        REQUESTS.labels(**{**_MODEL_LABELS, "status": status}).inc()
+        DURATION.labels(**_MODEL_LABELS).observe(elapsed)
+        IN_PROGRESS.labels(**_MODEL_LABELS).dec()
         log.debug("Embed request completed in %.3fs", elapsed)
 
 @app.get("/health")
@@ -162,7 +199,6 @@ def readyz():
     Returns 200 when the model is loaded and warmed up.
     Returns 503 when the model is not ready.
     """
-    # Try to load model lazily if not already loaded (this is synchronous)
     if _MODEL is None and _MODEL_ERROR is None:
         try:
             _load_model_if_needed()
@@ -173,13 +209,17 @@ def readyz():
         return {"status": "ready", "ready_at": _READY_AT, "model": DENSE_MODEL_NAME}
     raise HTTPException(status_code=503, detail={"status": "not_ready", "model_error": _MODEL_ERROR})
 
+@app.get("/metrics")
+def metrics():
+    """Prometheus metrics endpoint."""
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
 @app.on_event("startup")
 async def on_startup():
     """Preload model in background if PRELOAD_MODEL is set."""
     if PRELOAD_MODEL:
         log.info("PRELOAD_MODEL enabled; attempting to load model at startup (background)")
         loop = asyncio.get_running_loop()
-        # Run load in thread pool to avoid blocking the event loop
         await loop.run_in_executor(_EMBED_EXECUTOR, _load_model_if_needed)
 
 @app.on_event("shutdown")
@@ -187,10 +227,8 @@ async def on_shutdown():
     """Clean up thread pool executor."""
     _EMBED_EXECUTOR.shutdown(wait=True)
 
-# Allow running with `python host_dense.py` for local dev
 if __name__ == "__main__":
     import uvicorn
-    # For local dev, use uvloop automatically if installed
     uvicorn.run(
         "host_dense:app",
         host=os.getenv("DENSE_HOST", "0.0.0.0"),

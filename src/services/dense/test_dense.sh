@@ -15,6 +15,9 @@ case "${MODE,,}" in
   *) FASTEMBED_GPU_ARG=0 ;;
 esac
 
+TEST_MODE=cpu DENSE_MODEL_NAME="BAAI/bge-small-en-v1.5"
+DENSE_DIM=384
+
 IMAGE_TAG="${DENSE_IMAGE_TAG:-test}"
 IMAGE_REPO="${IMAGE_REPO:-dense}"
 IMAGE_LOCAL="${IMAGE_REPO}:${IMAGE_TAG}"
@@ -72,13 +75,11 @@ wait_for_ready(){
     # Prefer /readyz for readiness; fall back to /health if readyz not present
     body=$(curl -fsS --max-time 2 "http://127.0.0.1:${port}/readyz" 2>/dev/null || true)
     if [ -n "${body}" ]; then
-      # readyz should return JSON when ready
       printf '%s\n' "${body}"
       return 0
     fi
     body=$(curl -fsS --max-time 2 "http://127.0.0.1:${port}/health" 2>/dev/null || true)
     if [ -n "${body}" ]; then
-      # Accept health that indicates ok and either no model_error or model_error null
       if printf '%s' "${body}" | grep -q '"status"' && printf '%s' "${body}" | grep -q '"ok"'; then
         printf '%s\n' "${body}"
         return 0
@@ -147,7 +148,7 @@ else
   fi
 fi
 
-# Optional Trivy scan (if TRIVY_IMAGE set or default)
+# Optional Trivy scan
 TRIVY_IMAGE="${TRIVY_IMAGE:-ghcr.io/athithya-sakthivel/trivy:0.69.3-safe}"
 TRIVY_CACHE_DIR="${TRIVY_CACHE_DIR:-$PWD/.trivy-cache}"
 echo "[5/5] Scanning image ${IMAGE_LOCAL} with Trivy (CRITICAL severity will fail)"

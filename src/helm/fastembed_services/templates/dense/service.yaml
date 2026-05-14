@@ -1,0 +1,18 @@
+{{- if .Values.dense.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "fastembed.serviceName" (dict "service" "dense") }}
+  namespace: {{ .Values.dense.namespace }}
+  labels:
+    {{- include "fastembed.labels" (dict "Chart" .Chart "Release" .Release "name" "dense" "component" "embedder" "instance" "dense") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8200
+    targetPort: 8200
+    protocol: TCP
+    name: http
+  selector:
+    {{- include "fastembed.selectorLabels" (dict "name" "dense" "component" "embedder" "instance" "dense") | nindent 4 }}
+{{- end }}

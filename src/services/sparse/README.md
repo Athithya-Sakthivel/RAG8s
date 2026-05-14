@@ -57,6 +57,13 @@ Returns service status, model name, batch size, and CUDA configuration.
 ### `GET /readyz` – Readiness probe
 Returns `200 OK` when the model is fully loaded and warmed up.
 
+### `GET /metrics` – Prometheus metrics
+Exposes the following metrics:
+- `sparse_requests_total{model, cuda, status}` – total requests (success/client_error/model_error/server_error)
+- `sparse_request_duration_seconds{model, cuda}` – latency histogram
+- `sparse_requests_in_progress{model, cuda}` – current in-flight requests
+- `sparse_errors_total{model, cuda, error_type}` – error count by type
+
 ## Usage Example
 
 **Generate sparse embeddings (with `curl`):**
@@ -74,11 +81,15 @@ curl -X POST http://localhost:8201/embed \
 curl http://localhost:8201/health
 ```
 
+**Scrape metrics:**
+```bash
+curl http://localhost:8201/metrics
+```
+
 ## Notes
 
 - The model is **loaded lazily** on first request (or at startup if `PRELOAD_MODEL=1`).
 - On first use, the model is **downloaded** from Hugging Face Hub (cache in `/models_cache`).
 - For **batch processing**, send multiple texts up to `SPARSE_BATCH_SIZE` – larger batches are rejected.
 - Sparse vectors are ideal for **keyword‑aware** hybrid search when combined with dense embeddings.
-
----
+- Prometheus metrics are exported on port 8201 at `/metrics`. Ensure your scrape configuration points to `rag-sparse-model.inference:8201/metrics`.

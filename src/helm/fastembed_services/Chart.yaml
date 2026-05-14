@@ -1,0 +1,13 @@
+apiVersion: v2
+name: fastembed
+description: A Helm chart for FastEmbed models (dense, sparse, reranker) as scalable microservices
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - embedding
+  - reranker
+  - fastembed
+  - qdrant
+maintainers:
+  - name: Athithya

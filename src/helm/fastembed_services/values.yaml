@@ -1,9 +1,6 @@
-### A Helm chart for deploying [FastEmbed](https://github.com/qdrant/fastembed) models as scalable microservices on Kubernetes. Deploy **dense embedding**, **sparse embedding**, and **reranker** models behind a unified API, with production-ready features like GPU acceleration, horizontal autoscaling, network isolation, and Prometheus metrics.
-
-
-```yaml
 # GLOBAL SETTINGS - apply to ALL services unless overridden at service level
 global:
+  createNamespace: true
   networkPolicy:
     enabled: true  # Enable network isolation between services
     allowedNamespaces: [inference, indexing]  # Only these namespaces can communicate
@@ -21,6 +18,7 @@ global:
 
 # DENSE EMBEDDING - Converts text to dense (numerical) vectors
 # ServiceAccount: rag-dense-model (auto-created, immutable)
+# Metrics exposed at: /metrics on port 8200
 dense:
   enabled: true
   embedderImage: ghcr.io/athithya-sakthivel/sparse:2026-05-06-06-26--13b7433@sha256:e977f4eedd896f28de999809eefe8db7c2048dc7fb9f7700d450a333449d334b
@@ -45,6 +43,7 @@ dense:
 
 # SPARSE EMBEDDING - Converts text to sparse (mostly zeros) vectors
 # ServiceAccount: rag-sparse-model (auto-created, immutable)
+# Metrics exposed at: /metrics on port 8201
 sparse:
   enabled: true
   embedderImage: "myregistry/sparse-embedder:latest"
@@ -68,6 +67,7 @@ sparse:
 
 # RERANKER - Re-orders search results by relevance
 # ServiceAccount: rag-reranker-model (auto-created, immutable)
+# Metrics exposed at: /metrics on port 8202
 reranker:
   enabled: true
   embedderImage: ghcr.io/athithya-sakthivel/reranker:2026-05-07-06-10--5e0b28b@sha256:60475c50371406a2f43ef9b5c2e5a0a32f9b953a02ecbe7f622ad9c1ddd92495
@@ -88,24 +88,27 @@ reranker:
       limits:
         cpu: 2000m  # CPU limit per pod (burstable)
         memory: 2Gi  # Memory limit per pod (max allowed)
-```        
 
-### PROMETHEUS SCRAPING EXAMPLE
+### PROMETHEUS SCRAPING CONFIGURATION
+### Each service exposes these metrics at /metrics:
+###   {service}_requests_total{model, cuda, status}  - Request count by outcome
+###   {service}_request_duration_seconds{model, cuda} - Latency histogram
+###   {service}_requests_in_progress{model, cuda}     - Active requests gauge
+###   {service}_errors_total{model, cuda, error_type} - Errors by type
+###
 ### PORT, /metrics, serviceaccount names are fixed but namespace may vary.
-```yaml
 scrape_configs:
   - job_name: 'fastembed'
     metrics_path: '/metrics'
+    scrape_interval: 15s
+    scrape_timeout: 10s
     static_configs:
-      - targets: ['rag-dense-model.inference:8200', 'rag-sparse-model.inference:8201', 'rag-reranker-model.inference:8202']
-```
-
-### Building custom image example
-```sh
-git clone https://github.com/Athithya-Sakthivel/E2E-RAG-System.git && cd src/services/dense
-```
-
-### [Example usage in indexing](https://github.com/Athithya-Sakthivel/E2E-RAG-System/blob/main/src/indexing_pipeline/index.py)
-### [Example usage in retrieval](https://github.com/Athithya-Sakthivel/E2E-RAG-System/blob/main/src/services/retriever/main.py)
-
-
+      - targets:
+        - 'rag-dense-model.inference:8200'
+        - 'rag-sparse-model.inference:8201'
+        - 'rag-reranker-model.inference:8202'
+    metric_relabel_configs:
+      # Keep all metrics from these services
+      - source_labels: [__name__]
+        regex: '(dense|sparse|reranker)_.*'
+        action: keep

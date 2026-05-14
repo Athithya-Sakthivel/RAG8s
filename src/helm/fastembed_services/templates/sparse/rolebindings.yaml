@@ -1,0 +1,17 @@
+{{- if .Values.sparse.enabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "fastembed.roleBindingName" (dict "service" "sparse") }}
+  namespace: {{ .Values.sparse.namespace }}
+  labels:
+    {{- include "fastembed.labels" (dict "Chart" .Chart "Release" .Release "name" "sparse" "component" "embedder" "instance" "sparse") | nindent 4 }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "fastembed.serviceAccountName" (dict "service" "sparse") }}
+  namespace: {{ .Values.sparse.namespace }}
+roleRef:
+  kind: Role
+  name: {{ include "fastembed.roleName" (dict "service" "sparse") }}
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}

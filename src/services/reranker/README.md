@@ -61,6 +61,13 @@ Returns model name, max documents, CUDA status, and readiness flag.
 ### `GET /readyz` – Readiness probe
 Returns `200 OK` when the model is loaded and ready.
 
+### `GET /metrics` – Prometheus metrics
+Exposes the following metrics (sample):
+- `reranker_requests_total{model, cuda, status}` — total requests (success/client_error/model_error/server_error)
+- `reranker_request_duration_seconds{model, cuda}` — latency histogram
+- `reranker_requests_in_progress{model, cuda}` — current in-flight requests
+- `reranker_errors_total{model, cuda, error_type}` — error count by type
+
 ## Usage Example
 
 **Re‑rank documents (with `curl`):**
@@ -85,10 +92,15 @@ curl -X POST http://localhost:8202/rerank \
 curl http://localhost:8202/health
 ```
 
+**Scrape metrics:**
+```bash
+curl http://localhost:8202/metrics
+```
+
 ## Notes
 
 - The model is **loaded lazily** on the first request (unless `PRELOAD_MODEL=1` is set).
 - On first use, the model is **downloaded** from Hugging Face Hub (cache in `/models_cache`).
 - The request fails if `len(documents) > RERANKER_MAX_DOCS`. Adjust the variable for your needs.
 - Reranking is **CPU‑bound**; the service uses a thread pool to keep the async event loop responsive. For high throughput, increase `UVICORN_WORKERS` (set in the container) and allocate enough CPU cores.
----
+- Prometheus metrics are exported on port 8202 at `/metrics`. Ensure your Prometheus scrape configuration points to `rag-reranker-model.inference:8202/metrics`

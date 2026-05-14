@@ -1,0 +1,50 @@
+{{- if and .Values.sparse.enabled .Values.global.networkPolicy.enabled }}
+{{- $service := "sparse" }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "fastembed.networkPolicyName" (dict "service" $service) }}
+  namespace: {{ .Values.sparse.namespace }}
+  labels:
+    {{- include "fastembed.labels" (dict "Chart" .Chart "Release" .Release "name" "sparse" "component" "embedder" "instance" "sparse") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "fastembed.selectorLabels" (dict "name" "sparse" "component" "embedder" "instance" "sparse") | nindent 6 }}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  {{- range .Values.global.networkPolicy.allowedNamespaces }}
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: {{ . }}
+    ports:
+    - port: 8201
+      protocol: TCP
+  {{- end }}
+  {{- range .Values.global.networkPolicy.allowedServiceAccounts }}
+  - from:
+    - podSelector:
+        matchLabels:
+          fastembed.io/service-account: {{ . }}
+    ports:
+    - port: 8201
+      protocol: TCP
+  {{- end }}
+  egress:
+  - to:
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+{{- end }}
