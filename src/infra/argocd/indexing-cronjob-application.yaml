@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/part-of: e2e-rag-system
   annotations:
     description: Indexing CronJob Helm deployment
-    deployed-at: "2026-05-14T10:42:02Z"
+    deployed-at: "2026-05-14T10:52:38Z"
     deployed-by: "user"
     aws-region: "ap-south-1"
     ecr-repository: "681802563986.dkr.ecr.ap-south-1.amazonaws.com/indexer"
