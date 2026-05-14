@@ -1,6 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
+GH_REPO="https://github.com/Athithya-Sakthivel/E2E-RAG-System.git"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 TOFU_DIR="$REPO_ROOT/src/infra/terraform/aws"
 ARGOCD_APP_DIR="$REPO_ROOT/src/infra/argocd"
@@ -92,12 +93,13 @@ ECR_URL="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 IMAGE_TAG="${IMAGE_TAG:-staging}"
 export AWS_REGION AWS_DEFAULT_REGION="$AWS_REGION"
 
-log_info "Region: $AWS_REGION"
-log_info "ECR:    $ECR_URL"
-log_info "S3:     data=$DATA_S3_BUCKET  backup=$BACKUP_S3_BUCKET"
-log_info "Image:  $IMAGE_TAG"
-log_info "IRSA Role:    $IRSA_ROLE_ARN"
-sleep 3
+log_info "Region:   $AWS_REGION"
+log_info "ECR:      $ECR_URL"
+log_info "S3 data:  $DATA_S3_BUCKET"
+log_info "S3 backup:$BACKUP_S3_BUCKET"
+log_info "Image:    $IMAGE_TAG"
+log_info "IRSA:     $IRSA_ROLE_ARN"
+sleep 2
 
 # 2. Upload to S3
 log_step "2/6 Uploading data to S3"
@@ -105,7 +107,7 @@ if ! python3 "$REPO_ROOT/src/scripts/local/force_sync_s3_local_fs.py" --upload; 
     log_warn "S3 upload failed, continuing"
 fi
 
-# 3. Generate ArgoCD Application YAML – includes nodeSelector & toleration for compute
+# 3. Generate ArgoCD Application YAML (no image digest, uses tag only)
 log_step "3/6 Generating ArgoCD Application YAMLs"
 mkdir -p "$ARGOCD_APP_DIR"
 cat > "$INDEXING_APP" << EOF
@@ -126,7 +128,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/Athithya-Sakthivel/E2E-RAG-System.git
+    repoURL: ${GH_REPO}
     targetRevision: main
     path: src/infra/helm/indexing_cronjob
     helm:
@@ -186,7 +188,7 @@ log_step "5/6 Deploying FastEmbed via ArgoCD"
 kubectl apply -f "$FASTEMBED_APP"
 sleep 10
 
-# Wait for dependencies (pods Running)
+# Wait for dependencies (pods Running, no HTTP checks)
 log_step "Waiting for Qdrant pod"
 wait_for_pods "qdrant" "app.kubernetes.io/name=qdrant" 300
 

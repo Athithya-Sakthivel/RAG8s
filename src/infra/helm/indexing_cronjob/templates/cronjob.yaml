@@ -35,6 +35,7 @@ spec:
               emptyDir: {}
           containers:
             - name: indexer
+              # Image format: registry/repository:tag[ @digest] (digest only if non-empty)
               image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.image.tag }}{{ if .Values.image.digest }}@{{ .Values.image.digest }}{{ end }}"
               imagePullPolicy: {{ .Values.image.pullPolicy }}
               command:

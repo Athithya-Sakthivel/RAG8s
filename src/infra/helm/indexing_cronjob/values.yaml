@@ -7,11 +7,12 @@ serviceAccount:
   annotations: {}
   # eks.amazonaws.com/role-arn: ""
 
+# Container image – only tag is used; digest is left empty
 image:
-  registry: ghcr.io
-  repository: athithya-sakthivel/indexing-pipeline
-  tag: "2026-05-09-16-28--d613be2"
-  digest: "sha256:f293916991de710b8d725dfe71aaa74e2148c45913e420d76c77829a5482df69"
+  registry: 
+  repository: 
+  tag: ""
+  digest: ""                    # <-- EMPTY, no default digest
   pullPolicy: IfNotPresent
 
 networkPolicy:
@@ -42,7 +43,7 @@ cronjob:
   failedJobsHistoryLimit: 1
   backoffLimit: 1
   restartPolicy: Never
-  serviceAccountName: indexer
+  serviceAccountName: indexer   # must match serviceAccount.name
   labels:
     app.kubernetes.io/name: indexing-backup-cronjob
     app.kubernetes.io/component: indexing
@@ -64,8 +65,8 @@ env:
   QDRANT_URL: http://qdrant.qdrant.svc.cluster.local:6333
   DENSE_URL: http://dense-svc.fastembed.svc.cluster.local:8200
   SPARSE_URL: http://sparse-svc.fastembed.svc.cluster.local:8201
-  S3_BUCKET: ""
-  DATA_S3_BUCKET: ""
+  S3_BUCKET: ""                # overridden at deploy time
+  DATA_S3_BUCKET: ""           # overridden at deploy time
   DATA_S3_PREFIX: data/chunked/
   STORAGE_RAW_PREFIX: data/raw/
   STORAGE_CHUNKED_PREFIX: data/chunked/
@@ -116,7 +117,7 @@ resources:
     cpu: "2"
     memory: 2Gi
 
-# Target only compute nodes and tolerate their taint
+# Schedule only on compute nodes and tolerate their taint
 nodeSelector:
   node-type: compute
 

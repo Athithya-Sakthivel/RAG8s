@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/part-of: e2e-rag-system
   annotations:
     description: Indexing CronJob Helm deployment
-    deployed-at: "2026-05-14T12:01:11Z"
+    deployed-at: "2026-05-14T12:34:28Z"
     aws-region: "ap-south-1"
     ecr-repository: "681802563986.dkr.ecr.ap-south-1.amazonaws.com/indexer"
 spec:
@@ -26,7 +26,6 @@ spec:
           tag: "staging"
           pullPolicy: IfNotPresent
         serviceAccount:
-          name: indexer
           annotations:
             eks.amazonaws.com/role-arn: "arn:aws:iam::681802563986:role/rag-indexer-irsa-role"
         env:
@@ -39,8 +38,13 @@ spec:
           limits:
             cpu: "2"
             memory: 2Gi
-        nodeSelector: {}
-        tolerations: []
+        nodeSelector:
+          node-type: compute
+        tolerations:
+          - key: "node-type"
+            operator: "Equal"
+            value: "compute"
+            effect: "NoSchedule"
   destination:
     server: https://kubernetes.default.svc
     namespace: indexing
