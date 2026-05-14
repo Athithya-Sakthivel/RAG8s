@@ -23,7 +23,6 @@ env:
   AWS_REGION: ap-south-1
   AWS_ACCOUNT_ID: 681802563986
   AWS_ROLE_ARN: arn:aws:iam::681802563986:role/gh-actions-sparse-model
-
   ECR_REPOSITORY: sparse-model
   IMAGE_NAME: sparse
 
@@ -47,13 +46,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           IMAGE_TAG="${IMAGE_TAG:-$(TZ=Asia/Kolkata date +%Y-%m-%d-%H-%M)--$(git rev-parse --short HEAD)}"
           REGISTRY_HOST="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-
           PRIMARY_IMAGE="${REGISTRY_HOST}/${ECR_REPOSITORY}:${IMAGE_TAG}"
           STAGING_IMAGE="${REGISTRY_HOST}/${ECR_REPOSITORY}:staging"
-
           echo "registry_host=${REGISTRY_HOST}" >> "$GITHUB_OUTPUT"
           echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
           echo "repo_name=${ECR_REPOSITORY}" >> "$GITHUB_OUTPUT"
@@ -79,16 +75,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           cd src/services/sparse
-
           export SPARSE_MODEL_NAME="${SPARSE_MODEL_NAME:-prithivida/Splade_PP_en_v1}"
           export SPARSE_BATCH_SIZE="${SPARSE_BATCH_SIZE:-8}"
           export SPARSE_IMAGE_TAG="${IMAGE_TAG:-${{ steps.image-meta.outputs.image_tag }}}"
           export IMAGE_REPO="${IMAGE_REPO:-${{ steps.image-meta.outputs.repo_name }}}"
-
           chmod +x test_sparse.sh
-
           TEST_MODE=cpu \
           SPARSE_MODEL_NAME="${SPARSE_MODEL_NAME}" \
           SPARSE_BATCH_SIZE="${SPARSE_BATCH_SIZE}" \
@@ -115,11 +107,19 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: aws-actions/amazon-ecr-login@v2.1.5
 
+      - name: Delete existing staging tag to allow overwrite
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          aws ecr batch-delete-image \
+            --repository-name "${{ env.ECR_REPOSITORY }}" \
+            --image-ids imageTag=staging \
+            --region "${{ env.AWS_REGION }}" || true
+
       - name: Push image tags
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: bash
         run: |
           set -euo pipefail
-
           docker push "${{ steps.image-meta.outputs.primary_image }}"
           docker push "${{ steps.image-meta.outputs.staging_image }}"
