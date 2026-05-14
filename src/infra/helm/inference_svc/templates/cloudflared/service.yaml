@@ -1,0 +1,21 @@
+{{- if .Values.cloudflared.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: cloudflared-metrics
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: cloudflared
+    app.kubernetes.io/component: tunnel
+    {{- include "inference-services.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: cloudflared
+    app.kubernetes.io/component: tunnel
+  ports:
+    - name: metrics
+      port: {{ .Values.cloudflared.service.metricsPort }}
+      targetPort: {{ .Values.cloudflared.service.metricsPort }}
+      protocol: TCP
+{{- end }}

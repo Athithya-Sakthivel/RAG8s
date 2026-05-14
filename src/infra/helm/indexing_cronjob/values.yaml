@@ -1,0 +1,162 @@
+# Default values for indexing-cronjob.
+
+# Namespace creation
+# createNamespace: true
+namespace: indexing
+
+# ServiceAccount configuration
+serviceAccount:
+  name: indexer
+  annotations:
+    eks.amazonaws.com/role-arn: ""   # set to ARN if using IRSA, e.g. arn:aws:iam::681802563986:role/rag-indexer-irsa-role
+
+# Container image
+image:
+  registry: ghcr.io
+  repository: athithya-sakthivel/indexing-pipeline
+  tag: "2026-05-09-16-28--d613be2"
+  digest: "sha256:f293916991de710b8d725dfe71aaa74e2148c45913e420d76c77829a5482df69"
+  pullPolicy: IfNotPresent
+  
+# NetworkPolicy configuration
+networkPolicy:
+  enabled: true
+  name: indexing-cronjob-egress
+  dns:
+    namespace: kube-system
+  qdrant:
+    namespace: qdrant
+    port: 6333
+  fastembed:
+    namespace: fastembed
+    dense:
+      serviceName: dense
+      port: 8200
+    sparse:
+      serviceName: sparse
+      port: 8201
+  awsApi:
+    enabled: true
+    port: 443
+
+# CronJob configuration
+cronjob:
+  name: indexing-backup-cronjob
+  schedule: "0 */6 * * *"
+  concurrencyPolicy: Allow
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  backoffLimit: 1
+  restartPolicy: Never
+  serviceAccountName: indexer   # should match serviceAccount.name
+  labels:
+    app.kubernetes.io/name: indexing-backup-cronjob
+    app.kubernetes.io/component: indexing
+
+# Container image
+image:
+  repository: ghcr.io/athithya-sakthivel/indexing-pipeline
+  tag: "2026-05-09-16-28--d613be2"
+  digest: "sha256:f293916991de710b8d725dfe71aaa74e2148c45913e420d76c77829a5482df69"
+  pullPolicy: IfNotPresent
+
+# Container command & args
+command:
+  - /opt/venv/bin/python
+  - /indexing_pipeline/indexing_pipeline.py
+args:
+  - --workdir
+  - /indexing_pipeline
+
+# Environment variables – all values will be quoted automatically
+env:
+  PYTHONUNBUFFERED: "1"
+  TMPDIR: /tmp
+  LOG_LEVEL: INFO
+  HTTP_TIMEOUT: "60"
+  INDEXING_STRICT: "true"
+  RUN_PRE_CONVERSIONS: "false"
+  QDRANT_URL: http://qdrant.qdrant.svc.cluster.local:6333
+  DENSE_URL: http://dense-svc.fastembed.svc.cluster.local:8200
+  SPARSE_URL: http://sparse-svc.fastembed.svc.cluster.local:8201
+  S3_BUCKET: s3-temp-bucket-mlsecops-681802563986
+  DATA_S3_BUCKET: s3-temp-bucket-mlsecops-681802563986
+  DATA_S3_PREFIX: data/chunked/
+  STORAGE_RAW_PREFIX: data/raw/
+  STORAGE_CHUNKED_PREFIX: data/chunked/
+  MAX_TOKENS_PER_CHUNK: "320"
+  MIN_TOKENS_PER_CHUNK: "100"
+  NUMBER_OF_OVERLAPPING_SENTENCES: "2"
+  PDF_DISABLE_OCR: "false"
+  PDF_OCR_ENGINE: rapidocr
+  PDF_TESSERACT_LANG: eng
+  PDF_FORCE_OCR: "false"
+  PDF_OCR_RENDER_DPI: "400"
+  PDF_MIN_IMG_SIZE_BYTES: "3072"
+  IMAGE_OCR_ENGINE: tesseract
+  IMAGE_TESSERACT_LANG: eng
+  IMAGE_MIN_IMG_SIZE_BYTES: "3072"
+  IMAGE_RENDER_DPI: "400"
+  IMAGE_UPSCALE_FACTOR: "2.0"
+  TESSERACT_CONFIG: --oem 1 --psm 6
+  CSV_TARGET_TOKENS_PER_CHUNK: "400"
+  JSONL_TARGET_TOKENS_PER_CHUNK: "400"
+  PPTX_SLIDES_PER_CHUNK: "4"
+  PPTX_OCR_ENGINE: rapidocr
+  COLLECTION_NAME: default_rag_collection1
+  DENSE_DIM: "384"
+  BATCH_SIZE: "8"
+  UPSERT_CHUNK: "500"
+  SPARSE_BATCH_FALLBACK: "8"
+  QDRANT_SHARD_NUMBER: "3"
+  QDRANT_REPLICATION_FACTOR: "2"
+  QDRANT_WRITE_CONSISTENCY_FACTOR: "1"
+  QDRANT_HNSW_EF_CONSTRUCT: "128"
+  QDRANT_HNSW_M: "32"
+  QDRANT_HNSW_FULL_SCAN_THRESHOLD: "10000"
+  QDRANT_ONDISK: "false"
+  QDRANT_ENABLE_SCALAR_QUANTIZATION: "true"
+  QDRANT_QUANTIZATION_ALWAYS_RAM: "true"
+  INDEX_TIMEOUT: "1800"
+  BACKUP_TIMEOUT: "300"
+  ENABLE_QDRANT_BACKUP: "true"
+  MIN_INDEXED_POINTS_FOR_BACKUP: "100"
+  MIN_INDEX_DELTA_RATIO_FOR_BACKUP: "0.0"
+
+# Pod resources
+resources:
+  requests:
+    cpu: "2"
+    memory: 1Gi
+  limits:
+    cpu: "6"
+    memory: 2Gi
+
+# Node selector
+nodeSelector:
+  node-type: compute
+
+# Tolerations
+tolerations:
+  - key: "node-type"
+    operator: "Equal"
+    value: "compute"
+    effect: "NoSchedule"
+
+# Pod security context
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+# Container security context
+containerSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL

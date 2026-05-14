@@ -333,8 +333,6 @@ do_rollout() {
   log "Initial admin password (base64-decoded):"
   kubectl -n "${NAMESPACE}" get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 --decode && echo
 
-  log "Applying Argo CD bootstrap manifests from src/argocd"
-  kubectl apply -f src/argocd || warn "kubectl apply for src/argocd returned non-zero"
 }
 
 do_delete() {

@@ -1,0 +1,54 @@
+{{- if .Values.cloudflared.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflared
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: cloudflared
+    app.kubernetes.io/component: tunnel
+    {{- include "inference-services.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.cloudflared.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cloudflared
+      app.kubernetes.io/component: tunnel
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cloudflared
+        app.kubernetes.io/component: tunnel
+        {{- include "inference-services.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ .Values.cloudflared.serviceAccount.name }}
+      containers:
+        - name: cloudflared
+          image: "{{ .Values.cloudflared.image.repository }}:{{ .Values.cloudflared.image.tag }}"
+          imagePullPolicy: {{ .Values.cloudflared.image.pullPolicy }}
+          args:
+            - tunnel
+            - --config
+            - /etc/cloudflared/config/config.yaml
+            - run
+          env:
+            - name: TUNNEL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.cloudflared.tunnel.tokenSecretName }}
+                  key: token
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.cloudflared.service.metricsPort }}
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.cloudflared.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/cloudflared/config
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: cloudflared-config
+{{- end }}

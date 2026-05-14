@@ -1,0 +1,263 @@
+# Default values for inference-services.
+# This is a YAML-formatted file.
+
+namespace: inference
+
+# -- Common labels applied to all resources
+commonLabels:
+  app.kubernetes.io/managed-by: helm
+
+frontend:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: ghcr.io/athithya-sakthivel/frontend
+    tag: "2026-05-12-09-42--adaa9e3@sha256:7a22eeb96d7d16d9583c0bac4f1d68c3b33fb7c6b8698956a5849c7aaed55b0e"
+    pullPolicy: Always
+  serviceAccount:
+    create: true
+    name: frontend
+    annotations:
+      eks.amazonaws.com/role-arn: "arn:aws:iam::681802563986:role/rag-frontend-irsa-role"
+  service:
+    type: ClusterIP
+    port: 8000
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  nodeSelector:
+    node-type: compute
+  tolerations:
+    - key: node-type
+      operator: Equal
+      value: compute
+      effect: NoSchedule
+  env:
+    ENV: PROD
+    LOG_LEVEL: INFO
+    ENABLE_PROMETHEUS: "true"
+    PROMETHEUS_PATH: /metrics
+    REQUIRE_AUTH: "true"
+    ENABLE_GOOGLE_AUTH: "true"
+    ENABLE_MICROSOFT_AUTH: "true"
+    ENABLE_GITHUB_AUTH: "false"
+    DISPLAY_SOURCES_IN_UI: "true"
+    DISPLAY_TOPK_IN_UI: "false"
+    USE_IAM: "false"
+    RATE_LIMIT_GENERATE_STREAM: 5/minute
+    RATE_LIMIT_AUTH_ME: 30/minute
+    RATE_LIMIT_STREAM_CONCURRENCY: "10"
+    RATE_LIMIT_AUTH_LOGIN: 10/minute
+    RATE_LIMIT_AUTH_START: 5/minute
+    RATE_LIMIT_AUTH_CALLBACK: 20/minute
+    RATE_LIMIT_AUTH_LOGOUT: 20/minute
+    JWT_ISS: stateless-openid-auth
+    JWT_AUD: rag-ui
+    JWT_TTL_SECONDS: "900"
+    JWT_CLOCK_SKEW_SECONDS: "90"
+    JWT_KID: production-key-1
+    GOOGLE_ALLOWED_DOMAINS: "gmail.com"
+    MICROSOFT_ALLOWED_DOMAINS: "outlook.com"
+    MICROSOFT_ALLOWED_TENANT_IDS: "b8a65a11-9d1c-4d48-b9f6-dabfc67f2e4b"
+    GITHUB_ALLOWED_ORGS: ""
+    FRONTEND_HOSTNAME: rag.athithya.site
+    MS_TENANT_ID: "b8a65a11-9d1c-4d48-b9f6-dabfc67f2e4b"
+    RETRIEVER_URL: http://retriever.inference.svc.cluster.local:8001
+    GENERATE_STREAM_PATH: /generate/stream
+    UPSTREAM_TIMEOUT_SECONDS: "60"
+    VALKEY_SERVICE_HOST: valkey.valkey.svc.cluster.local
+    VALKEY_SERVICE_PORT: "6379"
+    ENABLE_PRESIGNED_URLS: "true"
+    PRESIGNED_URL_TTL_SECONDS: "3600"
+  secrets:  # existing secret name(s) to mount as envFrom
+    - frontend-secrets
+  probes:
+    startup:
+      path: /health
+      port: 8000
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      failureThreshold: 12
+    liveness:
+      path: /health
+      port: 8000
+      periodSeconds: 10
+      failureThreshold: 3
+    readiness:
+      path: /orchestrator/health
+      port: 8000
+      periodSeconds: 5
+      failureThreshold: 2
+  networkPolicy:
+    ingressAllowFrom:
+      - podLabels: { app.kubernetes.io/name: cloudflared }
+        ports: [8000]
+      - namespaceLabels: { kubernetes.io/metadata.name: monitoring }
+        ports: [8000]
+    egressAllowTo:
+      dns:
+        namespaceLabels: { kubernetes.io/metadata.name: kube-system }
+        podLabels: { k8s-app: kube-dns }
+      valkey:
+        namespaceLabels: { kubernetes.io/metadata.name: valkey }
+        podLabels: { app: valkey }
+        ports: [6379]
+      retriever:
+        podLabels: { app.kubernetes.io/name: retriever }
+        ports: [8001]
+      internet:
+        # allow outbound HTTPS to public internet only
+        cidr: "0.0.0.0/0"
+        except: ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+        ports: [443]
+
+retriever:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: ghcr.io/athithya-sakthivel/retriever
+    tag: "2026-05-10-07-09--e446eb2@sha256:d537a42c429c94a55bdb0720a1f0b96212a34873ffea9113982acaaf9f301429"
+    pullPolicy: Always
+  serviceAccount:
+    create: true
+    name: retriever
+    annotations:
+      eks.amazonaws.com/role-arn: "arn:aws:iam::681802563986:role/rag-retriever-irsa-role"
+  service:
+    type: ClusterIP
+    port: 8001
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  nodeSelector:
+    node-type: compute
+  tolerations:
+    - key: node-type
+      operator: Equal
+      value: compute
+      effect: NoSchedule
+  env:
+    DEPLOYMENT_ENVIRONMENT: PROD
+    ENV: PROD
+    LOG_LEVEL: INFO
+    ENABLE_PROMETHEUS: "true"
+    PROMETHEUS_PATH: /metrics
+    BEDROCK_MODEL_ID: meta.llama3-8b-instruct-v1:0
+    COLLECTION_NAME: default_rag_collection1
+    DENSE_URL: "http://dense-svc.fastembed.svc.cluster.local:8200"
+    SPARSE_URL: "http://sparse-svc.fastembed.svc.cluster.local:8201"
+    RERANKER_URL: "http://reranker-svc.fastembed.svc.cluster.local:8202"
+    ENABLE_PRESIGNED_URLS: "true"
+    PRESIGNED_URL_TTL_SECONDS: "1800"
+  secrets:
+    - retriever-secrets
+  probes:
+    readiness:
+      path: /readyz
+      port: 8001
+      initialDelaySeconds: 10
+      periodSeconds: 5
+      failureThreshold: 3
+    liveness:
+      path: /healthz
+      port: 8001
+      initialDelaySeconds: 30
+      periodSeconds: 5
+      failureThreshold: 6
+    startup:
+      path: /healthz
+      port: 8001
+      initialDelaySeconds: 30
+      periodSeconds: 5
+      failureThreshold: 60
+  networkPolicy:
+    ingressAllowFrom:
+      - podLabels: { app.kubernetes.io/name: frontend }
+        ports: [8001]
+      - namespaceLabels: { kubernetes.io/metadata.name: monitoring }
+        ports: [8001]
+    egressAllowTo:
+      dns:
+        namespaceLabels: { kubernetes.io/metadata.name: kube-system }
+        podLabels: { k8s-app: kube-dns }
+      qdrant:
+        namespaceLabels: { kubernetes.io/metadata.name: qdrant }
+        podLabels: { app: qdrant }
+        ports: [6333, 6334]
+      dense:
+        namespaceLabels: { kubernetes.io/metadata.name: fastembed }
+        podLabels: { app.kubernetes.io/name: dense }
+        ports: [8200]
+      sparse:
+        namespaceLabels: { kubernetes.io/metadata.name: fastembed }
+        podLabels: { app.kubernetes.io/name: sparse }
+        ports: [8201]
+      reranker:
+        namespaceLabels: { kubernetes.io/metadata.name: fastembed }
+        podLabels: { app.kubernetes.io/name: reranker }
+        ports: [8202]
+      internet:
+        cidr: "0.0.0.0/0"
+        except: ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+        ports: [443]
+
+cloudflared:
+  enabled: true
+  tunnel:
+    name: default-tunnel-1
+    # Secret containing the tunnel token (key: token)
+    tokenSecretName: cloudflared-token
+  image:
+    repository: cloudflare/cloudflared
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  serviceAccount:
+    create: true
+    name: cloudflared-sa
+  ingress:
+    # Full ingress rules for cloudflared config.yaml
+    rules:
+      - hostname: rag.athithya.site
+        path: /metrics
+        service: http_status:403
+      - hostname: rag.athithya.site
+        path: /healthz
+        service: http_status:403
+      - hostname: rag.athithya.site
+        path: /readyz
+        service: http_status:403
+      - hostname: rag.athithya.site
+        service: http://frontend.inference.svc.cluster.local:8000
+        originRequest:
+          connectTimeout: 10s
+          keepAliveTimeout: 30s
+          disableChunkedEncoding: false
+      - hostname: argocd.athithya.site
+        service: http://argocd-server.argocd.svc.cluster.local:80
+        originRequest:
+          connectTimeout: 10s
+          keepAliveTimeout: 30s
+      - hostname: grafana.athithya.site
+        service: http://grafana.grafana.svc.cluster.local:80
+        originRequest:
+          connectTimeout: 10s
+          keepAliveTimeout: 30s
+    catchAll: http_status:404
+  service:
+    metricsPort: 2000
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi

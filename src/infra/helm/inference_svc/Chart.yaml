@@ -1,0 +1,8 @@
+apiVersion: v2
+name: inference-services
+description: Helm chart for the RAG inference stack (frontend, retriever, cloudflared tunnel)
+type: application
+version: 0.1.0
+appVersion: "1.0"
+maintainers:
+  - name: Athithya

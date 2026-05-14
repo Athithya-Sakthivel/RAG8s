@@ -3,12 +3,36 @@ kind: Application
 metadata:
   name: indexing-cronjob
   namespace: argocd
+  labels:
+    app.kubernetes.io/name: indexing-cronjob
+    app.kubernetes.io/managed-by: argocd
+    app.kubernetes.io/part-of: e2e-rag-system
+  annotations:
+    description: Indexing CronJob Helm deployment
+    deployed-at: "2026-05-14T10:42:02Z"
+    deployed-by: "user"
+    aws-region: "ap-south-1"
+    ecr-repository: "681802563986.dkr.ecr.ap-south-1.amazonaws.com/indexer"
 spec:
   project: default
   source:
     repoURL: https://github.com/Athithya-Sakthivel/E2E-RAG-System.git
     targetRevision: main
-    path: src/manifests/indexing-cronjob
+    path: src/infra/helm/indexing_cronjob
+    helm:
+      values: |
+        image:
+          registry: 681802563986.dkr.ecr.ap-south-1.amazonaws.com
+          repository: indexer
+          tag: "staging"
+          pullPolicy: IfNotPresent
+        serviceAccount:
+          name: indexer
+          annotations:
+            eks.amazonaws.com/role-arn: "arn:aws:iam::681802563986:role/rag-indexer-irsa-role"
+        env:
+          S3_BUCKET: "rag-staging-qdrant-backups-681802563986"
+          DATA_S3_BUCKET: "rag-staging-data-681802563986"
   destination:
     server: https://kubernetes.default.svc
     namespace: indexing
@@ -20,3 +44,9 @@ spec:
       - CreateNamespace=true
       - PrunePropagationPolicy=foreground
       - PruneLast=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m

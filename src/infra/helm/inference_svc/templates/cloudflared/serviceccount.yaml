@@ -1,0 +1,11 @@
+{{- if .Values.cloudflared.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.cloudflared.serviceAccount.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: cloudflared
+    app.kubernetes.io/component: tunnel
+    {{- include "inference-services.labels" . | nindent 4 }}
+{{- end }}

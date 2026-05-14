@@ -1,0 +1,71 @@
+{{- if and .Values.frontend.enabled .Values.frontend.networkPolicy }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "inference-services.componentLabels" (dict "component" "frontend") | nindent 4 }}
+    {{- include "inference-services.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: frontend
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+  {{- range .Values.frontend.networkPolicy.ingressAllowFrom }}
+    - from:
+      {{- if .podLabels }}
+        - podSelector:
+            matchLabels:
+              {{- toYaml .podLabels | nindent 14 }}
+      {{- end }}
+      {{- if .namespaceLabels }}
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml .namespaceLabels | nindent 14 }}
+      {{- end }}
+      ports:
+      {{- range .ports }}
+        - protocol: TCP
+          port: {{ . }}
+      {{- end }}
+  {{- end }}
+  egress:
+  {{- range $target, $rule := .Values.frontend.networkPolicy.egressAllowTo }}
+    - to:
+      {{- if eq $target "internet" }}
+        - ipBlock:
+            cidr: {{ $rule.cidr }}
+            {{- if $rule.except }}
+            except:
+              {{- toYaml $rule.except | nindent 14 }}
+            {{- end }}
+      {{- else }}
+        {{- if $rule.namespaceLabels }}
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml $rule.namespaceLabels | nindent 14 }}
+        {{- end }}
+        {{- if $rule.podLabels }}
+          podSelector:
+            matchLabels:
+              {{- toYaml $rule.podLabels | nindent 14 }}
+        {{- end }}
+      {{- end }}
+      ports:
+      {{- if eq $target "dns" }}
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+      {{- else }}
+      {{- range $rule.ports }}
+        - protocol: TCP
+          port: {{ . }}
+      {{- end }}
+      {{- end }}
+  {{- end }}
+{{- end }}
