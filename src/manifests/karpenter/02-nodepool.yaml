@@ -3,6 +3,10 @@ kind: NodePool
 metadata:
   name: compute
 spec:
+  disruption:
+    consolidationPolicy: WhenUnderutilized
+    budgets:
+    - nodes: "50%"
   template:
     metadata:
       labels:
