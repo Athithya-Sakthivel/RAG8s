@@ -266,6 +266,10 @@ kind: NodePool
 metadata:
   name: ${KARPENTER_NODE_POOL_NAME}
 spec:
+  disruption:
+    consolidationPolicy: WhenUnderutilized
+    budgets:
+    - nodes: "50%"
   template:
     metadata:
       labels:
@@ -307,7 +311,6 @@ $(echo "$EXCLUDED_INSTANCE_TYPES" | tr ',' '\n' | sed 's/^/            - /')
   limits:
     cpu: "${CPU_LIMIT}"
 EOF
-  log_info "Generated: $NODEPOOL_YAML"
 
   # 3. Git commit & push
   log_step "3/4 Committing and pushing to Git"

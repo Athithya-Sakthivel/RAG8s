@@ -104,3 +104,19 @@ bash src/scripts/eks/bootstrap_karpenter.sh --rollout
 
 </details>
 
+### Deploy the full E2E RAG indexing pipeline (Qdrant → FastEmbed → Indexing CronJob). 
+ * NOTE: Karpenter may take longer than 5-15 minutes to provision EC2 instances if the
+ * cheapest matching instance type is not available in your account/region.
+ * It will automatically retry with other c-family types. This is normal.
+ * Pods stay Pending until a compatible instance launches successfully.
+
+```sh
+bash src/scripts/eks/run_indexing_pipeline.sh
+```
+
+<details>
+<summary>▶ Expected output</summary>
+
+![alt text](src/scripts/archive/images/karpenter.png)
+
+</details>
