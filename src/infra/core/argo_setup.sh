@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# bash src/infra/core/argo_setup.sh --delete --confirm
 # bash src/infra/core/argo_setup.sh --rollout
+# bash src/infra/core/argo_setup.sh --delete --confirm
+# PRIVATE_REPO=true GIT_PAT="ghp_xxx" bash src/infra/core/argo_setup.sh --rollout
+# CONTROLLER_REPLICAS=2 bash src/infra/core/argo_setup.sh --rollout
 set -euo pipefail
 IFS=$'\n\t'
 
@@ -14,6 +16,14 @@ VALUES_FILE="/tmp/argocd.yaml"
 TIMEOUT="10m"
 TMPDIR="$(mktemp -d)"
 
+# ---- REPOSITORY CONFIGURATION ----
+PRIVATE_REPO="${PRIVATE_REPO:-true}"
+GIT_PAT="${GIT_PAT:-}"
+GH_REPO="${GH_REPO:-https://github.com/Athithya-Sakthivel/E2E-RAG-System.git}"
+
+# ---- ARGOCD COMPONENT SCALING ----
+CONTROLLER_REPLICAS="${CONTROLLER_REPLICAS:-2}"
+
 MODE=""
 CONFIRM="no"
 
@@ -25,8 +35,23 @@ Modes:
   --rollout     Apply CRDs (server-side) and install/upgrade Argo CD (ClusterIP).
   --delete      Delete Argo CD control plane and Argo CD CRs without pruning managed workloads. Requires --confirm.
 
+Environment Variables:
+  PRIVATE_REPO           Set to "true" to configure private repo access (default: false)
+  GIT_PAT                GitHub Personal Access Token (required if PRIVATE_REPO=true)
+  GH_REPO                GitHub repository URL (default: https://github.com/Athithya-Sakthivel/E2E-RAG-System.git)
+  CONTROLLER_REPLICAS    Number of application-controller replicas (default: 1)
+
 Examples:
+  # Public repo with defaults
   $0 --rollout
+
+  # Private repo
+  PRIVATE_REPO=true GIT_PAT="ghp_xxxxxxxxxxxx" $0 --rollout
+
+  # HA controller
+  CONTROLLER_REPLICAS=2 $0 --rollout
+
+  # Delete
   $0 --delete --confirm
 EOF
   exit 1
@@ -89,9 +114,144 @@ require_cmds() {
   fi
 }
 
+# ---- PRIVATE REPO FUNCTIONS ----
+
+validate_git_pat() {
+  local pat="$1"
+  
+  # Check format
+  if [[ ! "$pat" =~ ^(ghp_|github_pat_) ]]; then
+    err "Invalid GIT_PAT format. Should start with 'ghp_' or 'github_pat_'"
+    err "Generate one at: https://github.com/settings/tokens"
+    err "Required scopes: repo (for private repos)"
+    return 1
+  fi
+  
+  # Validate minimum length (GitHub tokens are at least 40 chars)
+  if [[ ${#pat} -lt 40 ]]; then
+    err "GIT_PAT seems too short (${#pat} chars). GitHub tokens are at least 40 characters."
+    return 1
+  fi
+  
+  # Optional: Test PAT against GitHub API
+  log "Validating PAT against GitHub API..."
+  local response
+  response=$(curl -s -o /dev/null -w "%{http_code}" \
+    -H "Authorization: token ${pat}" \
+    -H "Accept: application/vnd.github.v3+json" \
+    --connect-timeout 10 \
+    --max-time 30 \
+    https://api.github.com/user 2>/dev/null) || {
+    warn "Could not validate PAT against GitHub API (network issue?)"
+    warn "Continuing without validation..."
+    return 0
+  }
+  
+  if [[ "$response" == "200" ]]; then
+    log "PAT validated successfully against GitHub API"
+    return 0
+  elif [[ "$response" == "401" ]]; then
+    err "PAT is invalid or expired (HTTP 401)"
+    return 1
+  else
+    warn "Unexpected API response: HTTP $response"
+    warn "Continuing but PAT may not work..."
+    return 0
+  fi
+}
+
+configure_private_repo() {
+  local repo_url="$1"
+  local pat="$2"
+  
+  log "==========================================="
+  log "  Configuring Private Repository Access"
+  log "==========================================="
+  log "Repository: ${repo_url}"
+  
+  # Validate PAT if provided
+  if [[ -n "$pat" ]]; then
+    validate_git_pat "$pat" || return 1
+  else
+    err "GIT_PAT is required when PRIVATE_REPO=true"
+    return 1
+  fi
+  
+  # Remove existing secret if present (idempotent)
+  kubectl delete secret private-repo-creds \
+    -n "$NAMESPACE" \
+    --ignore-not-found=true 2>/dev/null || true
+  
+  # Create the repository secret
+  log "Creating repository secret 'private-repo-creds'..."
+  kubectl create secret generic private-repo-creds \
+    -n "$NAMESPACE" \
+    --from-literal=type=git \
+    --from-literal=url="$repo_url" \
+    --from-literal=username=git \
+    --from-literal=password="$pat" \
+    --dry-run=client -o yaml | kubectl apply -f -
+  
+  # Label for ArgoCD discovery
+  kubectl label secret private-repo-creds \
+    -n "$NAMESPACE" \
+    argocd.argoproj.io/secret-type=repository \
+    --overwrite
+  
+  # Verify secret was created
+  if kubectl get secret private-repo-creds -n "$NAMESPACE" &>/dev/null; then
+    log "Repository secret 'private-repo-creds' created successfully"
+  else
+    err "Failed to create repository secret"
+    return 1
+  fi
+  
+  # If argocd CLI is available and admin password is accessible, test connection
+  if command -v argocd &>/dev/null; then
+    local admin_password
+    admin_password=$(kubectl -n "$NAMESPACE" get secret argocd-initial-admin-secret \
+      -o jsonpath="{.data.password}" 2>/dev/null | base64 --decode || echo "")
+    
+    if [[ -n "$admin_password" ]]; then
+      log "Testing repository connection via ArgoCD CLI..."
+      
+      # Port-forward to argocd-server for CLI access
+      kubectl -n "$NAMESPACE" port-forward svc/argocd-server 8080:80 &>/dev/null &
+      local pf_pid=$!
+      sleep 3
+      
+      if argocd login localhost:8080 \
+        --username admin \
+        --password "$admin_password" \
+        --insecure &>/dev/null; then
+        
+        if argocd repo list --repo "$repo_url" &>/dev/null; then
+          log "Repository connection verified"
+        else
+          warn "Could not verify repository connection (repo may need different permissions)"
+        fi
+        
+        argocd logout localhost:8080 &>/dev/null || true
+      else
+        warn "Could not login to ArgoCD to verify (this is OK for fresh installs)"
+      fi
+      
+      kill "$pf_pid" 2>/dev/null || true
+    fi
+  fi
+  
+  log "Private repository configured successfully"
+  log ""
+  log "All ArgoCD Applications can now use:"
+  log "  repoURL: ${repo_url}"
+  return 0
+}
+
+# ---- HELM VALUES GENERATION ----
+
 write_values() {
   mkdir -p "$(dirname "${VALUES_FILE}")"
-  cat > "${VALUES_FILE}" <<'EOF'
+  cat > "${VALUES_FILE}" <<EOF
 server:
   service:
     type: ClusterIP
@@ -109,7 +269,7 @@ configs:
   resourceTrackingMethod: "annotation"
 
 controller:
-  replicas: 1
+  replicas: ${CONTROLLER_REPLICAS}
   resources:
     requests:
       cpu: "150m"
@@ -333,6 +493,25 @@ do_rollout() {
   log "Initial admin password (base64-decoded):"
   kubectl -n "${NAMESPACE}" get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 --decode && echo
 
+  # ---- CONFIGURE PRIVATE REPO (if enabled) ----
+  if [[ "${PRIVATE_REPO}" == "true" ]]; then
+    echo ""
+    configure_private_repo "$GH_REPO" "$GIT_PAT" || {
+      err "Failed to configure private repo access"
+      err "ArgoCD is running but cannot access private repositories"
+      exit 1
+    }
+  else
+    log ""
+    log "PRIVATE_REPO not set to 'true' - skipping private repo configuration"
+    log "   To configure later, run:"
+    log "   kubectl create secret generic private-repo-creds -n ${NAMESPACE} \\"
+    log "     --from-literal=type=git \\"
+    log "     --from-literal=url=${GH_REPO} \\"
+    log "     --from-literal=username=git \\"
+    log "     --from-literal=password=\$GIT_PAT"
+    log "   kubectl label secret private-repo-creds -n ${NAMESPACE} argocd.argoproj.io/secret-type=repository"
+  fi
 }
 
 do_delete() {
@@ -344,6 +523,13 @@ do_delete() {
   fi
 
   log "Deleting only Argo CD control plane and Argo CD CRs; managed workloads will be orphaned, not pruned"
+  
+  # Delete private repo secret first
+  if kubectl get secret private-repo-creds -n "${NAMESPACE}" &>/dev/null; then
+    log "Removing private repo secret"
+    kubectl delete secret private-repo-creds -n "${NAMESPACE}" --ignore-not-found=true
+  fi
+  
   delete_argo_crs_without_pruning
 
   if helm status argocd -n "${NAMESPACE}" >/dev/null 2>&1; then

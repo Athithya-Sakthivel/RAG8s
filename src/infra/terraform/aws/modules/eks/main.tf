@@ -398,3 +398,11 @@ output "secrets_encryption_kms_key_arn" {
   description = "KMS key ARN used for EKS secrets encryption."
   value       = aws_kms_key.eks_secrets.arn
 }
+
+
+# Karpenter discovery tag for cluster security group
+resource "aws_ec2_tag" "karpenter_discovery" {
+  resource_id = aws_eks_cluster.this.vpc_config[0].cluster_security_group_id
+  key         = "karpenter.sh/discovery"
+  value       = var.cluster_name
+}

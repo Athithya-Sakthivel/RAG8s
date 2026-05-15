@@ -405,3 +405,13 @@ resource "aws_vpc_endpoint" "eks" {
   security_group_ids  = [aws_security_group.vpce.id]
   private_dns_enabled = true
 }
+
+
+# Karpenter discovery tags for private subnets
+resource "aws_ec2_tag" "karpenter_discovery" {
+  for_each = { for idx, subnet in aws_subnet.private : idx => subnet.id }
+
+  resource_id = each.value
+  key         = "karpenter.sh/discovery"
+  value       = var.cluster_name
+}

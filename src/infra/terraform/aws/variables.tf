@@ -29,6 +29,28 @@ variable "cluster_name" {
   }
 }
 
+variable "github_repository" {
+  description = "GitHub repository in owner/repo format (injected into all GitHub Actions roles)."
+  type        = string
+  default     = "Athithya-Sakthivel/E2E-RAG-System"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$", var.github_repository))
+    error_message = "github_repository must be in owner/repo format."
+  }
+}
+
+variable "system_nodegroup_replicas" {
+  description = "Number of replicas for the system node group. Min, desired, and max will all be set to this value (no autoscaling)."
+  type        = number
+  default     = 2
+
+  validation {
+    condition     = var.system_nodegroup_replicas >= 1 && var.system_nodegroup_replicas <= 10
+    error_message = "system_nodegroup_replicas must be between 1 and 10."
+  }
+}
+
 variable "create_admin_ec2" {
   description = "Create the private admin EC2 host in this environment."
   type        = bool
@@ -137,7 +159,7 @@ variable "single_nat_gateway" {
 }
 
 variable "system_nodegroup" {
-  description = "Sizing for the system node group."
+  description = "Base sizing for the system node group. Instance type is used; actual sizes are overridden by system_nodegroup_replicas."
   type = object({
     instance_type = string
     min_size      = number
@@ -272,7 +294,7 @@ variable "irsa_roles" {
 }
 
 variable "github_actions_roles" {
-  description = "GitHub Actions federated IAM roles."
+  description = "GitHub Actions federated IAM roles. The repository field will be overridden at runtime by var.github_repository."
   type = map(object({
     repository = string
     branch     = string
@@ -282,42 +304,42 @@ variable "github_actions_roles" {
 
   default = {
     frontend = {
-      repository = "Athithya-Sakthivel/E2E-RAG-System"
+      repository = "placeholder"   # replaced by local
       branch     = "main"
       role_name  = "gh-actions-frontend"
       ecr_repo   = "frontend"
     }
 
     retriever = {
-      repository = "Athithya-Sakthivel/E2E-RAG-System"
+      repository = "placeholder"
       branch     = "main"
       role_name  = "gh-actions-retriever"
       ecr_repo   = "retriever"
     }
 
     dense_model = {
-      repository = "Athithya-Sakthivel/E2E-RAG-System"
+      repository = "placeholder"
       branch     = "main"
       role_name  = "gh-actions-dense-model"
       ecr_repo   = "dense-model"
     }
 
     sparse_model = {
-      repository = "Athithya-Sakthivel/E2E-RAG-System"
+      repository = "placeholder"
       branch     = "main"
       role_name  = "gh-actions-sparse-model"
       ecr_repo   = "sparse-model"
     }
 
     reranker = {
-      repository = "Athithya-Sakthivel/E2E-RAG-System"
+      repository = "placeholder"
       branch     = "main"
       role_name  = "gh-actions-reranker"
       ecr_repo   = "reranker"
     }
 
     indexer = {
-      repository = "Athithya-Sakthivel/E2E-RAG-System"
+      repository = "placeholder"
       branch     = "main"
       role_name  = "gh-actions-indexer"
       ecr_repo   = "indexer"
@@ -327,8 +349,6 @@ variable "github_actions_roles" {
   validation {
     condition = alltrue([
       for v in var.github_actions_roles :
-      strcontains(v.repository, "/") &&
-      can(regex("^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$", v.repository)) &&
       length(trimspace(v.branch)) > 0 &&
       v.branch == "main" &&
       length(trimspace(v.role_name)) > 0 &&
@@ -336,7 +356,7 @@ variable "github_actions_roles" {
       length(trimspace(v.ecr_repo)) > 0 &&
       can(regex("^[a-z0-9]+(-[a-z0-9]+)*$", v.ecr_repo))
     ])
-    error_message = "github_actions_roles entries must define repository in owner/repo format, branch 'main', a gh-actions-* role_name, and a lowercase hyphenated ecr_repo."
+    error_message = "github_actions_roles entries must define branch 'main', a gh-actions-* role_name, and a lowercase hyphenated ecr_repo."
   }
 }
 
@@ -393,4 +413,24 @@ variable "tags" {
   description = "Additional tags for all resources."
   type        = map(string)
   default     = {}
+}
+
+# ------------------------------------------------------------------------------
+# Locals – combine static & dynamic values for final usage
+# ------------------------------------------------------------------------------
+locals {
+  # Effective system node group: use the replicas value for all sizes
+  effective_system_nodegroup = {
+    instance_type = var.system_nodegroup.instance_type
+    min_size      = var.system_nodegroup_replicas
+    desired_size  = var.system_nodegroup_replicas
+    max_size      = var.system_nodegroup_replicas
+  }
+
+  # GitHub Actions roles with the dynamic repository injected
+  effective_github_actions_roles = {
+    for k, v in var.github_actions_roles : k => merge(v, {
+      repository = var.github_repository
+    })
+  }
 }

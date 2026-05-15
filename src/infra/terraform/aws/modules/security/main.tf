@@ -62,3 +62,11 @@ output "node_security_group_name" {
   description = "Security Group name for worker nodes."
   value       = aws_security_group.node.name
 }
+
+
+# Karpenter discovery tag for node security group
+resource "aws_ec2_tag" "karpenter_discovery" {
+  resource_id = aws_security_group.node.id
+  key         = "karpenter.sh/discovery"
+  value       = var.cluster_name
+}

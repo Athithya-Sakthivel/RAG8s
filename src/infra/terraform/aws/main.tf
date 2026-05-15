@@ -50,7 +50,7 @@ module "security" {
   vpc_id      = module.vpc.vpc_id
   vpc_cidr    = var.vpc_cidr
   name_prefix = "rag"
-
+  cluster_name = var.cluster_name
   tags = var.tags
 }
 
@@ -97,7 +97,8 @@ module "eks" {
   cluster_endpoint_private_access      = var.cluster_endpoint_private_access
   cluster_endpoint_public_access_cidrs = var.cluster_endpoint_public_access_cidrs
 
-  system_nodegroup   = var.system_nodegroup
+  # Use the computed local that applies system_nodegroup_replicas
+  system_nodegroup   = local.effective_system_nodegroup
   system_node_taints = var.system_node_taints
   system_node_labels = var.system_node_labels
 
@@ -140,7 +141,8 @@ module "iam_post_eks" {
   s3_bucket_arn_map  = module.s3.bucket_arn_map
 
   irsa_roles           = var.irsa_roles
-  github_actions_roles = var.github_actions_roles
+  # Use the computed local that injects the real repository
+  github_actions_roles = local.effective_github_actions_roles
 
   depends_on = [
     module.eks,
@@ -189,11 +191,9 @@ resource "aws_security_group" "eks_admin" {
   #trivy:ignore:AVD-AWS-0104
   egress {
     description = "Allow outbound HTTPS"
-
-    from_port = 443
-    to_port   = 443
-    protocol  = "tcp"
-
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 
@@ -201,11 +201,9 @@ resource "aws_security_group" "eks_admin" {
   #trivy:ignore:AVD-AWS-0104
   egress {
     description = "Allow outbound DNS UDP"
-
-    from_port = 53
-    to_port   = 53
-    protocol  = "udp"
-
+    from_port   = 53
+    to_port     = 53
+    protocol    = "udp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 
@@ -213,11 +211,9 @@ resource "aws_security_group" "eks_admin" {
   #trivy:ignore:AVD-AWS-0104
   egress {
     description = "Allow outbound DNS TCP"
-
-    from_port = 53
-    to_port   = 53
-    protocol  = "tcp"
-
+    from_port   = 53
+    to_port     = 53
+    protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 
@@ -234,15 +230,12 @@ resource "aws_iam_role" "eks_admin" {
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
-
     Statement = [
       {
         Effect = "Allow"
-
         Principal = {
           Service = "ec2.amazonaws.com"
         }
-
         Action = "sts:AssumeRole"
       }
     ]
@@ -269,15 +262,12 @@ resource "aws_iam_role_policy" "eks_admin_describe_cluster" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-
     Statement = [
       {
         Effect = "Allow"
-
         Action = [
           "eks:DescribeCluster"
         ]
-
         Resource = "arn:aws:eks:${var.region}:${data.aws_caller_identity.current.account_id}:cluster/${module.eks.cluster_name}"
       }
     ]
@@ -342,8 +332,7 @@ resource "aws_instance" "eks_admin" {
   root_block_device {
     volume_type = "gp3"
     volume_size = 12
-
-    encrypted             = true
+    encrypted   = true
     delete_on_termination = true
   }
 
@@ -365,8 +354,7 @@ resource "aws_security_group_rule" "eks_admin_to_cluster" {
 
   description = "Allow admin host to reach EKS API"
 
-  type = "ingress"
-
+  type      = "ingress"
   from_port = 443
   to_port   = 443
   protocol  = "tcp"

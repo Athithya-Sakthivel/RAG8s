@@ -1,6 +1,18 @@
-environment  = "staging"
-region       = "ap-south-1"
-cluster_name = "rag-eks-staging"
+# src/infra/terraform/aws/staging.tfvars
+# Staging environment overrides.
+#
+# The five primary variables (region, environment, cluster_name, github_repository,
+# system_nodegroup_replicas) are NOT defined here – they are expected to be injected
+# via TF_VAR_ environment variables at runtime (or via -var CLI flags).
+#
+# Example:
+#   export TF_VAR_region="ap-south-1"
+#   export TF_VAR_environment="staging"
+#   export TF_VAR_cluster_name="rag-eks-staging"
+#   export TF_VAR_github_repository="Athithya-Sakthivel/E2E-RAG-System"
+#   export TF_VAR_system_nodegroup_replicas=4
+
+# region, environment, cluster_name – intentionally omitted (use TF_VAR_)
 
 create_admin_ec2 = false
 
@@ -25,12 +37,9 @@ public_subnet_cidrs = [
 enable_nat_per_az  = true
 single_nat_gateway = false
 
-system_nodegroup = {
-  instance_type = "t3.small"
-  min_size      = 4
-  desired_size  = 4
-  max_size      = 4
-}
+# system_nodegroup – removed. Node sizes come from TF_VAR_system_nodegroup_replicas.
+# Instance type is picked from the variable's default (t3.small). Override with -var
+# if you need a different instance type (e.g., -var='system_nodegroup={"instance_type":"t3.medium"}').
 
 system_node_taints = []
 
@@ -88,49 +97,8 @@ irsa_roles = {
   }
 }
 
-github_actions_roles = {
-  frontend = {
-    repository = "Athithya-Sakthivel/E2E-RAG-System"
-    branch     = "main"
-    role_name  = "gh-actions-frontend"
-    ecr_repo   = "frontend"
-  }
-
-  retriever = {
-    repository = "Athithya-Sakthivel/E2E-RAG-System"
-    branch     = "main"
-    role_name  = "gh-actions-retriever"
-    ecr_repo   = "retriever"
-  }
-
-  dense_model = {
-    repository = "Athithya-Sakthivel/E2E-RAG-System"
-    branch     = "main"
-    role_name  = "gh-actions-dense-model"
-    ecr_repo   = "dense-model"
-  }
-
-  sparse_model = {
-    repository = "Athithya-Sakthivel/E2E-RAG-System"
-    branch     = "main"
-    role_name  = "gh-actions-sparse-model"
-    ecr_repo   = "sparse-model"
-  }
-
-  reranker = {
-    repository = "Athithya-Sakthivel/E2E-RAG-System"
-    branch     = "main"
-    role_name  = "gh-actions-reranker"
-    ecr_repo   = "reranker"
-  }
-
-  indexer = {
-    repository = "Athithya-Sakthivel/E2E-RAG-System"
-    branch     = "main"
-    role_name  = "gh-actions-indexer"
-    ecr_repo   = "indexer"
-  }
-}
+# github_actions_roles – fully removed. The dynamic repository will be injected
+# automatically from TF_VAR_github_repository.
 
 ecr_repositories = {
   frontend = {

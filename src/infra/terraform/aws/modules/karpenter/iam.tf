@@ -240,22 +240,22 @@ data "aws_iam_policy_document" "controller" {
   }
 
   statement {
-  sid    = "AllowIAMInstanceProfileActions"
-  effect = "Allow"
+    sid    = "AllowIAMInstanceProfileActions"
+    effect = "Allow"
 
-  actions = [
-    "iam:PassRole",
-    "iam:CreateInstanceProfile",
-    "iam:TagInstanceProfile",
-    "iam:AddRoleToInstanceProfile",
-    "iam:RemoveRoleFromInstanceProfile",
-    "iam:DeleteInstanceProfile",
-    "iam:GetInstanceProfile",
-    "iam:ListInstanceProfiles",
-  ]
+    actions = [
+      "iam:PassRole",
+      "iam:CreateInstanceProfile",
+      "iam:TagInstanceProfile",
+      "iam:AddRoleToInstanceProfile",
+      "iam:RemoveRoleFromInstanceProfile",
+      "iam:DeleteInstanceProfile",
+      "iam:GetInstanceProfile",
+      "iam:ListInstanceProfiles",
+    ]
 
-  resources = ["*"]
-}
+    resources = ["*"]
+  }
 
   statement {
     sid    = "AllowEKSDiscovery"
