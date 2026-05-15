@@ -7,7 +7,7 @@ metadata:
   labels:
     app.kubernetes.io/name: cloudflared
     app.kubernetes.io/component: tunnel
-    {{- include "inference-services.labels" . | nindent 4 }}
+    {{- include "inference-services.commonLabels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.cloudflared.replicaCount }}
   selector:
@@ -19,13 +19,13 @@ spec:
       labels:
         app.kubernetes.io/name: cloudflared
         app.kubernetes.io/component: tunnel
-        {{- include "inference-services.labels" . | nindent 8 }}
+        {{- include "inference-services.commonLabels" . | nindent 8 }}
     spec:
       serviceAccountName: {{ .Values.cloudflared.serviceAccount.name }}
       containers:
         - name: cloudflared
           image: "{{ .Values.cloudflared.image.repository }}:{{ .Values.cloudflared.image.tag }}"
-          imagePullPolicy: {{ .Values.cloudflared.image.pullPolicy }}
+          imagePullPolicy: {{ .Values.cloudflared.image.pullPolicy | default "IfNotPresent" }}
           args:
             - tunnel
             - --config

@@ -6,50 +6,21 @@ Expand the name of the chart.
 {{- end }}
 
 {{/*
-Create a default fully qualified app name.
-*/}}
-{{- define "inference-services.fullname" -}}
-{{- if .Values.fullnameOverride }}
-{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
-{{- else }}
-{{- $name := default .Chart.Name .Values.nameOverride }}
-{{- if contains $name .Release.Name }}
-{{- .Release.Name | trunc 63 | trimSuffix "-" }}
-{{- else }}
-{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" }}
-{{- end }}
-{{- end }}
-{{- end }}
-
-{{/*
-Selector labels
+Component selector labels – only the labels needed for selectors.
 */}}
 {{- define "inference-services.selectorLabels" -}}
-app.kubernetes.io/name: {{ .component | default "inference-services" }}
-app.kubernetes.io/instance: {{ .Release.Name }}
-{{- end }}
-
-{{/*
-Common labels
-*/}}
-{{- define "inference-services.labels" -}}
-helm.sh/chart: {{ include "inference-services.name" . }}-{{ .Chart.Version | replace "+" "_" }}
-{{ include "inference-services.selectorLabels" . }}
-{{- if .Chart.AppVersion }}
-app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
-{{- end }}
-app.kubernetes.io/managed-by: {{ .Release.Service }}
-{{- if .Values.commonLabels }}
-{{ toYaml .Values.commonLabels }}
-{{- end }}
-{{- end }}
-
-{{/*
-Component-specific labels for frontend, retriever, cloudflared
-*/}}
-{{- define "inference-services.componentLabels" -}}
 app.kubernetes.io/name: {{ .component }}
 app.kubernetes.io/instance: {{ .component }}
 app.kubernetes.io/component: {{ .component }}
-app.kubernetes.io/part-of: {{ .component }}
+{{- end }}
+
+{{/*
+Common labels (merged into pod template only, not selector).
+*/}}
+{{- define "inference-services.commonLabels" -}}
+helm.sh/chart: {{ include "inference-services.name" . }}-{{ .Chart.Version | replace "+" "_" }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
 {{- end }}

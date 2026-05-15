@@ -1,18 +1,18 @@
-{{- if and .Values.frontend.enabled .Values.frontend.networkPolicy }}
+{{- if and .Values.retriever.enabled .Values.retriever.networkPolicy }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: frontend
+  name: retriever
   namespace: {{ .Values.namespace }}
 spec:
   podSelector:
     matchLabels:
-      app.kubernetes.io/name: frontend
+      app.kubernetes.io/name: retriever
   policyTypes:
     - Ingress
     - Egress
   ingress:
-  {{- range .Values.frontend.networkPolicy.ingressAllowFrom }}
+  {{- range .Values.retriever.networkPolicy.ingressAllowFrom }}
     - from:
       {{- if .podLabels }}
         - podSelector:
@@ -31,7 +31,7 @@ spec:
       {{- end }}
   {{- end }}
   egress:
-  {{- range $target, $rule := .Values.frontend.networkPolicy.egressAllowTo }}
+  {{- range $target, $rule := .Values.retriever.networkPolicy.egressAllowTo }}
     - to:
       {{- if eq $target "internet" }}
         - ipBlock:

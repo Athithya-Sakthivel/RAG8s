@@ -1,0 +1,110 @@
+{{- if .Values.retriever.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: retriever
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: {{ .Values.retriever.replicaCount }}
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      {{- include "inference-services.selectorLabels" (dict "component" "retriever") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "inference-services.selectorLabels" (dict "component" "retriever") | nindent 8 }}
+        {{- include "inference-services.commonLabels" . | nindent 8 }}
+        app.kubernetes.io/part-of: retriever
+    spec:
+      serviceAccountName: {{ .Values.retriever.serviceAccount.name }}
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        fsGroup: 1000
+      {{- with .Values.retriever.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.retriever.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      containers:
+        - name: retriever
+          image: "{{ .Values.retriever.image.repository }}:{{ .Values.retriever.image.tag }}"
+          imagePullPolicy: {{ .Values.retriever.image.pullPolicy | default "IfNotPresent" }}
+          ports:
+            - name: http
+              containerPort: 8001
+              protocol: TCP
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: SERVICE_NAME
+              value: retriever
+            {{- range $k, $v := .Values.retriever.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+          {{- if .Values.retriever.secrets }}
+          envFrom:
+            {{- range .Values.retriever.secrets }}
+            - secretRef:
+                name: {{ . }}
+            {{- end }}
+          {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: tmp
+              mountPath: /var/tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+          resources:
+            {{- toYaml .Values.retriever.resources | nindent 12 }}
+          {{- if .Values.retriever.probes }}
+          startupProbe:
+            httpGet:
+              path: {{ .Values.retriever.probes.startup.path }}
+              port: 8001
+              scheme: HTTP
+            initialDelaySeconds: {{ .Values.retriever.probes.startup.initialDelaySeconds }}
+            timeoutSeconds: 5
+            periodSeconds: {{ .Values.retriever.probes.startup.periodSeconds }}
+            failureThreshold: {{ .Values.retriever.probes.startup.failureThreshold }}
+            successThreshold: 1
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.retriever.probes.liveness.path }}
+              port: 8001
+              scheme: HTTP
+            initialDelaySeconds: 0
+            timeoutSeconds: 5
+            periodSeconds: {{ .Values.retriever.probes.liveness.periodSeconds }}
+            failureThreshold: {{ .Values.retriever.probes.liveness.failureThreshold }}
+            successThreshold: 1
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.retriever.probes.readiness.path }}
+              port: 8001
+              scheme: HTTP
+            initialDelaySeconds: 0
+            timeoutSeconds: 5
+            periodSeconds: {{ .Values.retriever.probes.readiness.periodSeconds }}
+            failureThreshold: {{ .Values.retriever.probes.readiness.failureThreshold }}
+            successThreshold: 1
+          {{- end }}
+{{- end }}

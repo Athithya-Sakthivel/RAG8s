@@ -4,25 +4,18 @@ kind: Deployment
 metadata:
   name: frontend
   namespace: {{ .Values.namespace }}
-  labels:
-    {{- include "inference-services.componentLabels" (dict "component" "frontend") | nindent 4 }}
-    {{- include "inference-services.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.frontend.replicaCount }}
   revisionHistoryLimit: 3
   selector:
     matchLabels:
-      app.kubernetes.io/name: frontend
-      app.kubernetes.io/instance: frontend
-      app.kubernetes.io/component: frontend
+      {{- include "inference-services.selectorLabels" (dict "component" "frontend") | nindent 6 }}
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: frontend
-        app.kubernetes.io/instance: frontend
-        app.kubernetes.io/component: frontend
+        {{- include "inference-services.selectorLabels" (dict "component" "frontend") | nindent 8 }}
+        {{- include "inference-services.commonLabels" . | nindent 8 }}
         app.kubernetes.io/part-of: frontend
-        {{- include "inference-services.labels" . | nindent 8 }}
     spec:
       serviceAccountName: {{ .Values.frontend.serviceAccount.name }}
       terminationGracePeriodSeconds: 30
@@ -44,10 +37,10 @@ spec:
       containers:
         - name: frontend
           image: "{{ .Values.frontend.image.repository }}:{{ .Values.frontend.image.tag }}"
-          imagePullPolicy: {{ .Values.frontend.image.pullPolicy }}
+          imagePullPolicy: {{ .Values.frontend.image.pullPolicy | default "IfNotPresent" }}
           ports:
             - name: http
-              containerPort: {{ .Values.frontend.service.port }}
+              containerPort: 8000
               protocol: TCP
           env:
             - name: POD_NAME
@@ -86,36 +79,36 @@ spec:
             runAsGroup: 1000
           resources:
             {{- toYaml .Values.frontend.resources | nindent 12 }}
-          {{- with .Values.frontend.probes }}
+          {{- if .Values.frontend.probes }}
           startupProbe:
             httpGet:
-              path: {{ .startup.path }}
-              port: {{ .startup.port }}
+              path: {{ .Values.frontend.probes.startup.path }}
+              port: 8000
               scheme: HTTP
-            initialDelaySeconds: {{ .startup.initialDelaySeconds }}
+            initialDelaySeconds: {{ .Values.frontend.probes.startup.initialDelaySeconds }}
             timeoutSeconds: 5
-            periodSeconds: {{ .startup.periodSeconds }}
-            failureThreshold: {{ .startup.failureThreshold }}
+            periodSeconds: {{ .Values.frontend.probes.startup.periodSeconds }}
+            failureThreshold: {{ .Values.frontend.probes.startup.failureThreshold }}
             successThreshold: 1
           livenessProbe:
             httpGet:
-              path: {{ .liveness.path }}
-              port: {{ .liveness.port }}
+              path: {{ .Values.frontend.probes.liveness.path }}
+              port: 8000
               scheme: HTTP
             initialDelaySeconds: 0
             timeoutSeconds: 5
-            periodSeconds: {{ .liveness.periodSeconds }}
-            failureThreshold: {{ .liveness.failureThreshold }}
+            periodSeconds: {{ .Values.frontend.probes.liveness.periodSeconds }}
+            failureThreshold: {{ .Values.frontend.probes.liveness.failureThreshold }}
             successThreshold: 1
           readinessProbe:
             httpGet:
-              path: {{ .readiness.path }}
-              port: {{ .readiness.port }}
+              path: {{ .Values.frontend.probes.readiness.path }}
+              port: 8000
               scheme: HTTP
             initialDelaySeconds: 0
             timeoutSeconds: 5
-            periodSeconds: {{ .readiness.periodSeconds }}
-            failureThreshold: {{ .readiness.failureThreshold }}
+            periodSeconds: {{ .Values.frontend.probes.readiness.periodSeconds }}
+            failureThreshold: {{ .Values.frontend.probes.readiness.failureThreshold }}
             successThreshold: 1
           {{- end }}
 {{- end }}
