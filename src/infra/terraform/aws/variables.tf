@@ -1,6 +1,5 @@
 // src/infra/terraform/aws/variables.tf
 // Root-level contract for the E2E RAG platform.
-// Finalized for OpenTofu/Terraform 1.x compatibility.
 
 variable "region" {
   description = "AWS region where resources will be created."
@@ -30,6 +29,56 @@ variable "cluster_name" {
   }
 }
 
+variable "create_admin_ec2" {
+  description = "Create the private admin EC2 host in this environment."
+  type        = bool
+  default     = false
+}
+
+variable "admin_instance_type" {
+  description = "Instance type for the admin EC2 host."
+  type        = string
+  default     = "t3.micro"
+}
+
+variable "admin_ami_parameter" {
+  description = "SSM parameter path for the Ubuntu 24.04 AMI."
+  type        = string
+  default     = "/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id"
+}
+
+variable "karpenter_chart_version" {
+  description = "Karpenter Helm chart version."
+  type        = string
+  default     = "1.9.0"
+}
+
+variable "cluster_endpoint_public_access" {
+  description = "Whether the EKS API server is publicly reachable."
+  type        = bool
+  default     = false
+}
+
+variable "cluster_endpoint_private_access" {
+  description = "Whether the EKS API server is privately reachable inside the VPC."
+  type        = bool
+  default     = true
+}
+
+variable "cluster_endpoint_public_access_cidrs" {
+  description = "CIDR blocks allowed to reach the public EKS endpoint."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition = (
+      length(var.cluster_endpoint_public_access_cidrs) == 0 ||
+      alltrue([for cidr in var.cluster_endpoint_public_access_cidrs : length(trimspace(cidr)) > 0])
+    )
+    error_message = "cluster_endpoint_public_access_cidrs must be empty or contain only non-empty CIDR strings."
+  }
+}
+
 variable "vpc_cidr" {
   description = "Primary IPv4 CIDR for the VPC."
   type        = string
@@ -52,7 +101,7 @@ variable "private_subnet_cidrs" {
   type        = list(string)
   default = [
     "10.0.32.0/20",
-    "10.0.48.0/20"
+    "10.0.48.0/20",
   ]
 
   validation {
@@ -66,7 +115,7 @@ variable "public_subnet_cidrs" {
   type        = list(string)
   default = [
     "10.0.0.0/24",
-    "10.0.1.0/24"
+    "10.0.1.0/24",
   ]
 
   validation {
@@ -87,10 +136,6 @@ variable "single_nat_gateway" {
   default     = false
 }
 
-###############################################################################
-# NODE GROUPS
-###############################################################################
-
 variable "system_nodegroup" {
   description = "Sizing for the system node group."
   type = object({
@@ -108,38 +153,12 @@ variable "system_nodegroup" {
   }
 }
 
-variable "workloads_nodegroup" {
-  description = "Sizing for the workloads node group."
-  type = object({
-    instance_type = string
-    min_size      = number
-    desired_size  = number
-    max_size      = number
-  })
-
-  default = {
-    instance_type = "m7i-flex.large"
-    min_size      = 2
-    desired_size  = 2
-    max_size      = 6
-  }
-}
-
 variable "system_node_labels" {
   description = "Labels applied to system nodes."
   type        = map(string)
 
   default = {
     node-type = "general"
-  }
-}
-
-variable "workloads_node_labels" {
-  description = "Labels applied to workload nodes."
-  type        = map(string)
-
-  default = {
-    node-type = "compute"
   }
 }
 
@@ -165,73 +184,6 @@ variable "system_node_taints" {
   }
 }
 
-variable "workloads_node_taints" {
-  description = "Taints applied to workloads nodes."
-  type = list(object({
-    key    = string
-    value  = string
-    effect = string
-  }))
-
-  default = [
-    {
-      key    = "node-type"
-      value  = "compute"
-      effect = "NO_SCHEDULE"
-    }
-  ]
-
-  validation {
-    condition = alltrue([
-      for t in var.workloads_node_taints :
-      contains(
-        ["NO_SCHEDULE", "NO_EXECUTE", "PREFER_NO_SCHEDULE"],
-        t.effect
-      )
-    ])
-    error_message = "workloads_node_taints.effect must be NO_SCHEDULE, NO_EXECUTE, or PREFER_NO_SCHEDULE."
-  }
-}
-
-###############################################################################
-# AUTOSCALER
-###############################################################################
-
-variable "cluster_autoscaler" {
-  description = "Cluster Autoscaler feature configuration."
-  type = object({
-    enabled                    = bool
-    scan_interval_seconds      = number
-    max_node_provision_time    = number
-    expander                   = string
-    balance_similar_nodegroups = bool
-  })
-
-  default = {
-    enabled                    = true
-    scan_interval_seconds      = 10
-    max_node_provision_time    = 600
-    expander                   = "least-waste"
-    balance_similar_nodegroups = true
-  }
-
-  validation {
-    condition = (
-      var.cluster_autoscaler.scan_interval_seconds > 0 &&
-      var.cluster_autoscaler.max_node_provision_time > 0 &&
-      contains(
-        ["least-waste", "most-pods", "random"],
-        var.cluster_autoscaler.expander
-      )
-    )
-    error_message = "cluster_autoscaler must use positive timing values and a valid expander."
-  }
-}
-
-###############################################################################
-# S3
-###############################################################################
-
 variable "s3_buckets" {
   description = "Managed S3 buckets."
   type = map(object({
@@ -242,22 +194,18 @@ variable "s3_buckets" {
 
   default = {
     DATA_S3_BUCKET = {
-      name          = "rag-prod-data"
+      name          = "rag-prod-data-681802563986"
       versioning    = true
       force_destroy = false
     }
 
     QDRANT_BACKUPS_BUCKET = {
-      name          = "rag-prod-qdrant-backups"
+      name          = "rag-prod-qdrant-backups-681802563986"
       versioning    = true
       force_destroy = false
     }
   }
 }
-
-###############################################################################
-# IRSA
-###############################################################################
 
 variable "irsa_roles" {
   description = "IAM roles for Kubernetes service accounts."
@@ -285,7 +233,7 @@ variable "irsa_roles" {
         {
           key    = "QDRANT_BACKUPS_BUCKET"
           access = "read_write"
-        }
+        },
       ]
     }
 
@@ -296,7 +244,7 @@ variable "irsa_roles" {
         {
           key    = "DATA_S3_BUCKET"
           access = "read"
-        }
+        },
       ]
     }
 
@@ -322,10 +270,6 @@ variable "irsa_roles" {
     error_message = "Each irsa_roles item must define namespace and service_account, and must define either buckets or aws_services."
   }
 }
-
-###############################################################################
-# GITHUB ACTIONS OIDC ROLES
-###############################################################################
 
 variable "github_actions_roles" {
   description = "GitHub Actions federated IAM roles."
@@ -396,10 +340,6 @@ variable "github_actions_roles" {
   }
 }
 
-###############################################################################
-# ECR
-###############################################################################
-
 variable "ecr_repositories" {
   description = "ECR repositories."
   type = map(object({
@@ -440,29 +380,13 @@ variable "ecr_repositories" {
     condition = alltrue([
       for _, v in var.ecr_repositories :
       length(trimspace(v.name)) > 0 &&
-      v.retain_last_images > 0 &&
-      contains(["IMMUTABLE"], upper(v.image_tag_mutability)) &&
-      contains(["AES256"], upper(v.encryption_type)) &&
+      try(v.retain_last_images, 30) > 0 &&
+      try(upper(v.image_tag_mutability), "IMMUTABLE") == "IMMUTABLE" &&
+      try(upper(v.encryption_type), "AES256") == "AES256" &&
       can(regex("^[a-z0-9]+(-[a-z0-9]+)*$", v.name))
     ])
     error_message = "Each ecr_repositories entry must define a lowercase hyphenated name, immutable tags, AES256 encryption, and retain_last_images > 0."
   }
-}
-
-###############################################################################
-# OPTIONAL LAUNCH TEMPLATE INPUTS
-###############################################################################
-
-variable "launch_template_id" {
-  description = "Optional EC2 Launch Template ID."
-  type        = string
-  default     = ""
-}
-
-variable "launch_template_version" {
-  description = "Optional Launch Template version."
-  type        = string
-  default     = ""
 }
 
 variable "tags" {

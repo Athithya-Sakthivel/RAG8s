@@ -1,0 +1,18 @@
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+
+metadata:
+  name: compute
+
+spec:
+  amiFamily: AL2023
+
+  role: KarpenterNodeRole-rag-eks-staging
+
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: rag-eks-staging
+
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: rag-eks-staging

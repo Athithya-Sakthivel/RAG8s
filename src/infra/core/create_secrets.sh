@@ -1,8 +1,3 @@
-#!/usr/bin/env bash
-
-for ns in indexing inference logging grafana monitoring; do
-  kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f -
-done
 
 # Frontend secrets
 SESSION_SECRET="${SESSION_SECRET:-$(openssl rand -hex 32)}"
@@ -19,17 +14,6 @@ kubectl create secret generic frontend-secrets -n inference \
   --dry-run=client -o yaml | kubectl apply -f -
 rm -f "$JWT_PEM_FILE"
 
-kubectl create ns grafana --dry-run=client -o yaml | kubectl apply -f -
-kubectl create secret generic grafana-admin -n grafana \
-  --from-literal=admin-user=admin \
-  --from-literal=admin-password="${GRAFANA_ADMIN_PASSWORD:-grafana}" \
-  --dry-run=client -o yaml | kubectl apply -f -
-
-# ClickHouse/Vector secrets
-kubectl create secret generic clickhouse-credentials -n logging \
-  --from-literal=username="${CLICKHOUSE_USER:-vector}" \
-  --from-literal=password="${CLICKHOUSE_PASSWORD:-vectorpass}" \
-  --dry-run=client -o yaml | kubectl apply -f -
 
 export CLOUDFLARE_TUNNEL_TOKEN="$(tofu -chdir=src/infra/terraform/cloudflare output -raw cloudflare_tunnel_token)"
 # Cloudflare tunnel secret

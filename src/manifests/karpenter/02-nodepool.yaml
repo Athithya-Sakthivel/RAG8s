@@ -1,0 +1,56 @@
+apiVersion: karpenter.sh/v1
+kind: NodePool
+
+metadata:
+  name: compute
+
+spec:
+  template:
+
+    metadata:
+      labels:
+        node-type: compute
+
+    spec:
+
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: compute
+
+      taints:
+        - key: node-type
+          value: compute
+          effect: NoSchedule
+
+      requirements:
+
+        - key: kubernetes.io/arch
+          operator: In
+          values:
+            - amd64
+
+        - key: kubernetes.io/os
+          operator: In
+          values:
+            - linux
+
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values:
+            - spot
+
+        - key: karpenter.k8s.aws/instance-category
+          operator: In
+          values:
+            - c
+            - m
+            - r
+
+        - key: karpenter.k8s.aws/instance-generation
+          operator: Gt
+          values:
+            - "2"
+
+  limits:
+    cpu: "50"

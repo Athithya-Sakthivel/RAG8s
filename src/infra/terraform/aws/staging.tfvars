@@ -8,8 +8,6 @@ cluster_endpoint_public_access       = true
 cluster_endpoint_private_access      = true
 cluster_endpoint_public_access_cidrs = ["183.82.177.77/32"]
 
-# curl -s https://checkip.amazonaws.com
-
 vpc_cidr = "10.1.0.0/16"
 
 az_count = 2
@@ -29,34 +27,15 @@ single_nat_gateway = false
 
 system_nodegroup = {
   instance_type = "t3.small"
-  min_size      = 2
-  desired_size  = 2
-  max_size      = 2
-}
-
-workloads_nodegroup = {
-  instance_type = "m7i-flex.large"
-  min_size      = 2
-  desired_size  = 2
+  min_size      = 4
+  desired_size  = 4
   max_size      = 4
 }
 
 system_node_taints = []
 
-workloads_node_taints = [
-  {
-    key    = "node-type"
-    value  = "compute"
-    effect = "NO_SCHEDULE"
-  }
-]
-
 system_node_labels = {
   "node-type" = "general"
-}
-
-workloads_node_labels = {
-  "node-type" = "compute"
 }
 
 s3_buckets = {
@@ -195,14 +174,6 @@ ecr_repositories = {
     encryption_type    = "AES256"
     retain_last_images = 30
   }
-}
-
-cluster_autoscaler = {
-  enabled                    = true
-  scan_interval_seconds      = 10
-  max_node_provision_time    = 600
-  expander                   = "least-waste"
-  balance_similar_nodegroups = true
 }
 
 tags = {

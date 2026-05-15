@@ -53,13 +53,18 @@ log_info "Tunnel:      $CLOUDFLARE_TUNNEL_NAME"
 log_step "2/5 Creating required secrets"
 kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
+
+PRIVATE_KEY_PEM=$(openssl ecparam -genkey -name prime256v1 -noout 2>/dev/null)
+
 kubectl create secret generic frontend-secrets \
   --namespace="$NAMESPACE" \
   --from-literal=GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-}" \
   --from-literal=GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET:-}" \
   --from-literal=MICROSOFT_CLIENT_ID="${MICROSOFT_CLIENT_ID:-}" \
   --from-literal=MICROSOFT_CLIENT_SECRET="${MICROSOFT_CLIENT_SECRET:-}" \
-  --from-literal=JWT_SECRET="${JWT_SECRET:-$(openssl rand -base64 32)}" \
+  --from-literal=JWT_SECRET="$(openssl rand -base64 32)" \
+  --from-literal=SESSION_SECRET="$(openssl rand -base64 32)" \
+  --from-literal=JWT_PRIVATE_KEY_PEM="$PRIVATE_KEY_PEM" \
   --dry-run=client -o yaml | kubectl apply -f -
 
 kubectl create secret generic retriever-secrets \

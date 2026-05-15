@@ -1,13 +1,13 @@
 // src/infra/terraform/aws/modules/eks/main.tf
-// EKS cluster + managed nodegroups for the RAG platform.
+// EKS cluster + managed system nodegroup for the RAG platform.
 //
 // Contract:
 // - private cluster endpoint by default
 // - public endpoint can be enabled for staging
 // - OIDC provider for IRSA
-// - two managed nodegroups only:
-//   - system    -> on-demand, platform services
-//   - workloads -> Spot, stateless services and jobs
+// - single managed nodegroup only:
+//   - system -> on-demand, platform services
+// - Karpenter handles bursty/stateless compute nodes outside this module
 // - cluster security group rule is owned here
 // - access-entry-capable cluster authentication mode enabled
 // - no CloudWatch dependency required
@@ -30,7 +30,7 @@ variable "vpc_id" {
 }
 
 variable "subnet_ids" {
-  description = "Private subnet IDs for the managed nodegroups."
+  description = "Private subnet IDs for the managed nodegroup."
   type        = list(string)
 }
 
@@ -88,16 +88,6 @@ variable "system_nodegroup" {
   })
 }
 
-variable "workloads_nodegroup" {
-  description = "Sizing for the workloads nodegroup."
-  type = object({
-    instance_type = string
-    min_size      = number
-    desired_size  = number
-    max_size      = number
-  })
-}
-
 variable "system_node_taints" {
   description = "Structured taints for the system nodegroup."
   type = list(object({
@@ -116,36 +106,10 @@ variable "system_node_taints" {
   }
 }
 
-variable "workloads_node_taints" {
-  description = "Structured taints for the workloads nodegroup."
-  type = list(object({
-    key    = string
-    value  = string
-    effect = string
-  }))
-  default = [
-    { key = "node-type", value = "compute", effect = "NO_SCHEDULE" }
-  ]
-
-  validation {
-    condition = alltrue([
-      for t in var.workloads_node_taints :
-      contains(["NO_SCHEDULE", "NO_EXECUTE", "PREFER_NO_SCHEDULE"], t.effect)
-    ])
-    error_message = "Each workloads_node_taints[].effect must be one of NO_SCHEDULE, NO_EXECUTE, or PREFER_NO_SCHEDULE."
-  }
-}
-
 variable "system_node_labels" {
   description = "Labels applied to system nodes."
   type        = map(string)
   default     = { "node-type" = "general" }
-}
-
-variable "workloads_node_labels" {
-  description = "Labels applied to workloads nodes."
-  type        = map(string)
-  default     = { "node-type" = "compute" }
 }
 
 variable "enabled_cluster_log_types" {
@@ -301,12 +265,7 @@ resource "aws_iam_openid_connect_provider" "this" {
   url = aws_eks_cluster.this.identity[0].oidc[0].issuer
 
   client_id_list = ["sts.amazonaws.com"]
-
-  thumbprint_list = [
-    data.tls_certificate.eks_oidc.certificates[0].sha1_fingerprint
-  ]
-
-  tags = local.common_tags
+  tags           = local.common_tags
 }
 
 resource "aws_security_group_rule" "allow_nodes_to_control_plane" {
@@ -392,46 +351,6 @@ resource "aws_eks_node_group" "system" {
   }
 
   labels = var.system_node_labels
-
-  launch_template {
-    id      = aws_launch_template.nodes.id
-    version = "$Latest"
-  }
-
-  update_config {
-    max_unavailable = 1
-  }
-
-  tags = local.common_tags
-}
-
-resource "aws_eks_node_group" "workloads" {
-  depends_on = [aws_security_group_rule.allow_nodes_to_control_plane]
-
-  cluster_name    = aws_eks_cluster.this.name
-  node_group_name = "${var.cluster_name}-workloads"
-  node_role_arn   = var.node_role_arn
-  subnet_ids      = var.subnet_ids
-  capacity_type   = "SPOT"
-
-  scaling_config {
-    desired_size = var.workloads_nodegroup.desired_size
-    min_size     = var.workloads_nodegroup.min_size
-    max_size     = var.workloads_nodegroup.max_size
-  }
-
-  instance_types = [var.workloads_nodegroup.instance_type]
-
-  dynamic "taint" {
-    for_each = var.workloads_node_taints
-    content {
-      key    = taint.value.key
-      value  = taint.value.value
-      effect = taint.value.effect
-    }
-  }
-
-  labels = var.workloads_node_labels
 
   launch_template {
     id      = aws_launch_template.nodes.id

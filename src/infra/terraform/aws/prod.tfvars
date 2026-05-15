@@ -1,4 +1,3 @@
-# src/infra/terraform/aws/prod.tfvars
 environment  = "prod"
 region       = "ap-south-1"
 cluster_name = "rag-eks-prod"
@@ -28,34 +27,15 @@ single_nat_gateway = false
 
 system_nodegroup = {
   instance_type = "t3.small"
-  min_size      = 3
-  desired_size  = 3
-  max_size      = 3
-}
-
-workloads_nodegroup = {
-  instance_type = "m7i-flex.large"
-  min_size      = 2
-  desired_size  = 2
+  min_size      = 6
+  desired_size  = 6
   max_size      = 6
 }
 
 system_node_taints = []
 
-workloads_node_taints = [
-  {
-    key    = "node-type"
-    value  = "compute"
-    effect = "NO_SCHEDULE"
-  }
-]
-
 system_node_labels = {
   "node-type" = "general"
-}
-
-workloads_node_labels = {
-  "node-type" = "compute"
 }
 
 s3_buckets = {
@@ -194,14 +174,6 @@ ecr_repositories = {
     encryption_type    = "AES256"
     retain_last_images = 30
   }
-}
-
-cluster_autoscaler = {
-  enabled                    = true
-  scan_interval_seconds      = 10
-  max_node_provision_time    = 600
-  expander                   = "least-waste"
-  balance_similar_nodegroups = true
 }
 
 tags = {

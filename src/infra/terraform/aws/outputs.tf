@@ -98,6 +98,26 @@ output "irsa_policy_arns" {
   value       = module.iam_post_eks.irsa_policy_arns
 }
 
+output "karpenter_controller_role_arn" {
+  description = "Karpenter controller IAM role ARN."
+  value       = module.karpenter.controller_role_arn
+}
+
+output "karpenter_node_role_arn" {
+  description = "Karpenter node IAM role ARN."
+  value       = module.karpenter.node_role_arn
+}
+
+output "karpenter_node_pool_name" {
+  description = "Karpenter NodePool name."
+  value       = module.karpenter.node_pool_name
+}
+
+output "karpenter_node_class_name" {
+  description = "Karpenter EC2NodeClass name."
+  value       = module.karpenter.node_class_name
+}
+
 output "eks_admin_instance_id" {
   description = "Admin EC2 instance ID if enabled."
   value       = try(aws_instance.eks_admin[0].id, null)
