@@ -11,7 +11,7 @@
    **AWS Free Tier is sufficient for development and testing purposes.**
 4. **A Cloudflare account with a registered domain, with permissions to manage DNS records and create Cloudflare Tunnels (cloudflared)**
 
-## Clone the repo and build the devcontainer(Reproducible). This will take 5-10 minutes. 
+## Clone the repo and build the devcontainer(Reproducible). This will take 10-20 minutes. 
 ```sh 
 cd $HOME && rm -rf E2E-RAG-System && git clone https://github.com/Athithya-Sakthivel/E2E-RAG-System.git && cd E2E-RAG-System && code .
 ```
@@ -48,7 +48,7 @@ echo "[INFO] A private repo '$REPO_NAME' created and pushed. Only visible from y
 ```
 
 
-### Bootstrap the terrraform infrastructure
+### Login to aws and bootstrap the terrraform infrastructure
 ```sh
 export TF_VAR_environment="staging"
 export TF_VAR_region="ap-south-1"
@@ -57,6 +57,12 @@ export TF_VAR_github_repository="Athithya-Sakthivel/E2E-RAG-System"
 export TF_VAR_system_nodegroup_replicas=4
 bash src/infra/terraform/aws/run.sh --create --env staging
 ```
+<details>
+<summary>▶ Expected output</summary>
+
+![alt text](src/scripts/archive/images/tf.png)
+
+</details>
 
 ### Login to the eks cluster as public endpoint enabled for staging cluster.
 ```sh
@@ -68,6 +74,7 @@ aws eks update-kubeconfig --region ap-south-1 --name rag-eks-staging
 export GIT_PAT=ghp_   # https://github.com/settings/tokens/new
 bash src/infra/core/argo_setup.sh --rollout
 ```
+
 
 ### Bootstrap karpenter for bursty, stateless workloads
 ```sh
@@ -89,4 +96,11 @@ export TTL_SECONDS_UNTIL_EXPIRED="259200"
 export TTL_SECONDS_AFTER_EMPTY="300"
 bash src/scripts/eks/bootstrap_karpenter.sh --rollout
 ```
+
+<details>
+<summary>▶ Expected output</summary>
+
+![alt text](src/scripts/archive/images/karpenter.png)
+
+</details>
 

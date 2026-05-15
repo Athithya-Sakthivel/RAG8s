@@ -1,49 +1,52 @@
 # E2E RAG Platform Infrastructure
 
-This repository defines the AWS infrastructure for the end-to-end RAG platform using **OpenTofu**. It provisions the network, security boundaries, IAM, storage, container registries, and EKS cluster required to run the platform.
+This repository defines the AWS foundation for the end-to-end RAG platform using **OpenTofu**.
 
-Ingress and application delivery are handled separately from this layer. This repository owns the AWS foundation only.
+It provisions the cloud infrastructure needed by the platform:
+networking, IAM, EKS, S3, ECR, and supporting security controls.
+
+Kubernetes application delivery is handled separately through **ArgoCD / GitOps**.
 
 ---
 
-## What this infrastructure provisions
+## What this stack provisions
 
 For each environment, this stack provides:
 
 - A multi-AZ VPC
 - Public and private subnets
-- NAT gateways for outbound internet access
-- Selective VPC endpoints for private AWS service access
-- An EKS cluster with two managed nodegroups
-- IAM roles for pre-cluster bootstrap and post-cluster access
-- S3 buckets for platform data and Qdrant backups
+- NAT gateways for outbound access
+- Selective VPC endpoints where needed
+- An EKS cluster
+- IAM roles for cluster bootstrap and post-cluster access
+- S3 buckets for platform data and backups
 - ECR repositories for service images
-- Security groups for worker nodes and optional admin EC2 access
-- Remote state via S3 + DynamoDB, bootstrapped through `run.sh`
+- Security groups for worker nodes and optional admin access
+- Remote state via S3 + DynamoDB, managed through `run.sh`
 
-All values are environment-scoped through `.tfvars` files.
+Environment-specific values live in `.tfvars` files.
 
 ---
 
 ## Environment model
 
-The stack supports two operating modes:
+The stack supports two deployment modes:
 
 ### Staging
 - EKS public endpoint enabled
 - Public endpoint restricted by CIDR
 - No admin EC2 host
-- Easier direct `kubectl` access from your laptop
+- Easier direct cluster access for development
 
 ### Production
 - EKS private endpoint only
-- Optional admin EC2 host enabled
-- Private operational access path
+- Optional private admin EC2 host
 - More restrictive network posture
+- Same AWS/IAM contract as staging
 
 ---
 
-## Architecture
+## Current architecture
 
 ### Networking
 
@@ -53,13 +56,11 @@ The VPC module creates:
 - Public and private subnets across `az_count` Availability Zones
 - An Internet Gateway
 - NAT gateways
-  - one per AZ by default
-  - single NAT only as a compatibility escape hatch
 - Route tables for public and private subnets
 
-Worker nodes run in private subnets only.
+Worker nodes and cluster-managed compute run in private subnets.
 
-The VPC module also creates the selective endpoints required for a private EKS and SSM-oriented bootstrap path.
+The VPC module also supports the tags required for Karpenter discovery.
 
 ---
 
@@ -69,12 +70,14 @@ The EKS module provisions:
 
 - The EKS control plane
 - An OIDC provider for IRSA
-- Two managed nodegroups
+- A system managed nodegroup
 - Cluster security-group rules for worker nodes
-- Secrets encryption using KMS
-- Access-entry support for AWS IAM principals
+- KMS-backed secrets encryption
+- Access entry support for AWS IAM principals
 
-The cluster is designed around exactly two nodegroups:
+The cluster is designed around a stable **system** nodegroup for platform components.
+
+Karpenter is used for dynamic compute capacity through GitOps-managed Kubernetes resources.
 
 ---
 
@@ -82,39 +85,40 @@ The cluster is designed around exactly two nodegroups:
 
 Purpose:
 - Stable platform services
-- Control-plane-adjacent workloads
-- Stateful or always-on services
+- Cluster infrastructure
+- Always-on components
 
 Typical examples:
 - CoreDNS support workloads
 - EBS CSI components
-- Cluster infrastructure services
-- Other always-on platform components
+- ArgoCD
+- Karpenter controller
+- Other cluster-critical services
 
 Characteristics:
 - On-demand only
 - Stable capacity
-- Not intended for bursty compute workloads
+- Not intended for bursty application workloads
 
 Labels:
 ```yaml
 node-type: general
 ````
 
-Taint policy:
+Taints:
 
-* Kept untainted in the current setup unless explicitly configured otherwise
+* Kept untainted unless explicitly configured otherwise
 
 ---
 
-#### 2. `workloads` nodegroup
+#### 2. Karpenter-managed compute nodes
 
 Purpose:
 
 * Stateless inference
 * Batch jobs
 * Model-serving workloads
-* Indexing jobs
+* Indexing jobs and CronJobs
 
 Typical examples:
 
@@ -123,13 +127,13 @@ Typical examples:
 * dense model service
 * sparse model service
 * reranker
-* indexing jobs and CronJobs
-* qdrant, when scheduled to compute-capable nodes
+* indexing jobs
+* other bursty workloads
 
 Characteristics:
 
-* Spot-capable
-* Suitable for autoscaling
+* Provisioned dynamically by Karpenter
+* Spot or on-demand depending on NodePool policy
 * Not intended for cluster-critical services
 
 Labels:
@@ -144,18 +148,36 @@ Taint:
 node-type=compute:NoSchedule
 ```
 
-Workload pods must include matching tolerations and a node selector when they are meant to run on the compute pool.
+Workload pods must include matching tolerations and node selectors when they are meant to run on compute nodes.
 
 ---
 
 ### Scheduling model
 
-Terraform defines the scheduling contract through labels and taints. Kubernetes manifests must honor that contract.
+The scheduling contract is:
 
-* system workloads go to `general`
-* stateless workloads go to `compute`
-* Spot capacity is reserved for stateless workloads
-* Stateful platform services should not depend on Spot scheduling
+* `system` nodes run platform services
+* Karpenter nodes run stateless workloads
+* Cluster-critical services should not depend on bursty compute capacity
+* Compute nodes are tainted to protect them from accidental scheduling
+
+---
+
+### Karpenter ownership model
+
+Terraform now owns only the AWS-side identity and access needed by Karpenter:
+
+* Karpenter controller IAM role
+* Karpenter node IAM role
+* EKS access entry for Karpenter nodes
+
+ArgoCD owns the Kubernetes-side Karpenter resources:
+
+* Karpenter Helm release
+* `EC2NodeClass`
+* `NodePool`
+
+This keeps infrastructure and cluster reconciliation separate.
 
 ---
 
@@ -165,7 +187,7 @@ The security module creates:
 
 * A worker-node security group
 * Intra-VPC ingress rules
-* Egress suitable for private-subnet nodes using NAT or approved endpoints
+* Controlled outbound access
 
 Control-plane security-group rules are owned by the EKS module.
 
@@ -185,7 +207,6 @@ This includes:
 
 * EKS cluster role
 * EKS node role
-* Other bootstrap IAM wiring needed to create the cluster
 
 #### `iam_post_eks`
 
@@ -231,6 +252,10 @@ These roles are scoped to:
 * the branch condition
 * the exact ECR repository they are allowed to push to
 
+##### EBS CSI driver role
+
+Provides the EKS add-on with the permissions it needs for persistent volumes.
+
 ---
 
 ### S3
@@ -253,7 +278,7 @@ Bucket names are configured through `.tfvars`.
 
 ### ECR
 
-The ECR module creates repositories dynamically from root input.
+The ECR module creates repositories from root input.
 
 Current repositories:
 
@@ -275,7 +300,7 @@ Each repository uses:
 
 ## Repository structure
 
-```text
+```sh
 src/infra/terraform/aws/
   main.tf
   outputs.tf
@@ -293,6 +318,7 @@ src/infra/terraform/aws/
     s3/
     iam_post_eks/
     ecr/
+    karpenter/
 ```
 
 ---
@@ -308,7 +334,7 @@ Creates:
 * Internet Gateway
 * NAT gateways
 * route tables
-* selective VPC endpoints
+* optional Karpenter discovery tagging support
 
 ### `modules/security`
 
@@ -330,10 +356,11 @@ Creates:
 Creates:
 
 * EKS cluster
-* system and workloads nodegroups
+* system managed nodegroup
 * OIDC provider
 * KMS secret encryption
 * worker-to-control-plane rule
+* Karpenter discovery tagging support, if enabled in the root module
 
 ### `modules/s3`
 
@@ -345,7 +372,6 @@ Exports:
 
 * bucket name map
 * bucket ARN map
-* bucket ID map
 
 ### `modules/iam_post_eks`
 
@@ -362,6 +388,16 @@ Creates:
 * repositories from tfvars
 * lifecycle policies
 
+### `modules/karpenter`
+
+Owns Karpenter AWS IAM resources only:
+
+* controller role
+* node role
+* EKS access entry for Karpenter nodes
+
+Kubernetes manifests for Karpenter are deployed separately through ArgoCD.
+
 ---
 
 ## Outputs
@@ -370,16 +406,15 @@ The root stack exposes outputs for:
 
 ### Networking
 
-* `vpc_id`
-* `private_subnet_ids`
-* `public_subnet_ids`
 * `availability_zones`
+* `aws_region`
 
 ### EKS
 
-* `eks_cluster_name`
+* `cluster_name`
 * `eks_cluster_endpoint`
 * `eks_cluster_ca_data`
+* `eks_cluster_security_group_id`
 * `eks_oidc_provider_arn`
 * `eks_oidc_provider_issuer`
 
@@ -389,6 +424,8 @@ The root stack exposes outputs for:
 * `iam_node_role_arn`
 * `irsa_role_arns`
 * `github_actions_role_arns`
+* `karpenter_controller_role_arn`
+* `karpenter_node_role_arn`
 
 ### S3
 
@@ -406,6 +443,7 @@ The root stack exposes outputs for:
 * optional admin security group ID
 
 ---
+
 ## Configuration
 
 Environment-specific configuration lives in:
@@ -419,7 +457,6 @@ These define:
 * cluster name
 * VPC CIDR
 * subnet CIDRs
-* nodegroup sizing
 * endpoint exposure mode
 * admin EC2 toggle
 * S3 bucket names
@@ -438,7 +475,7 @@ Remote state is handled through `run.sh` using:
 * S3 for state storage
 * DynamoDB for state locking
 
-No local state should be used for the platform resources.
+No local state should be used for platform resources.
 
 ---
 
@@ -446,9 +483,9 @@ No local state should be used for the platform resources.
 
 These must stay true:
 
-* exactly two nodegroups: `system` and `workloads`
-* `system` is for platform services
-* `workloads` is for stateless compute
+* the system nodegroup remains stable and always available
+* Karpenter owns bursty/stateless compute capacity
+* platform services stay on stable capacity
 * no workloads in public subnets
 * no static AWS credentials in Kubernetes
 * AWS access is through IRSA or GitHub OIDC
@@ -457,3 +494,4 @@ These must stay true:
 * ECR names must match the CI contract exactly
 * staging should stay low-friction
 * production should stay private and controlled
+* Karpenter Kubernetes objects are deployed through ArgoCD, not Terraform

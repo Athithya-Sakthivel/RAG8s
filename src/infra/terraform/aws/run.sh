@@ -14,7 +14,7 @@
 #   bash src/infra/terraform/aws/run.sh --create --env staging
 #   bash src/infra/terraform/aws/run.sh --destroy --env staging --yes-delete
 #   bash src/infra/terraform/aws/run.sh --env staging --find-version
-# 
+#   
 # Notes / invariants:
 #  - AWS_ACCESS_KEY_ID,AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION is used (fallback ap-south-1).
 #  - Script does NOT commit formatted changes to git; it only auto-formats files in-place.

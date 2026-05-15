@@ -497,7 +497,7 @@ def invoke_backup(workdir: str) -> bool:
     last = None
 
     for attempt in range(1, retries + 1):
-        log_info("backup.start", attempt=attempt, retries=retries, script=backup_script, bucket=s3_bucket, prefix=s3_prefix)
+        log_info("backup.start", attempt=attempt, retries=retries, script=backup_script, prefix=s3_prefix)
         rc, out, err = run_cmd(cmd, cwd=workdir, env=env, timeout=timeout + 30)
         if rc == 0:
             log_info("backup.ok", script=backup_script)

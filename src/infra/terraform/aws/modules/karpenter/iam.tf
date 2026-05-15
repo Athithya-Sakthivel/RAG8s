@@ -218,6 +218,7 @@ data "aws_iam_policy_document" "controller" {
       "ec2:DescribeSpotPriceHistory",
       "ec2:DescribeSubnets",
       "pricing:GetProducts",
+      "ssm:GetParameter",
     ]
 
     resources = ["*"]

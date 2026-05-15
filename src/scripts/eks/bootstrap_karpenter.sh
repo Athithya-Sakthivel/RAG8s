@@ -20,12 +20,10 @@ log_step()  { echo -e "\n${BLUE}[STEP]${NC} ${YELLOW}$*${NC}"; }
 # CONFIGURATION KNOBS
 # ============================================
 
-# ---- HUMAN-REQUIRED INPUTS ----
 GH_REPO="${GH_REPO:-https://github.com/Athithya-Sakthivel/E2E-RAG-System.git}"
 GH_BRANCH="${GH_BRANCH:-main}"
 AWS_REGION="${AWS_REGION:-ap-south-1}"
 
-# ---- STRONG DEFAULTS ----
 KARPENTER_NODE_CLASS_NAME="${KARPENTER_NODE_CLASS_NAME:-compute}"
 KARPENTER_NODE_POOL_NAME="${KARPENTER_NODE_POOL_NAME:-compute}"
 KARPENTER_TAINT_KEY="${KARPENTER_TAINT_KEY:-node-type}"
@@ -51,7 +49,6 @@ SG_TAG_KEY="${SG_TAG_KEY:-karpenter.sh/discovery}"
 ROOT_VOLUME_SIZE="${ROOT_VOLUME_SIZE:-50Gi}"
 ENCRYPTED_ROOT_VOLUME="${ENCRYPTED_ROOT_VOLUME:-true}"
 
-# ---- COMPUTED PATHS ----
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 TOFU_DIR="$REPO_ROOT/src/infra/terraform/aws"
 ARGOCD_APP_DIR="$REPO_ROOT/src/infra/argocd"
@@ -61,7 +58,7 @@ NODECLASS_YAML="$MANIFESTS_DIR/01-nodeclass.yaml"
 NODEPOOL_YAML="$MANIFESTS_DIR/02-nodepool.yaml"
 
 # ============================================
-# PRE-FLIGHT CHECKS (common)
+# HELPERS
 # ============================================
 
 check_prereqs() {
@@ -72,8 +69,105 @@ check_prereqs() {
   command -v git      >/dev/null 2>&1 || { log_error "git required"; exit 1; }
 }
 
+wait_for_resource() {
+  local resource_type="$1"
+  local resource_name="$2"
+  local namespace="${3:-}"
+  local timeout="${4:-120}"
+
+  local ns_flag=""
+  [ -n "$namespace" ] && ns_flag="-n $namespace"
+
+  local start_time
+  start_time=$(date +%s)
+
+  while true; do
+    if kubectl get "${resource_type}/${resource_name}" ${ns_flag} -o name &>/dev/null; then
+      return 0
+    fi
+    local now
+    now=$(date +%s)
+    if [ $((now - start_time)) -ge "$timeout" ]; then
+      return 1
+    fi
+    sleep 5
+  done
+}
+
+wait_for_condition() {
+  local resource_type="$1"
+  local resource_name="$2"
+  local condition="$3"
+  local timeout="${4:-120}"
+  local namespace="${5:-}"
+
+  local ns_flag=""
+  [ -n "$namespace" ] && ns_flag="-n $namespace"
+
+  if kubectl wait --for="condition=${condition}" "${resource_type}/${resource_name}" ${ns_flag} --timeout="${timeout}s" 2>/dev/null; then
+    return 0
+  else
+    return 1
+  fi
+}
+
+diagnose_failure() {
+  log_warn "Diagnosing Karpenter issues..."
+
+  echo ""
+  log_info "--- NodeClass Status ---"
+  kubectl get ec2nodeclass "${KARPENTER_NODE_CLASS_NAME}" -o yaml 2>/dev/null | grep -A20 "status:" || echo "No NodeClass found"
+
+  echo ""
+  log_info "--- NodePool Status ---"
+  kubectl get nodepool "${KARPENTER_NODE_POOL_NAME}" -o yaml 2>/dev/null | grep -A20 "status:" || echo "No NodePool found"
+
+  echo ""
+  log_info "--- Karpenter Controller Logs (errors only) ---"
+  kubectl logs -n karpenter deployment/karpenter --tail=50 2>/dev/null | grep -i "error\|failed\|unable" | tail -10 || echo "No errors found"
+
+  echo ""
+  log_info "--- Recent Events ---"
+  kubectl get events -n karpenter --sort-by='.lastTimestamp' 2>/dev/null | tail -15 || echo "No events found"
+
+  echo ""
+  log_info "--- Subnet Tags Check ---"
+  local cluster_name
+  cluster_name=$(tofu -chdir="$TOFU_DIR" output -raw cluster_name 2>/dev/null || echo "")
+  if [ -n "$cluster_name" ]; then
+    local subnet_count
+    subnet_count=$(aws ec2 describe-subnets \
+      --filters "Name=tag:karpenter.sh/discovery,Values=${cluster_name}" \
+      --query 'length(Subnets)' --output text 2>/dev/null || echo "0")
+    if [ "$subnet_count" -gt 0 ]; then
+      log_info "Subnets tagged: $subnet_count"
+    else
+      log_error "No subnets have karpenter.sh/discovery=${cluster_name} tag!"
+    fi
+
+    local sg_count
+    sg_count=$(aws ec2 describe-security-groups \
+      --filters "Name=tag:karpenter.sh/discovery,Values=${cluster_name}" \
+      --query 'length(SecurityGroups)' --output text 2>/dev/null || echo "0")
+    if [ "$sg_count" -gt 0 ]; then
+      log_info "Security groups tagged: $sg_count"
+    else
+      log_error "No security groups have karpenter.sh/discovery=${cluster_name} tag!"
+    fi
+  fi
+
+  echo ""
+  log_info "--- IAM Role SSM Permission Check ---"
+  local role_name
+  role_name=$(tofu -chdir="$TOFU_DIR" output -raw karpenter_controller_role_arn 2>/dev/null | xargs basename || echo "")
+  if [ -n "$role_name" ]; then
+    aws iam list-role-policies --role-name "$role_name" --query 'PolicyNames' --output table 2>/dev/null || echo "Cannot list role policies"
+    aws iam list-attached-role-policies --role-name "$role_name" --query 'AttachedPolicies[*].PolicyName' --output table 2>/dev/null || echo "Cannot list attached policies"
+  fi
+}
+
 # ============================================
-# ROLLOUT: Full setup
+# ROLLOUT
 # ============================================
 
 do_rollout() {
@@ -96,11 +190,10 @@ do_rollout() {
   log_info "Karpenter Node Role: $KARPENTER_NODE_ROLE"
   log_info "Security Group:     $SG_ID"
 
-  # 3. Render YAMLs
+  # 2. Render YAMLs
   log_step "2/4 Rendering Karpenter YAML manifests"
   mkdir -p "$ARGOCD_APP_DIR" "$MANIFESTS_DIR"
 
-  # ArgoCD Application
   cat > "$KARPENTER_APP_YAML" << EOF
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -139,7 +232,6 @@ spec:
 EOF
   log_info "Generated: $KARPENTER_APP_YAML"
 
-  # EC2NodeClass (AL2023)
   cat > "$NODECLASS_YAML" << EOF
 apiVersion: karpenter.k8s.aws/v1
 kind: EC2NodeClass
@@ -168,7 +260,6 @@ spec:
 EOF
   log_info "Generated: $NODECLASS_YAML"
 
-  # NodePool
   cat > "$NODEPOOL_YAML" << EOF
 apiVersion: karpenter.sh/v1
 kind: NodePool
@@ -218,7 +309,7 @@ $(echo "$EXCLUDED_INSTANCE_TYPES" | tr ',' '\n' | sed 's/^/            - /')
 EOF
   log_info "Generated: $NODEPOOL_YAML"
 
-  # 4. Git commit & push
+  # 3. Git commit & push
   log_step "3/4 Committing and pushing to Git"
   cd "$REPO_ROOT"
   if ! git diff --quiet HEAD -- "$KARPENTER_APP_YAML" "$NODECLASS_YAML" "$NODEPOOL_YAML"; then
@@ -230,19 +321,52 @@ EOF
     log_info "No changes to commit"
   fi
 
-  # 5. Apply ArgoCD app
-  log_step "4/4 Applying ArgoCD Application"
-  kubectl apply -f "$KARPENTER_APP_YAML"
-  log_info "Waiting for ArgoCD to sync Karpenter (30s)..."
-  sleep 30
+  # 4. Apply and wait
+  log_step "4/4 Applying ArgoCD Application and waiting for readiness"
 
-  if kubectl get deployment -n karpenter karpenter &>/dev/null; then
-    log_info "Karpenter controller deployment found"
-    kubectl get deployment -n karpenter karpenter
-  else
-    log_warn "Karpenter deployment not yet visible. Check ArgoCD sync status."
+  kubectl apply -f "$KARPENTER_APP_YAML"
+
+  # Give ArgoCD a moment to react and start the sync
+  sleep 10
+
+  # --- Wait for controller deployment to exist ---
+  log_info "Waiting for Karpenter deployment to be created (up to 60s)..."
+  if ! wait_for_resource "deployment" "karpenter" "karpenter" 60; then
+    log_error "Karpenter deployment was not created"
+    diagnose_failure
+    exit 1
   fi
 
+  # --- Wait for deployment to become available ---
+  log_info "Waiting for Karpenter controller deployment to become available (up to 120s)..."
+  if wait_for_condition "deployment" "karpenter" "available" 120 "karpenter"; then
+    log_info "Karpenter controller is available"
+    kubectl get deployment -n karpenter karpenter
+  else
+    log_error "Karpenter controller did not become available"
+    diagnose_failure
+    exit 1
+  fi
+
+  # --- Wait for NodeClass ---
+  log_info "Waiting for EC2NodeClass '${KARPENTER_NODE_CLASS_NAME}' to be ready (up to 180s)..."
+  if wait_for_condition "ec2nodeclass" "${KARPENTER_NODE_CLASS_NAME}" "ready" 180; then
+    log_info "EC2NodeClass is ready"
+  else
+    log_error "EC2NodeClass did not become ready"
+    diagnose_failure
+    exit 1
+  fi
+
+  # --- Wait for NodePool ---
+  log_info "Waiting for NodePool '${KARPENTER_NODE_POOL_NAME}' to be ready (up to 60s)..."
+  if wait_for_condition "nodepool" "${KARPENTER_NODE_POOL_NAME}" "ready" 60; then
+    log_info "NodePool is ready"
+  else
+    log_warn "NodePool not ready yet - continuing anyway"
+  fi
+
+  # --- Final status ---
   echo -e "\n${GREEN}=========================================${NC}"
   echo -e "${GREEN}  Karpenter Setup Complete${NC}"
   echo -e "${GREEN}=========================================${NC}"
@@ -251,12 +375,17 @@ EOF
   echo -e "Node Class:     ${KARPENTER_NODE_CLASS_NAME}"
   echo -e "Node Pool:      ${KARPENTER_NODE_POOL_NAME}"
   echo -e "Instance Types: ${INSTANCE_CATEGORIES}-family, gen ${INSTANCE_GENERATIONS}+"
+  echo -e ""
+  echo -e "Current Status:"
+  kubectl get nodepools,ec2nodeclasses -A
+  echo -e ""
+  echo -e "To verify node provisioning, deploy a test pod or run:"
+  echo -e "  kubectl logs -n karpenter deployment/karpenter --tail=20"
 }
 
 # ============================================
-# DELETE: Remove Karpenter from cluster
+# DELETE
 # ============================================
-
 
 do_delete() {
   echo -e "${GREEN}=========================================${NC}"
@@ -264,42 +393,35 @@ do_delete() {
   echo -e "${GREEN}=========================================${NC}"
   check_prereqs
 
-  # 1. Delete all NodeClaims (this terminates the EC2 instances)
-  log_step "Deleting all NodeClaims"
-  kubectl delete nodeclaims --all --ignore-not-found=true || true
-  log_info "NodeClaims deleted (EC2 instances terminating)"
+  log_step "Deleting all NodeClaims (EC2 instances will terminate)"
+  kubectl delete nodeclaims --all --ignore-not-found=true --timeout=120s || true
+  log_info "NodeClaims deleted"
 
-  # 2. Delete NodePools
   log_step "Deleting all NodePools"
   kubectl delete nodepools --all --ignore-not-found=true || true
   log_info "NodePools deleted"
 
-  # 3. Delete EC2NodeClasses
   log_step "Deleting all EC2NodeClasses"
   kubectl delete ec2nodeclasses --all --ignore-not-found=true || true
   log_info "EC2NodeClasses deleted"
 
-  # 4. Remove ArgoCD Application
   log_step "Removing ArgoCD Application"
   kubectl delete -f "$KARPENTER_APP_YAML" --ignore-not-found=true || true
   log_info "ArgoCD Application deleted"
 
-  # 5. Delete karpenter namespace
   log_step "Deleting karpenter namespace"
   kubectl delete namespace karpenter --ignore-not-found=true --timeout=60s || true
   log_info "Namespace karpenter deleted"
 
-  # 6. Remove Karpenter CRDs (optional - comment out if other tools use them)
   log_step "Removing Karpenter CRDs"
-  kubectl get crd -o name | grep karpenter | xargs -r kubectl delete --ignore-not-found=true || true
+  kubectl get crd -o name 2>/dev/null | grep karpenter | xargs -r kubectl delete --ignore-not-found=true || true
   log_info "CRDs deleted"
 
   log_info "Karpenter uninstallation complete."
 }
 
-
 # ============================================
-# INSPECT: Show Karpenter status
+# INSPECT
 # ============================================
 
 do_inspect() {
@@ -314,18 +436,24 @@ do_inspect() {
   log_step "EC2NodeClasses"
   kubectl get ec2nodeclasses -A 2>/dev/null || echo "No EC2NodeClasses found"
 
+  log_step "NodeClaims"
+  kubectl get nodeclaims -A 2>/dev/null || echo "No NodeClaims found"
+
   log_step "Karpenter controller deployment"
-  kubectl get deployment -n karpenter karpenter 2>/dev/null || echo "Deployment not found in karpenter namespace"
+  kubectl get deployment -n karpenter karpenter 2>/dev/null || echo "Deployment not found"
+
+  log_step "Karpenter pods"
+  kubectl get pods -n karpenter 2>/dev/null || echo "No pods found"
 
   log_step "Recent events (karpenter namespace)"
   kubectl get events -n karpenter --sort-by='.lastTimestamp' 2>/dev/null | tail -20 || true
 
-  log_step "Controller logs (last 20 lines)"
-  kubectl logs -n karpenter deployment/karpenter --tail=20 2>/dev/null || echo "Unable to fetch logs"
+  log_step "Controller logs (last 30 lines)"
+  kubectl logs -n karpenter deployment/karpenter --tail=30 2>/dev/null || echo "Unable to fetch logs"
 }
 
 # ============================================
-# MAIN: Argument parsing
+# MAIN
 # ============================================
 
 usage() {

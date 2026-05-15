@@ -142,6 +142,11 @@ locals {
     k => role if length(try(role.buckets, [])) > 0
   }
 
+  irsa_bedrock_roles = {
+    for k, role in var.irsa_roles :
+    k => role if try(role.aws_services.bedrock, false)
+  }
+
   irsa_s3_statements = {
     for role_key, role in local.irsa_s3_roles :
     role_key => flatten([
@@ -170,7 +175,6 @@ resource "aws_iam_openid_connect_provider" "github_actions" {
   client_id_list = ["sts.amazonaws.com"]
   tags           = local.common_tags
 }
-
 
 ###############################################################################
 # IRSA trust policies
@@ -226,10 +230,7 @@ data "aws_iam_policy_document" "irsa_s3_access" {
 ###############################################################################
 
 data "aws_iam_policy_document" "irsa_bedrock_access" {
-  for_each = {
-    for k, role in var.irsa_roles :
-    k => role if try(role.aws_services.bedrock, false)
-  }
+  for_each = local.irsa_bedrock_roles
 
   statement {
     sid    = "AllowInvokeSpecificModel"
@@ -237,29 +238,29 @@ data "aws_iam_policy_document" "irsa_bedrock_access" {
 
     actions = [
       "bedrock:InvokeModel",
-      "bedrock:InvokeModelWithResponseStream"
+      "bedrock:InvokeModelWithResponseStream",
     ]
 
     resources = [
-      "arn:aws:bedrock:${data.aws_region.current.region}::foundation-model/meta.llama3-8b-instruct-v1:0"
+      "arn:aws:bedrock:${data.aws_region.current.id}::foundation-model/meta.llama3-8b-instruct-v1:0",
     ]
   }
 }
 
 resource "aws_iam_policy" "irsa_bedrock" {
-  for_each = data.aws_iam_policy_document.irsa_bedrock_access
+  for_each = local.irsa_bedrock_roles
 
   name        = "${var.name_prefix}-${each.key}-bedrock-policy"
   description = "IRSA Bedrock policy for ${each.key}"
-  policy      = each.value.json
+  policy      = data.aws_iam_policy_document.irsa_bedrock_access[each.key].json
   tags        = local.common_tags
 }
 
 resource "aws_iam_role_policy_attachment" "irsa_bedrock" {
-  for_each = aws_iam_policy.irsa_bedrock
+  for_each = local.irsa_bedrock_roles
 
   role       = aws_iam_role.irsa[each.key].name
-  policy_arn = each.value.arn
+  policy_arn = aws_iam_policy.irsa_bedrock[each.key].arn
 }
 
 ###############################################################################
@@ -280,7 +281,7 @@ data "aws_iam_policy_document" "ebs_csi_assume_role" {
       test     = "StringEquals"
       variable = "${var.oidc_provider_issuer}:sub"
       values = [
-        "system:serviceaccount:kube-system:ebs-csi-controller-sa"
+        "system:serviceaccount:kube-system:ebs-csi-controller-sa",
       ]
     }
 
@@ -345,7 +346,7 @@ data "aws_iam_policy_document" "github_assume_role" {
     principals {
       type = "Federated"
       identifiers = [
-        aws_iam_openid_connect_provider.github_actions.arn
+        aws_iam_openid_connect_provider.github_actions.arn,
       ]
     }
 
@@ -359,7 +360,7 @@ data "aws_iam_policy_document" "github_assume_role" {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
       values = [
-        "repo:${each.value.repository}:ref:refs/heads/${each.value.branch}"
+        "repo:${each.value.repository}:ref:refs/heads/${each.value.branch}",
       ]
     }
   }
@@ -389,16 +390,15 @@ data "aws_iam_policy_document" "github_ecr_push" {
       "ecr:InitiateLayerUpload",
       "ecr:PutImage",
       "ecr:UploadLayerPart",
-      "ecr:BatchDeleteImage", # <-- add this
-      "ecr:DescribeImages"    # optional, but useful
+      "ecr:BatchDeleteImage",
+      "ecr:DescribeImages",
     ]
 
     resources = [
-      "arn:aws:ecr:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:repository/${local.github_ecr_repository_names[each.key]}"
+      "arn:aws:ecr:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:repository/${local.github_ecr_repository_names[each.key]}",
     ]
   }
 }
-
 
 resource "aws_iam_role" "github_actions" {
   for_each = var.github_actions_roles

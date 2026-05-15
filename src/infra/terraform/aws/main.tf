@@ -47,11 +47,11 @@ module "vpc" {
 module "security" {
   source = "./modules/security"
 
-  vpc_id      = module.vpc.vpc_id
-  vpc_cidr    = var.vpc_cidr
-  name_prefix = "rag"
-  cluster_name = var.cluster_name
-  tags = var.tags
+  vpc_id       = module.vpc.vpc_id
+  vpc_cidr     = var.vpc_cidr
+  name_prefix  = "rag"
+  cluster_name = var.cluster_name # <-- required for Karpenter tag
+  tags         = var.tags
 }
 
 ###############################################################################
@@ -140,7 +140,7 @@ module "iam_post_eks" {
   s3_bucket_name_map = module.s3.bucket_name_map
   s3_bucket_arn_map  = module.s3.bucket_arn_map
 
-  irsa_roles           = var.irsa_roles
+  irsa_roles = var.irsa_roles
   # Use the computed local that injects the real repository
   github_actions_roles = local.effective_github_actions_roles
 
@@ -330,9 +330,9 @@ resource "aws_instance" "eks_admin" {
   EOF
 
   root_block_device {
-    volume_type = "gp3"
-    volume_size = 12
-    encrypted   = true
+    volume_type           = "gp3"
+    volume_size           = 12
+    encrypted             = true
     delete_on_termination = true
   }
 

@@ -396,7 +396,6 @@ output "internet_gateway_id" {
   value       = aws_internet_gateway.this.id
 }
 
-
 resource "aws_vpc_endpoint" "eks" {
   vpc_id              = aws_vpc.this.id
   service_name        = "com.amazonaws.${data.aws_region.current.region}.eks"
@@ -406,8 +405,9 @@ resource "aws_vpc_endpoint" "eks" {
   private_dns_enabled = true
 }
 
-
-# Karpenter discovery tags for private subnets
+# ============================================
+# Karpenter discovery tag for private subnets
+# ============================================
 resource "aws_ec2_tag" "karpenter_discovery" {
   for_each = { for idx, subnet in aws_subnet.private : idx => subnet.id }
 

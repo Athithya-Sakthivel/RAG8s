@@ -304,7 +304,7 @@ variable "github_actions_roles" {
 
   default = {
     frontend = {
-      repository = "placeholder"   # replaced by local
+      repository = "placeholder" # replaced by local
       branch     = "main"
       role_name  = "gh-actions-frontend"
       ecr_repo   = "frontend"

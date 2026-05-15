@@ -20,7 +20,6 @@ variable "tags" {
   default     = {}
 }
 
-
 variable "cluster_name" {
   description = "EKS cluster name used for Karpenter discovery tag."
   type        = string

@@ -3,6 +3,7 @@
 # bash src/infra/core/argo_setup.sh --delete --confirm
 # PRIVATE_REPO=true GIT_PAT="ghp_xxx" bash src/infra/core/argo_setup.sh --rollout
 # CONTROLLER_REPLICAS=2 bash src/infra/core/argo_setup.sh --rollout
+
 set -euo pipefail
 IFS=$'\n\t'
 
@@ -17,6 +18,7 @@ TIMEOUT="10m"
 TMPDIR="$(mktemp -d)"
 
 # ---- REPOSITORY CONFIGURATION ----
+# Default to false to match usage/help and avoid accidental secret creation.
 PRIVATE_REPO="${PRIVATE_REPO:-true}"
 GIT_PAT="${GIT_PAT:-}"
 GH_REPO="${GH_REPO:-https://github.com/Athithya-Sakthivel/E2E-RAG-System.git}"
@@ -32,14 +34,14 @@ usage() {
 Usage: $0 --rollout | --delete [--confirm]
 
 Modes:
-  --rollout     Apply CRDs (server-side) and install/upgrade Argo CD (ClusterIP).
+  --rollout     Install/upgrade Argo CD with Helm.
   --delete      Delete Argo CD control plane and Argo CD CRs without pruning managed workloads. Requires --confirm.
 
 Environment Variables:
   PRIVATE_REPO           Set to "true" to configure private repo access (default: false)
   GIT_PAT                GitHub Personal Access Token (required if PRIVATE_REPO=true)
   GH_REPO                GitHub repository URL (default: https://github.com/Athithya-Sakthivel/E2E-RAG-System.git)
-  CONTROLLER_REPLICAS    Number of application-controller replicas (default: 1)
+  CONTROLLER_REPLICAS    Number of application-controller replicas (default: 2)
 
 Examples:
   # Public repo with defaults
@@ -72,185 +74,79 @@ trap cleanup EXIT INT TERM
 
 require_cmds() {
   local miss=0
-  for c in kubectl helm git curl jq timeout base64; do
+  for c in kubectl helm curl jq base64; do
     if ! command -v "${c}" >/dev/null 2>&1; then
       err "Required command not found: ${c}"
       miss=1
     fi
   done
+
   if [[ ${miss} -ne 0 ]]; then
     exit 1
   fi
-
-  if ! command -v argocd >/dev/null 2>&1; then
-    log "argocd CLI not found; installing ${ARGOCD_APP_VERSION}"
-    local arch bin_name tmp_bin
-    arch="$(uname -m)"
-    if [[ "${arch}" == "x86_64" || "${arch}" == "amd64" ]]; then
-      bin_name="argocd-linux-amd64"
-    elif [[ "${arch}" == "aarch64" || "${arch}" == "arm64" ]]; then
-      bin_name="argocd-linux-arm64"
-    else
-      err "Unsupported architecture: ${arch}. Install argocd CLI manually."
-      exit 1
-    fi
-
-    tmp_bin="${TMPDIR}/argocd"
-    curl -sSL -o "${tmp_bin}" "https://github.com/argoproj/argo-cd/releases/download/${ARGOCD_APP_VERSION}/${bin_name}"
-    chmod +x "${tmp_bin}"
-
-    if command -v sudo >/dev/null 2>&1; then
-      sudo mv "${tmp_bin}" /usr/local/bin/argocd
-    else
-      mkdir -p "${HOME}/.local/bin"
-      mv "${tmp_bin}" "${HOME}/.local/bin/argocd"
-      export PATH="${HOME}/.local/bin:${PATH}"
-    fi
-
-    if ! command -v argocd >/dev/null 2>&1; then
-      err "Failed to install argocd CLI; please install it manually."
-      exit 1
-    fi
-  fi
 }
-
-# ---- PRIVATE REPO FUNCTIONS ----
 
 validate_git_pat() {
   local pat="$1"
-  
-  # Check format
+
   if [[ ! "$pat" =~ ^(ghp_|github_pat_) ]]; then
-    err "Invalid GIT_PAT format. Should start with 'ghp_' or 'github_pat_'"
-    err "Generate one at: https://github.com/settings/tokens"
-    err "Required scopes: repo (for private repos)"
+    err "Invalid GIT_PAT format. Expected a GitHub token starting with 'ghp_' or 'github_pat_'."
     return 1
   fi
-  
-  # Validate minimum length (GitHub tokens are at least 40 chars)
+
   if [[ ${#pat} -lt 40 ]]; then
-    err "GIT_PAT seems too short (${#pat} chars). GitHub tokens are at least 40 characters."
+    err "GIT_PAT seems too short (${#pat} chars)."
     return 1
   fi
-  
-  # Optional: Test PAT against GitHub API
-  log "Validating PAT against GitHub API..."
-  local response
-  response=$(curl -s -o /dev/null -w "%{http_code}" \
-    -H "Authorization: token ${pat}" \
-    -H "Accept: application/vnd.github.v3+json" \
-    --connect-timeout 10 \
-    --max-time 30 \
-    https://api.github.com/user 2>/dev/null) || {
-    warn "Could not validate PAT against GitHub API (network issue?)"
-    warn "Continuing without validation..."
-    return 0
-  }
-  
-  if [[ "$response" == "200" ]]; then
-    log "PAT validated successfully against GitHub API"
-    return 0
-  elif [[ "$response" == "401" ]]; then
-    err "PAT is invalid or expired (HTTP 401)"
-    return 1
-  else
-    warn "Unexpected API response: HTTP $response"
-    warn "Continuing but PAT may not work..."
-    return 0
-  fi
+
+  return 0
 }
 
 configure_private_repo() {
   local repo_url="$1"
   local pat="$2"
-  
-  log "==========================================="
-  log "  Configuring Private Repository Access"
-  log "==========================================="
-  log "Repository: ${repo_url}"
-  
-  # Validate PAT if provided
-  if [[ -n "$pat" ]]; then
-    validate_git_pat "$pat" || return 1
-  else
+
+  log "Configuring private repository access for: ${repo_url}"
+
+  if [[ -z "$pat" ]]; then
     err "GIT_PAT is required when PRIVATE_REPO=true"
     return 1
   fi
-  
-  # Remove existing secret if present (idempotent)
-  kubectl delete secret private-repo-creds \
-    -n "$NAMESPACE" \
-    --ignore-not-found=true 2>/dev/null || true
-  
-  # Create the repository secret
-  log "Creating repository secret 'private-repo-creds'..."
-  kubectl create secret generic private-repo-creds \
-    -n "$NAMESPACE" \
-    --from-literal=type=git \
-    --from-literal=url="$repo_url" \
-    --from-literal=username=git \
-    --from-literal=password="$pat" \
-    --dry-run=client -o yaml | kubectl apply -f -
-  
-  # Label for ArgoCD discovery
-  kubectl label secret private-repo-creds \
-    -n "$NAMESPACE" \
-    argocd.argoproj.io/secret-type=repository \
-    --overwrite
-  
-  # Verify secret was created
-  if kubectl get secret private-repo-creds -n "$NAMESPACE" &>/dev/null; then
+
+  validate_git_pat "$pat" || return 1
+
+  kubectl delete secret private-repo-creds -n "$NAMESPACE" --ignore-not-found=true >/dev/null 2>&1 || true
+
+  cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: Secret
+metadata:
+  name: private-repo-creds
+  namespace: ${NAMESPACE}
+  labels:
+    argocd.argoproj.io/secret-type: repository
+type: Opaque
+stringData:
+  type: git
+  url: ${repo_url}
+  username: git
+  password: ${pat}
+EOF
+
+  if kubectl get secret private-repo-creds -n "$NAMESPACE" >/dev/null 2>&1; then
     log "Repository secret 'private-repo-creds' created successfully"
   else
     err "Failed to create repository secret"
     return 1
   fi
-  
-  # If argocd CLI is available and admin password is accessible, test connection
-  if command -v argocd &>/dev/null; then
-    local admin_password
-    admin_password=$(kubectl -n "$NAMESPACE" get secret argocd-initial-admin-secret \
-      -o jsonpath="{.data.password}" 2>/dev/null | base64 --decode || echo "")
-    
-    if [[ -n "$admin_password" ]]; then
-      log "Testing repository connection via ArgoCD CLI..."
-      
-      # Port-forward to argocd-server for CLI access
-      kubectl -n "$NAMESPACE" port-forward svc/argocd-server 8080:80 &>/dev/null &
-      local pf_pid=$!
-      sleep 3
-      
-      if argocd login localhost:8080 \
-        --username admin \
-        --password "$admin_password" \
-        --insecure &>/dev/null; then
-        
-        if argocd repo list --repo "$repo_url" &>/dev/null; then
-          log "Repository connection verified"
-        else
-          warn "Could not verify repository connection (repo may need different permissions)"
-        fi
-        
-        argocd logout localhost:8080 &>/dev/null || true
-      else
-        warn "Could not login to ArgoCD to verify (this is OK for fresh installs)"
-      fi
-      
-      kill "$pf_pid" 2>/dev/null || true
-    fi
-  fi
-  
+
   log "Private repository configured successfully"
-  log ""
-  log "All ArgoCD Applications can now use:"
-  log "  repoURL: ${repo_url}"
   return 0
 }
 
-# ---- HELM VALUES GENERATION ----
-
 write_values() {
   mkdir -p "$(dirname "${VALUES_FILE}")"
+
   cat > "${VALUES_FILE}" <<EOF
 server:
   service:
@@ -303,8 +199,9 @@ redis:
       cpu: "200m"
       memory: "256Mi"
 
+# Keep CRDs managed by the chart to avoid brittle external kustomize fetches.
 crds:
-  install: false
+  install: true
 
 resources:
   requests:
@@ -319,27 +216,31 @@ rbac:
 EOF
 }
 
-apply_crds_server_side() {
-  local url="https://github.com/argoproj/argo-cd/manifests/crds?ref=${ARGOCD_APP_VERSION}"
-  local i
+wait_for_rollout() {
+  local kind="$1"
+  local name="$2"
 
-  log "Applying CRDs from ${url}"
+  if kubectl -n "$NAMESPACE" get "${kind}/${name}" >/dev/null 2>&1; then
+    kubectl -n "$NAMESPACE" rollout status "${kind}/${name}" --timeout="${TIMEOUT}" || warn "${kind}/${name} rollout check timed out"
+    return 0
+  fi
 
-  for i in {1..5}; do
-    if kubectl apply \
-      --server-side \
-      --force-conflicts \
-      -k "${url}"; then
-      log "CRDs applied successfully"
-      return 0
-    fi
+  return 1
+}
 
-    warn "CRD apply attempt ${i}/5 failed; retrying in 5s"
-    sleep 5
-  done
+wait_for_application_controller() {
+  if kubectl -n "$NAMESPACE" get statefulset/argocd-application-controller >/dev/null 2>&1; then
+    kubectl -n "$NAMESPACE" rollout status statefulset/argocd-application-controller --timeout="${TIMEOUT}" || warn "argocd-application-controller rollout check timed out"
+    return 0
+  fi
 
-  err "Failed to apply Argo CD CRDs after retries"
-  exit 1
+  if kubectl -n "$NAMESPACE" get deployment/argocd-application-controller >/dev/null 2>&1; then
+    kubectl -n "$NAMESPACE" rollout status deployment/argocd-application-controller --timeout="${TIMEOUT}" || warn "argocd-application-controller rollout check timed out"
+    return 0
+  fi
+
+  warn "argocd-application-controller workload not found"
+  return 1
 }
 
 wait_for_absent() {
@@ -349,9 +250,6 @@ wait_for_absent() {
   local elapsed=0
 
   while (( elapsed < timeout_seconds )); do
-    if ! kubectl get "${resource}" -A -o name >/dev/null 2>&1; then
-      return 0
-    fi
     if ! kubectl get "${resource}" -A -o name 2>/dev/null | grep -q .; then
       return 0
     fi
@@ -430,7 +328,7 @@ delete_namespace_safely() {
       sleep 10
     done
 
-    warn "Namespace ${NAMESPACE} still terminating; removing namespace finalizers"
+    warn "Namespace ${NAMESPACE} still terminating; attempting to remove namespace finalizers"
     kubectl get namespace "${NAMESPACE}" -o json \
       | jq '.spec.finalizers=[]' \
       | kubectl replace --raw "/api/v1/namespaces/${NAMESPACE}/finalize" -f - >/dev/null 2>&1 || warn "Namespace finalizer removal failed"
@@ -470,32 +368,34 @@ do_rollout() {
   helm repo add "${CHART_REPO_NAME}" "${CHART_REPO_URL}" >/dev/null 2>&1 || true
   helm repo update >/dev/null
 
-  log "Applying CRDs pinned to ${ARGOCD_APP_VERSION}"
-  apply_crds_server_side
-
   log "Installing/upgrading Helm chart ${CHART_NAME} (version ${CHART_VERSION})"
   helm upgrade --install argocd "${CHART_NAME}" \
     --version "${CHART_VERSION}" \
     -n "${NAMESPACE}" \
     --create-namespace \
     -f "${VALUES_FILE}" \
+    --set crds.install=true \
     --wait \
+    --atomic \
     --timeout "${TIMEOUT}"
 
-  log "Waiting for core deployments"
-  kubectl -n "${NAMESPACE}" rollout status deployment/argocd-server --timeout="${TIMEOUT}" || warn "argocd-server rollout check timed out"
-  kubectl -n "${NAMESPACE}" rollout status deployment/argocd-repo-server --timeout="${TIMEOUT}" || warn "argocd-repo-server rollout check timed out"
-  kubectl -n "${NAMESPACE}" rollout status statefulset/argocd-application-controller --timeout="${TIMEOUT}" || warn "argocd-application-controller rollout check timed out"
+  log "Waiting for core workloads"
+  wait_for_rollout deployment argocd-server
+  wait_for_rollout deployment argocd-repo-server
+  wait_for_application_controller
 
   log "Argo CD rollout complete. Pods:"
   kubectl -n "${NAMESPACE}" get pods -o wide || true
 
-  log "Initial admin password (base64-decoded):"
-  kubectl -n "${NAMESPACE}" get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 --decode && echo
+  if kubectl -n "${NAMESPACE}" get secret argocd-initial-admin-secret >/dev/null 2>&1; then
+    log "Initial admin password (base64-decoded):"
+    kubectl -n "${NAMESPACE}" get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 --decode && echo
+  else
+    warn "Initial admin secret not found yet"
+  fi
 
-  # ---- CONFIGURE PRIVATE REPO (if enabled) ----
   if [[ "${PRIVATE_REPO}" == "true" ]]; then
-    echo ""
+    printf '\n'
     configure_private_repo "$GH_REPO" "$GIT_PAT" || {
       err "Failed to configure private repo access"
       err "ArgoCD is running but cannot access private repositories"
@@ -503,14 +403,8 @@ do_rollout() {
     }
   else
     log ""
-    log "PRIVATE_REPO not set to 'true' - skipping private repo configuration"
-    log "   To configure later, run:"
-    log "   kubectl create secret generic private-repo-creds -n ${NAMESPACE} \\"
-    log "     --from-literal=type=git \\"
-    log "     --from-literal=url=${GH_REPO} \\"
-    log "     --from-literal=username=git \\"
-    log "     --from-literal=password=\$GIT_PAT"
-    log "   kubectl label secret private-repo-creds -n ${NAMESPACE} argocd.argoproj.io/secret-type=repository"
+    log "PRIVATE_REPO is not true; skipping private repo configuration"
+    log "To configure later, create a repository secret in namespace ${NAMESPACE}"
   fi
 }
 
@@ -523,13 +417,12 @@ do_delete() {
   fi
 
   log "Deleting only Argo CD control plane and Argo CD CRs; managed workloads will be orphaned, not pruned"
-  
-  # Delete private repo secret first
+
   if kubectl get secret private-repo-creds -n "${NAMESPACE}" &>/dev/null; then
     log "Removing private repo secret"
-    kubectl delete secret private-repo-creds -n "${NAMESPACE}" --ignore-not-found=true
+    kubectl delete secret private-repo-creds -n "${NAMESPACE}" --ignore-not-found=true >/dev/null 2>&1 || true
   fi
-  
+
   delete_argo_crs_without_pruning
 
   if helm status argocd -n "${NAMESPACE}" >/dev/null 2>&1; then
@@ -540,6 +433,7 @@ do_delete() {
   fi
 
   delete_namespace_safely
+  delete_crds_last
 
   log "Cleanup: remove Helm repo entry (optional)"
   helm repo remove "${CHART_REPO_NAME}" >/dev/null 2>&1 || true
