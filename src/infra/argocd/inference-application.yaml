@@ -9,9 +9,8 @@ metadata:
     app.kubernetes.io/part-of: e2e-rag-system
   annotations:
     description: Inference services (frontend, retriever, cloudflared)
-    deployed-at: "2026-05-15T03:38:13Z"
+    deployed-at: "2026-05-15T04:06:05Z"
     aws-region: "ap-south-1"
-    ecr-repository: "681802563986.dkr.ecr.ap-south-1.amazonaws.com"
 spec:
   project: default
   source:
@@ -21,16 +20,17 @@ spec:
     helm:
       values: |
         frontend:
-          image:
-            repository: 681802563986.dkr.ecr.ap-south-1.amazonaws.com/frontend
-            tag: "staging"
+          image: "681802563986.dkr.ecr.ap-south-1.amazonaws.com/frontend:staging"
           serviceAccount:
             annotations:
               eks.amazonaws.com/role-arn: "arn:aws:iam::681802563986:role/rag-frontend-irsa-role"
+          env:
+            FRONTEND_HOSTNAME: "rag.athithya.site"
+            MS_TENANT_ID: "b8a65a11-9d1c-4d48-b9f6-dabfc67f2e4b"
+            GOOGLE_ALLOWED_DOMAINS: "gmail.com"
+            MICROSOFT_ALLOWED_DOMAINS: "outlook.com"
         retriever:
-          image:
-            repository: 681802563986.dkr.ecr.ap-south-1.amazonaws.com/retriever
-            tag: "staging"
+          image: "681802563986.dkr.ecr.ap-south-1.amazonaws.com/retriever:staging"
           serviceAccount:
             annotations:
               eks.amazonaws.com/role-arn: "arn:aws:iam::681802563986:role/rag-retriever-irsa-role"
@@ -66,12 +66,6 @@ spec:
                   connectTimeout: 10s
                   keepAliveTimeout: 30s
             catchAll: http_status:404
-        global:
-          aws:
-            region: ap-south-1
-            accountId: 681802563986
-          ecr:
-            url: 681802563986.dkr.ecr.ap-south-1.amazonaws.com
   destination:
     server: https://kubernetes.default.svc
     namespace: inference
