@@ -388,7 +388,9 @@ data "aws_iam_policy_document" "github_ecr_push" {
       "ecr:GetDownloadUrlForLayer",
       "ecr:InitiateLayerUpload",
       "ecr:PutImage",
-      "ecr:UploadLayerPart"
+      "ecr:UploadLayerPart",
+      "ecr:BatchDeleteImage", # <-- add this
+      "ecr:DescribeImages"    # optional, but useful
     ]
 
     resources = [
@@ -396,6 +398,7 @@ data "aws_iam_policy_document" "github_ecr_push" {
     ]
   }
 }
+
 
 resource "aws_iam_role" "github_actions" {
   for_each = var.github_actions_roles
