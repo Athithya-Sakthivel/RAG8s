@@ -147,14 +147,61 @@ spec:
           annotations:
             eks.amazonaws.com/role-arn: "${IRSA_ROLE_ARN}"
         env:
-          S3_BUCKET: "${BACKUP_S3_BUCKET}"
+          S3_BUCKET: "${DATA_S3_BUCKET}"
           DATA_S3_BUCKET: "${DATA_S3_BUCKET}"
-
-          # In the generated ArgoCD values, set S3_BUCKET to the data bucket, not the backup bucket
-env:
-  S3_BUCKET: "${DATA_S3_BUCKET}"       # was BACKUP_S3_BUCKET - WRONG
-  DATA_S3_BUCKET: "${DATA_S3_BUCKET}"
-  
+          BACKUP_S3_BUCKET: "${BACKUP_S3_BUCKET}"
+          S3_RAW_PREFIX: data/raw/
+          S3_CHUNKED_PREFIX: data/chunked/
+          DATA_S3_PREFIX: data/chunked/
+          STORAGE_RAW_PREFIX: data/raw/
+          STORAGE_CHUNKED_PREFIX: data/chunked/
+          PYTHONUNBUFFERED: "1"
+          TMPDIR: /tmp
+          LOG_LEVEL: INFO
+          HTTP_TIMEOUT: "60"
+          INDEXING_STRICT: "true"
+          RUN_PRE_CONVERSIONS: "false"
+          QDRANT_URL: http://qdrant.qdrant.svc.cluster.local:6333
+          DENSE_URL: http://dense-svc.fastembed.svc.cluster.local:8200
+          SPARSE_URL: http://sparse-svc.fastembed.svc.cluster.local:8201
+          MAX_TOKENS_PER_CHUNK: "320"
+          MIN_TOKENS_PER_CHUNK: "100"
+          NUMBER_OF_OVERLAPPING_SENTENCES: "2"
+          PDF_DISABLE_OCR: "false"
+          PDF_OCR_ENGINE: rapidocr
+          PDF_TESSERACT_LANG: eng
+          PDF_FORCE_OCR: "false"
+          PDF_OCR_RENDER_DPI: "400"
+          PDF_MIN_IMG_SIZE_BYTES: "3072"
+          IMAGE_OCR_ENGINE: tesseract
+          IMAGE_TESSERACT_LANG: eng
+          IMAGE_MIN_IMG_SIZE_BYTES: "3072"
+          IMAGE_RENDER_DPI: "400"
+          IMAGE_UPSCALE_FACTOR: "2.0"
+          TESSERACT_CONFIG: --oem 1 --psm 6
+          CSV_TARGET_TOKENS_PER_CHUNK: "400"
+          JSONL_TARGET_TOKENS_PER_CHUNK: "400"
+          PPTX_SLIDES_PER_CHUNK: "4"
+          PPTX_OCR_ENGINE: rapidocr
+          COLLECTION_NAME: default_rag_collection1
+          DENSE_DIM: "384"
+          BATCH_SIZE: "8"
+          UPSERT_CHUNK: "500"
+          SPARSE_BATCH_FALLBACK: "8"
+          QDRANT_SHARD_NUMBER: "3"
+          QDRANT_REPLICATION_FACTOR: "2"
+          QDRANT_WRITE_CONSISTENCY_FACTOR: "1"
+          QDRANT_HNSW_EF_CONSTRUCT: "128"
+          QDRANT_HNSW_M: "32"
+          QDRANT_HNSW_FULL_SCAN_THRESHOLD: "10000"
+          QDRANT_ONDISK: "false"
+          QDRANT_ENABLE_SCALAR_QUANTIZATION: "true"
+          QDRANT_QUANTIZATION_ALWAYS_RAM: "true"
+          INDEX_TIMEOUT: "1800"
+          BACKUP_TIMEOUT: "300"
+          ENABLE_QDRANT_BACKUP: "true"
+          MIN_INDEXED_POINTS_FOR_BACKUP: "100"
+          MIN_INDEX_DELTA_RATIO_FOR_BACKUP: "0.0"
         resources:
           requests:
             cpu: "500m"
@@ -188,9 +235,9 @@ env:
         maxDuration: 3m
 EOF
 log_info "Generated: $INDEXING_APP"
-
 # 4. Apply Qdrant
 log_step "4/6 Deploying Qdrant via ArgoCD"
+bash src/infra/core/default_storage_class.sh
 kubectl apply -f "$QDRANT_APP"
 sleep 10
 
