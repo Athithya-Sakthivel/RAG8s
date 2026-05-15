@@ -21,7 +21,7 @@ spec:
               eks.amazonaws.com/role-arn: arn:aws:iam::681802563986:role/rag-eks-staging-karpenter
           settings:
             clusterName: rag-eks-staging
-            clusterEndpoint: https://6F9FB60B24D9C210AA963C8D57E19DD6.gr7.ap-south-1.eks.amazonaws.com
+            clusterEndpoint: https://3D9EDA909721B2EA353AEEF72369F4F3.gr7.ap-south-1.eks.amazonaws.com
     - repoURL: https://github.com/Athithya-Sakthivel/E2E-RAG-System.git
       targetRevision: main
       path: src/manifests/karpenter
