@@ -37,7 +37,7 @@ spec:
     # SOURCE 2
     # Your manifests repo
     #
-    - repoURL: https://github.com/YOUR_ORG/YOUR_REPO.git
+    - repoURL: https://github.com/Athithya-Sakthivel/E2E-RAG-System.git
       targetRevision: main
       path: src/manifests/karpenter
 
