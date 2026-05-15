@@ -5,17 +5,17 @@ metadata:
   name: frontend
   namespace: {{ .Values.namespace }}
   labels:
-    {{- include "inference-services.componentLabels" (dict "component" "frontend") | nindent 4 }}
-    {{- include "inference-services.labels" . | nindent 4 }}
+    {{- include "inference-services.selectorLabels" (dict "component" "frontend") | nindent 4 }}
+    {{- include "inference-services.commonLabels" . | nindent 4 }}
 spec:
-  type: {{ .Values.frontend.service.type }}
+  type: {{ .Values.frontend.service.type | default "ClusterIP" }}
   selector:
     app.kubernetes.io/name: frontend
     app.kubernetes.io/instance: frontend
     app.kubernetes.io/component: frontend
   ports:
     - name: http
-      port: {{ .Values.frontend.service.port }}
-      targetPort: {{ .Values.frontend.service.port }}
+      port: {{ .Values.frontend.service.port | default 8000 }}
+      targetPort: {{ .Values.frontend.service.port | default 8000 }}
       protocol: TCP
 {{- end }}
