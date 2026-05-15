@@ -1,27 +1,17 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
-
 metadata:
   name: karpenter
   namespace: argocd
-
 spec:
   project: default
-
   destination:
     server: https://kubernetes.default.svc
     namespace: karpenter
-
   sources:
-
-    #
-    # SOURCE 1
-    # Official Helm chart
-    #
     - repoURL: public.ecr.aws/karpenter
       chart: karpenter
       targetRevision: 1.9.0
-
       helm:
         values: |
           serviceAccount:
@@ -29,23 +19,16 @@ spec:
             name: karpenter
             annotations:
               eks.amazonaws.com/role-arn: arn:aws:iam::681802563986:role/rag-eks-staging-karpenter
-
           settings:
             clusterName: rag-eks-staging
-
-    #
-    # SOURCE 2
-    # Your manifests repo
-    #
+            clusterEndpoint: https://6F9FB60B24D9C210AA963C8D57E19DD6.gr7.ap-south-1.eks.amazonaws.com
     - repoURL: https://github.com/Athithya-Sakthivel/E2E-RAG-System.git
       targetRevision: main
       path: src/manifests/karpenter
-
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
-
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true

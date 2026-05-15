@@ -1,18 +1,24 @@
 apiVersion: karpenter.k8s.aws/v1
 kind: EC2NodeClass
-
 metadata:
   name: compute
-
 spec:
-  amiFamily: AL2023
-
+  amiFamily: Custom
+  amiSelectorTerms:
+    - id: ami-03923bac6aa699d69
   role: KarpenterNodeRole-rag-eks-staging
-
   subnetSelectorTerms:
     - tags:
         karpenter.sh/discovery: rag-eks-staging
-
   securityGroupSelectorTerms:
     - tags:
         karpenter.sh/discovery: rag-eks-staging
+  tags:
+    karpenter.sh/discovery: rag-eks-staging
+  blockDeviceMappings:
+    - deviceName: /dev/sda1
+      ebs:
+        volumeSize: 50Gi
+        volumeType: gp3
+        encrypted: true
+        deleteOnTermination: true
