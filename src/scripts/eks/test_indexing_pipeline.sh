@@ -238,6 +238,7 @@ log_info "Generated: $INDEXING_APP"
 # 4. Apply Qdrant
 log_step "4/6 Deploying Qdrant via ArgoCD"
 bash src/infra/core/default_storage_class.sh
+kubectl apply -f src/infra/argocd/qdrant-application.yaml
 kubectl apply -f "$QDRANT_APP"
 sleep 10
 
@@ -248,6 +249,7 @@ sleep 10
 
 # Wait for dependencies (pods Running, no HTTP checks)
 log_step "Waiting for Qdrant pod"
+
 wait_for_pods "qdrant" "app.kubernetes.io/name=qdrant" 300
 
 log_step "Waiting for FastEmbed dense pod"

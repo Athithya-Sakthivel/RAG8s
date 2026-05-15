@@ -1,0 +1,91 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: inference
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: inference
+    app.kubernetes.io/managed-by: argocd
+    app.kubernetes.io/part-of: e2e-rag-system
+  annotations:
+    description: Inference services (frontend, retriever, cloudflared)
+    deployed-at: "2026-05-15T03:38:13Z"
+    aws-region: "ap-south-1"
+    ecr-repository: "681802563986.dkr.ecr.ap-south-1.amazonaws.com"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Athithya-Sakthivel/E2E-RAG-System.git
+    targetRevision: main
+    path: src/infra/helm/inference_svc
+    helm:
+      values: |
+        frontend:
+          image:
+            repository: 681802563986.dkr.ecr.ap-south-1.amazonaws.com/frontend
+            tag: "staging"
+          serviceAccount:
+            annotations:
+              eks.amazonaws.com/role-arn: "arn:aws:iam::681802563986:role/rag-frontend-irsa-role"
+        retriever:
+          image:
+            repository: 681802563986.dkr.ecr.ap-south-1.amazonaws.com/retriever
+            tag: "staging"
+          serviceAccount:
+            annotations:
+              eks.amazonaws.com/role-arn: "arn:aws:iam::681802563986:role/rag-retriever-irsa-role"
+        cloudflared:
+          tunnel:
+            name: "default-tunnel-1"
+            tokenSecretName: cloudflared-token
+          ingress:
+            rules:
+              - hostname: rag.athithya.site
+                path: /metrics
+                service: http_status:403
+              - hostname: rag.athithya.site
+                path: /healthz
+                service: http_status:403
+              - hostname: rag.athithya.site
+                path: /readyz
+                service: http_status:403
+              - hostname: rag.athithya.site
+                service: http://frontend.inference.svc.cluster.local:8000
+                originRequest:
+                  connectTimeout: 10s
+                  keepAliveTimeout: 30s
+                  disableChunkedEncoding: false
+              - hostname: argocd.athithya.site
+                service: http://argocd-server.argocd.svc.cluster.local:80
+                originRequest:
+                  connectTimeout: 10s
+                  keepAliveTimeout: 30s
+              - hostname: grafana.athithya.site
+                service: http://grafana.grafana.svc.cluster.local:80
+                originRequest:
+                  connectTimeout: 10s
+                  keepAliveTimeout: 30s
+            catchAll: http_status:404
+        global:
+          aws:
+            region: ap-south-1
+            accountId: 681802563986
+          ecr:
+            url: 681802563986.dkr.ecr.ap-south-1.amazonaws.com
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: inference
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m

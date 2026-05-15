@@ -1,0 +1,21 @@
+{{- if .Values.retriever.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: retriever
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "inference-services.selectorLabels" (dict "component" "retriever") | nindent 4 }}
+    {{- include "inference-services.commonLabels" . | nindent 4 }}
+spec:
+  type: {{ .Values.retriever.service.type | default "ClusterIP" }}
+  selector:
+    app.kubernetes.io/name: retriever
+    app.kubernetes.io/instance: retriever
+    app.kubernetes.io/component: retriever
+  ports:
+    - name: http
+      port: {{ .Values.retriever.service.port | default 8001 }}
+      targetPort: {{ .Values.retriever.service.port | default 8001 }}
+      protocol: TCP
+{{- end }}

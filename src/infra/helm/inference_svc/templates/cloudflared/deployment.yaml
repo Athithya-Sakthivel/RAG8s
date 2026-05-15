@@ -24,8 +24,8 @@ spec:
       serviceAccountName: {{ .Values.cloudflared.serviceAccount.name }}
       containers:
         - name: cloudflared
-          image: "{{ .Values.cloudflared.image.repository }}:{{ .Values.cloudflared.image.tag }}"
-          imagePullPolicy: {{ .Values.cloudflared.image.pullPolicy | default "IfNotPresent" }}
+          image: "{{ .Values.cloudflared.image }}"
+          imagePullPolicy: {{ .Values.cloudflared.imagePullPolicy | default "IfNotPresent" }}
           args:
             - tunnel
             - --config

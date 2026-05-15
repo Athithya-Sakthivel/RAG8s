@@ -34,8 +34,8 @@ spec:
           emptyDir: {}
       containers:
         - name: retriever
-          image: "{{ .Values.retriever.image.repository }}:{{ .Values.retriever.image.tag }}"
-          imagePullPolicy: {{ .Values.retriever.image.pullPolicy | default "IfNotPresent" }}
+          image: "{{ .Values.retriever.image }}"
+          imagePullPolicy: {{ .Values.retriever.imagePullPolicy | default "IfNotPresent" }}
           ports:
             - name: http
               containerPort: 8001
@@ -78,33 +78,33 @@ spec:
           {{- if .Values.retriever.probes }}
           startupProbe:
             httpGet:
-              path: {{ .Values.retriever.probes.startup.path }}
+              path: {{ .Values.retriever.probes.startup.path | default "/healthz" }}
               port: 8001
               scheme: HTTP
-            initialDelaySeconds: {{ .Values.retriever.probes.startup.initialDelaySeconds }}
+            initialDelaySeconds: {{ .Values.retriever.probes.startup.initialDelaySeconds | default 30 }}
             timeoutSeconds: 5
-            periodSeconds: {{ .Values.retriever.probes.startup.periodSeconds }}
-            failureThreshold: {{ .Values.retriever.probes.startup.failureThreshold }}
+            periodSeconds: {{ .Values.retriever.probes.startup.periodSeconds | default 5 }}
+            failureThreshold: {{ .Values.retriever.probes.startup.failureThreshold | default 60 }}
             successThreshold: 1
           livenessProbe:
             httpGet:
-              path: {{ .Values.retriever.probes.liveness.path }}
+              path: {{ .Values.retriever.probes.liveness.path | default "/healthz" }}
               port: 8001
               scheme: HTTP
-            initialDelaySeconds: 0
+            initialDelaySeconds: {{ .Values.retriever.probes.liveness.initialDelaySeconds | default 30 }}
             timeoutSeconds: 5
-            periodSeconds: {{ .Values.retriever.probes.liveness.periodSeconds }}
-            failureThreshold: {{ .Values.retriever.probes.liveness.failureThreshold }}
+            periodSeconds: {{ .Values.retriever.probes.liveness.periodSeconds | default 5 }}
+            failureThreshold: {{ .Values.retriever.probes.liveness.failureThreshold | default 6 }}
             successThreshold: 1
           readinessProbe:
             httpGet:
-              path: {{ .Values.retriever.probes.readiness.path }}
+              path: {{ .Values.retriever.probes.readiness.path | default "/readyz" }}
               port: 8001
               scheme: HTTP
-            initialDelaySeconds: 0
+            initialDelaySeconds: {{ .Values.retriever.probes.readiness.initialDelaySeconds | default 10 }}
             timeoutSeconds: 5
-            periodSeconds: {{ .Values.retriever.probes.readiness.periodSeconds }}
-            failureThreshold: {{ .Values.retriever.probes.readiness.failureThreshold }}
+            periodSeconds: {{ .Values.retriever.probes.readiness.periodSeconds | default 5 }}
+            failureThreshold: {{ .Values.retriever.probes.readiness.failureThreshold | default 3 }}
             successThreshold: 1
           {{- end }}
 {{- end }}

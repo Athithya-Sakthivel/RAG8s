@@ -36,8 +36,8 @@ spec:
           emptyDir: {}
       containers:
         - name: frontend
-          image: "{{ .Values.frontend.image.repository }}:{{ .Values.frontend.image.tag }}"
-          imagePullPolicy: {{ .Values.frontend.image.pullPolicy | default "IfNotPresent" }}
+          image: "{{ .Values.frontend.image }}"
+          imagePullPolicy: {{ .Values.frontend.imagePullPolicy | default "IfNotPresent" }}
           ports:
             - name: http
               containerPort: 8000
@@ -82,33 +82,33 @@ spec:
           {{- if .Values.frontend.probes }}
           startupProbe:
             httpGet:
-              path: {{ .Values.frontend.probes.startup.path }}
+              path: {{ .Values.frontend.probes.startup.path | default "/health" }}
               port: 8000
               scheme: HTTP
-            initialDelaySeconds: {{ .Values.frontend.probes.startup.initialDelaySeconds }}
+            initialDelaySeconds: {{ .Values.frontend.probes.startup.initialDelaySeconds | default 5 }}
             timeoutSeconds: 5
-            periodSeconds: {{ .Values.frontend.probes.startup.periodSeconds }}
-            failureThreshold: {{ .Values.frontend.probes.startup.failureThreshold }}
+            periodSeconds: {{ .Values.frontend.probes.startup.periodSeconds | default 5 }}
+            failureThreshold: {{ .Values.frontend.probes.startup.failureThreshold | default 12 }}
             successThreshold: 1
           livenessProbe:
             httpGet:
-              path: {{ .Values.frontend.probes.liveness.path }}
+              path: {{ .Values.frontend.probes.liveness.path | default "/health" }}
               port: 8000
               scheme: HTTP
             initialDelaySeconds: 0
             timeoutSeconds: 5
-            periodSeconds: {{ .Values.frontend.probes.liveness.periodSeconds }}
-            failureThreshold: {{ .Values.frontend.probes.liveness.failureThreshold }}
+            periodSeconds: {{ .Values.frontend.probes.liveness.periodSeconds | default 10 }}
+            failureThreshold: {{ .Values.frontend.probes.liveness.failureThreshold | default 3 }}
             successThreshold: 1
           readinessProbe:
             httpGet:
-              path: {{ .Values.frontend.probes.readiness.path }}
+              path: {{ .Values.frontend.probes.readiness.path | default "/orchestrator/health" }}
               port: 8000
               scheme: HTTP
             initialDelaySeconds: 0
             timeoutSeconds: 5
-            periodSeconds: {{ .Values.frontend.probes.readiness.periodSeconds }}
-            failureThreshold: {{ .Values.frontend.probes.readiness.failureThreshold }}
+            periodSeconds: {{ .Values.frontend.probes.readiness.periodSeconds | default 5 }}
+            failureThreshold: {{ .Values.frontend.probes.readiness.failureThreshold | default 2 }}
             successThreshold: 1
           {{- end }}
 {{- end }}

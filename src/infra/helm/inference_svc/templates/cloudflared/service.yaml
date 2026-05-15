@@ -7,7 +7,7 @@ metadata:
   labels:
     app.kubernetes.io/name: cloudflared
     app.kubernetes.io/component: tunnel
-    {{- include "inference-services.labels" . | nindent 4 }}
+    {{- include "inference-services.commonLabels" . | nindent 4 }}
 spec:
   type: ClusterIP
   selector:
