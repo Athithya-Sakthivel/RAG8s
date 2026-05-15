@@ -4,7 +4,8 @@ metadata:
   name: compute
 spec:
   disruption:
-    consolidationPolicy: WhenUnderutilized
+    consolidationPolicy: WhenEmptyOrUnderutilized
+    consolidateAfter: 15m
     budgets:
     - nodes: "50%"
   template:
