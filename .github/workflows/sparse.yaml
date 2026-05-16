@@ -9,7 +9,6 @@ on:
     branches: [ main ]
     paths:
       - src/services/sparse/**
-      - .github/workflows/sparse.yaml
   workflow_dispatch:
 
 permissions:
@@ -22,7 +21,7 @@ concurrency:
 
 env:
   AWS_REGION: ap-south-1
-  AWS_ACCOUNT_ID: "681802563986"
+  AWS_ACCOUNT_ID: 
   ROLE_NAME: gh-actions-sparse-model
   ECR_REPOSITORY: sparse-model
   IMAGE_NAME: sparse
