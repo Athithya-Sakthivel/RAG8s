@@ -1,6 +1,6 @@
 # indexing pipeline
 AVD-DS-0031  # TOKEN_* vars are non-sensitive tokenizer identifiers (false positive)
-CVE-2026-40962 # Integer overflow and out-of-bounds(no longer doing audio conversions with ffmpeg)
+CVE-2026-40962 # Integer overflow and out-of-bounds(no longer performing audio conversions with ffmpeg)
 
 # retriever
 KSV-0109 # False positive: `LLM_MAX_TOKENS` is a non-sensitive numeric config, not a secret

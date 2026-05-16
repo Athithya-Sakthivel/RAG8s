@@ -3,6 +3,7 @@ line-length = 120
 
 exclude = [
   ".venv",
+  ".venv1",
   ".repos",
   "__pycache__",
   "tests",

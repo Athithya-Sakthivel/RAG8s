@@ -1,4 +1,4 @@
-# PREREQUISITES: Docker running, enabled on boot, and must be accessible without sudo(sudo usermod -aG docker $USER && newgrp docker)
+# PREREQUISITES: Docker running, enabled on boot, and must be accessible without sudo(sudo usermod -aG docker $USER && newgrp docker).
 
 FROM mcr.microsoft.com/devcontainers/base:ubuntu-24.04
 

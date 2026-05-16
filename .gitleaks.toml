@@ -1,5 +1,4 @@
-# Title for the gitleaks configuration
-title = "E2E-RAG-System gitleaks config"
+title = "gitleaks config"
 
 [allowlist]
 description = "False positives from S3 prefix concatenation patterns"

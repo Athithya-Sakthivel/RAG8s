@@ -89,7 +89,7 @@ jobs:
           retention-days: 30
 
   summary:
-    name: Generate scan summary
+    name: Scan summary
     runs-on: ubuntu-24.04
     needs: scan-images
     if: always()
