@@ -20,7 +20,7 @@ kubectl create secret generic "$ADMIN_SECRET" \
 kubectl delete application grafana -n argocd --ignore-not-found
 
 # ── Apply the ArgoCD Application ──
-kubectl apply -f src/argocd/grafana-application.yaml
+kubectl apply -f src/infra/argocd/grafana-application.yaml
 
 # ── Wait for the Deployment to be created (ArgoCD needs time to render the Helm chart) ──
 echo "Waiting for Grafana Deployment to appear..."

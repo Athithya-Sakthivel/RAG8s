@@ -343,7 +343,8 @@ EOF
 
   # 5. Force ArgoCD to sync (clears any stuck failed state and triggers a fresh sync)
   log_step "5/5 Forcing ArgoCD sync"
-
+  # Create the karpenter namespace first to prevent RBAC reconciliation race condition
+  kubectl create namespace karpenter --dry-run=client -o yaml | kubectl apply -f -
   # Wait briefly for ArgoCD to process the application
   sleep 5
 

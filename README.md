@@ -188,3 +188,4 @@ https Routes:
 - argocd.<domain>   -> Argo CD server
 - grafana.<domain>  -> Grafana service
 
+rag.<domain> will open the rag chat ui, login with a google/microsoft account , default configs allows all accounts

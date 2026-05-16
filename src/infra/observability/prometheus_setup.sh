@@ -24,7 +24,7 @@ kubectl create secret generic alertmanager-secrets \
 
 # ── 2. Deploy Prometheus via ArgoCD ──────────────────────────
 echo "==> Deploying Prometheus Application..."
-kubectl apply -f src/argocd/prometheus-application.yaml
+kubectl apply -f src/infra/argocd/prometheus-application.yaml
 
 # ── 3. Wait for the ConfigMap to exist ───────────────────────
 echo "==> Waiting for ConfigMap ${CM_NAME} to be created..."
