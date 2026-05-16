@@ -6,15 +6,15 @@ spec:
   amiFamily: AL2023
   amiSelectorTerms:
     - alias: al2023@latest
-  role: KarpenterNodeRole-rag-eks-prod
+  role: KarpenterNodeRole-rag-eks-staging
   subnetSelectorTerms:
     - tags:
-        karpenter.sh/discovery: rag-eks-prod
+        karpenter.sh/discovery: rag-eks-staging
   securityGroupSelectorTerms:
     - tags:
-        karpenter.sh/discovery: rag-eks-prod
+        karpenter.sh/discovery: rag-eks-staging
   tags:
-    karpenter.sh/discovery: rag-eks-prod
+    karpenter.sh/discovery: rag-eks-staging
   blockDeviceMappings:
     - deviceName: /dev/xvda
       ebs:

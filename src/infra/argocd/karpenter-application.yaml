@@ -18,10 +18,10 @@ spec:
             create: true
             name: karpenter
             annotations:
-              eks.amazonaws.com/role-arn: arn:aws:iam::681802563986:role/rag-eks-prod-karpenter
+              eks.amazonaws.com/role-arn: arn:aws:iam::681802563986:role/rag-eks-staging-karpenter
           settings:
-            clusterName: rag-eks-prod
-            clusterEndpoint: https://C58C3F015EFB939229605B229B5CC039.gr7.ap-south-1.eks.amazonaws.com
+            clusterName: rag-eks-staging
+            clusterEndpoint: https://026D1F2F8DE2D44F207F4ED843566A6C.sk1.ap-south-1.eks.amazonaws.com
     - repoURL: https://github.com/Athithya-Sakthivel/E2E-RAG-System.git
       targetRevision: main
       path: src/manifests/karpenter
