@@ -1,3 +1,4 @@
+
 ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)" \
 python3 - <<'PY'
 from pathlib import Path
@@ -16,12 +17,14 @@ for path in Path(".github/workflows").rglob("*"):
 
     original = path.read_text(encoding="utf-8")
 
+    # Fix: Handle both quoted and unquoted account IDs
     text = re.sub(
-        r"(^\s*AWS_ACCOUNT_ID:\s*)\d+(\s*$)",
-        lambda m: f"{m.group(1)}{account_id}{m.group(2)}",
+        r'(^\s*AWS_ACCOUNT_ID:\s*)"?\d+"?(\s*$)',
+        lambda m: f'{m.group(1)}"{account_id}"{m.group(2)}',
         original,
         flags=re.M,
     )
+    
     text = re.sub(
         r"(^\s*AWS_REGION:\s*).*$",
         lambda m: f"{m.group(1)}{region}",

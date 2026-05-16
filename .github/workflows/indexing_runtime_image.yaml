@@ -6,7 +6,7 @@ on:
     paths:
       - src/indexing_pipeline/**
       - .github/workflows/indexing_runtime_image.yaml
-      
+
   pull_request:
     branches: [ main ]
     paths:
