@@ -1,17 +1,19 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: karpenter-bootstrap
+  name: karpenter-config
   namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
 spec:
   project: default
   source:
     repoURL: "https://github.com/Athithya-Sakthivel/E2E-RAG-System.git"
     targetRevision: "main"
-    path: src/infra/argocd/karpenter-bootstrap
+    path: src/manifests/karpenter
   destination:
     server: https://kubernetes.default.svc
-    namespace: argocd
+    namespace: kube-system
   syncPolicy:
     automated:
       prune: true
