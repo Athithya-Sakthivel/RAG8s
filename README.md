@@ -69,7 +69,7 @@ bash src/infra/terraform/aws/run.sh --create --env staging
 aws eks update-kubeconfig --region ap-south-1 --name rag-eks-staging
 ```
 
-### Run this script to replace account id and aws region to trigger ci worklows to push rag images to ecr
+### Run this script to replace account id and aws region to trigger ci worklows to push rag images to ecr. After 5 min open https://<REPO_URL>/actions
 ```sh
 bash src/scripts/replace.sh
 ```

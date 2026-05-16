@@ -21,9 +21,8 @@ concurrency:
 
 env:
   AWS_REGION: ap-south-1
-  AWS_ACCOUNT_ID: 681802563986
+  AWS_ACCOUNT_ID: "681802563986"
   ROLE_NAME: gh-actions-frontend
-  AWS_ROLE_ARN: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.ROLE_NAME }}
   ECR_REPOSITORY: frontend
   IMAGE_NAME: frontend
 
@@ -42,6 +41,11 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4.0.0
 
+      - name: Construct AWS role ARN
+        id: aws-role
+        run: |
+          echo "arn=arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.ROLE_NAME }}" >> "$GITHUB_OUTPUT"
+
       - name: Compute image metadata
         id: image-meta
         shell: bash
@@ -49,9 +53,9 @@ jobs:
           set -euo pipefail
           export TF_VAR_region="ap-south-1"
           IMAGE_TAG="${IMAGE_TAG:-$(TZ=Asia/Kolkata date +%Y-%m-%d-%H-%M)--$(git rev-parse --short HEAD)}"
-          REGISTRY_HOST="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-          PRIMARY_IMAGE="${REGISTRY_HOST}/${ECR_REPOSITORY}:${IMAGE_TAG}"
-          STAGING_IMAGE="${REGISTRY_HOST}/${ECR_REPOSITORY}:staging"
+          REGISTRY_HOST="${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
+          PRIMARY_IMAGE="${REGISTRY_HOST}/${{ env.ECR_REPOSITORY }}:${IMAGE_TAG}"
+          STAGING_IMAGE="${REGISTRY_HOST}/${{ env.ECR_REPOSITORY }}:staging"
           echo "primary_image=${PRIMARY_IMAGE}" >> "$GITHUB_OUTPUT"
           echo "staging_image=${STAGING_IMAGE}" >> "$GITHUB_OUTPUT"
 
@@ -91,7 +95,7 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: aws-actions/configure-aws-credentials@v6.1.1
         with:
-          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          role-to-assume: ${{ steps.aws-role.outputs.arn }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Log in to ECR
