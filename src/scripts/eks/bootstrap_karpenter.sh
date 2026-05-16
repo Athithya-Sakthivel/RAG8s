@@ -170,6 +170,7 @@ diagnose_failure() {
 # ROLLOUT
 # ============================================
 
+
 do_rollout() {
   echo -e "${GREEN}=========================================${NC}"
   echo -e "${GREEN}  Karpenter Rollout${NC}"
@@ -178,7 +179,7 @@ do_rollout() {
   check_prereqs
 
   # 1. Fetch Terraform outputs
-  log_step "1/4 Fetching Terraform outputs"
+  log_step "1/5 Fetching Terraform outputs"
   CLUSTER_NAME=$(tofu -chdir="$TOFU_DIR" output -raw cluster_name)
   KARPENTER_ROLE_ARN=$(tofu -chdir="$TOFU_DIR" output -raw karpenter_controller_role_arn)
   KARPENTER_NODE_ROLE_ARN=$(tofu -chdir="$TOFU_DIR" output -raw karpenter_node_role_arn)
@@ -191,7 +192,7 @@ do_rollout() {
   log_info "Security Group:     $SG_ID"
 
   # 2. Render YAMLs
-  log_step "2/4 Rendering Karpenter YAML manifests"
+  log_step "2/5 Rendering Karpenter YAML manifests"
   mkdir -p "$ARGOCD_APP_DIR" "$MANIFESTS_DIR"
 
   cat > "$KARPENTER_APP_YAML" << EOF
@@ -260,6 +261,14 @@ spec:
 EOF
   log_info "Generated: $NODECLASS_YAML"
 
+  # Pre-compute values to avoid subshell issues with set -e inside heredoc
+  local instance_cat_values
+  instance_cat_values=$(echo "$INSTANCE_CATEGORIES" | tr ',' '\n' | sed 's/^/            - /')
+  local excluded_family_values
+  excluded_family_values=$(echo "$EXCLUDED_INSTANCE_TYPES" | tr ',' '\n' | sed 's/^/            - /')
+  local spot_value
+  spot_value=$([ "$SPOT_ENABLED" = "true" ] && echo "spot" || echo "on-demand")
+
   cat > "$NODEPOOL_YAML" << EOF
 apiVersion: karpenter.sh/v1
 kind: NodePool
@@ -267,7 +276,8 @@ metadata:
   name: ${KARPENTER_NODE_POOL_NAME}
 spec:
   disruption:
-    consolidationPolicy: WhenUnderutilized
+    consolidationPolicy: WhenEmptyOrUnderutilized
+    consolidateAfter: 15m
     budgets:
     - nodes: "50%"
   template:
@@ -295,11 +305,11 @@ spec:
         - key: karpenter.sh/capacity-type
           operator: In
           values:
-            - $([ "$SPOT_ENABLED" = "true" ] && echo "spot" || echo "on-demand")
+            - ${spot_value}
         - key: karpenter.k8s.aws/instance-category
           operator: In
           values:
-$(echo "$INSTANCE_CATEGORIES" | tr ',' '\n' | sed 's/^/            - /')
+${instance_cat_values}
         - key: karpenter.k8s.aws/instance-generation
           operator: Gt
           values:
@@ -307,16 +317,19 @@ $(echo "$INSTANCE_CATEGORIES" | tr ',' '\n' | sed 's/^/            - /')
         - key: karpenter.k8s.aws/instance-family
           operator: NotIn
           values:
-$(echo "$EXCLUDED_INSTANCE_TYPES" | tr ',' '\n' | sed 's/^/            - /')
+${excluded_family_values}
   limits:
     cpu: "${CPU_LIMIT}"
 EOF
+  log_info "Generated: $NODEPOOL_YAML"
 
   # 3. Git commit & push
-  log_step "3/4 Committing and pushing to Git"
+  log_step "3/5 Committing and pushing to Git"
   cd "$REPO_ROOT"
-  if ! git diff --quiet HEAD -- "$KARPENTER_APP_YAML" "$NODECLASS_YAML" "$NODEPOOL_YAML"; then
-    git add "$KARPENTER_APP_YAML" "$NODECLASS_YAML" "$NODEPOOL_YAML"
+
+  git add "$KARPENTER_APP_YAML" "$NODECLASS_YAML" "$NODEPOOL_YAML"
+
+  if ! git diff --cached --quiet; then
     git commit -m "chore: update karpenter manifests with AL2023"
     git push origin "$GH_BRANCH"
     log_info "Changes pushed to $GH_BRANCH"
@@ -324,13 +337,32 @@ EOF
     log_info "No changes to commit"
   fi
 
-  # 4. Apply and wait
-  log_step "4/4 Applying ArgoCD Application and waiting for readiness"
-
+  # 4. Apply ArgoCD Application (creates or updates the ArgoCD app object)
+  log_step "4/5 Applying ArgoCD Application"
   kubectl apply -f "$KARPENTER_APP_YAML"
 
-  # Give ArgoCD a moment to react and start the sync
-  sleep 10
+  # 5. Force ArgoCD to sync (clears any stuck failed state and triggers a fresh sync)
+  log_step "5/5 Forcing ArgoCD sync"
+
+  # Wait briefly for ArgoCD to process the application
+  sleep 5
+
+  # Clear any stuck operation state that would block a new sync
+  kubectl patch application karpenter -n argocd --type='json' \
+    -p='[{"op": "remove", "path": "/status/operationState"}]' 2>/dev/null || true
+
+  # Trigger a manual sync with prune and ServerSideApply
+  kubectl patch application karpenter -n argocd --type='merge' -p '{
+    "operation": {
+      "sync": {
+        "revision": "'"${GH_BRANCH}"'",
+        "prune": true,
+        "syncOptions": ["ServerSideApply=true"]
+      }
+    }
+  }'
+
+  log_info "Sync triggered. Waiting for resources to become ready..."
 
   # --- Wait for controller deployment to exist ---
   log_info "Waiting for Karpenter deployment to be created (up to 60s)..."
@@ -362,11 +394,18 @@ EOF
   fi
 
   # --- Wait for NodePool ---
+  log_info "Waiting for NodePool '${KARPENTER_NODE_POOL_NAME}' to exist (up to 120s)..."
+  if ! wait_for_resource "nodepool" "${KARPENTER_NODE_POOL_NAME}" "" 120; then
+    log_error "NodePool resource was not created – ArgoCD sync may have failed"
+    diagnose_failure
+    exit 1
+  fi
+
   log_info "Waiting for NodePool '${KARPENTER_NODE_POOL_NAME}' to be ready (up to 60s)..."
   if wait_for_condition "nodepool" "${KARPENTER_NODE_POOL_NAME}" "ready" 60; then
     log_info "NodePool is ready"
   else
-    log_warn "NodePool not ready yet - continuing anyway"
+    log_warn "NodePool not ready yet – check ArgoCD sync status"
   fi
 
   # --- Final status ---
@@ -385,6 +424,7 @@ EOF
   echo -e "To verify node provisioning, deploy a test pod or run:"
   echo -e "  kubectl logs -n karpenter deployment/karpenter --tail=20"
 }
+
 
 # ============================================
 # DELETE

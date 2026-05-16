@@ -274,6 +274,8 @@ if [ "${RUN_TEST:-true}" = "true" ]; then
     run_test_job
 fi
 
+aws s3 ls s3://$BACKUP_S3_BUCKET --recursive
+
 echo -e "\n${BLUE}Quick commands:${NC}"
 echo -e "  ${CYAN}kubectl get applications -n argocd${NC}"
 echo -e "  ${CYAN}kubectl get cronjobs -n $NAMESPACE${NC}"

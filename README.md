@@ -82,18 +82,6 @@ bash src/infra/core/argo_setup.sh --rollout
 export GH_REPO="https://github.com/Athithya-Sakthivel/E2E-RAG-System.git"
 export GH_BRANCH="main"
 export AWS_REGION="ap-south-1"
-#### -----OPTIONAL INPUTS ----
-export INSTANCE_CATEGORIES="c"
-export INSTANCE_GENERATIONS="3"
-export EXCLUDED_INSTANCE_TYPES="t2,t3,t4g"
-export SPOT_ENABLED="true"
-export ON_DEMAND_BASE_CAPACITY="2"
-export CPU_LIMIT="50"
-export MAX_NODE_COUNT="10"
-export CONSOLIDATION_ENABLED="true"
-export CONSOLIDATION_POLICY="WhenUnderutilized"
-export TTL_SECONDS_UNTIL_EXPIRED="259200"
-export TTL_SECONDS_AFTER_EMPTY="300"
 bash src/scripts/eks/bootstrap_karpenter.sh --rollout
 ```
 
@@ -104,7 +92,7 @@ bash src/scripts/eks/bootstrap_karpenter.sh --rollout
 
 </details>
 
-### Deploy the full E2E RAG indexing pipeline (Qdrant → FastEmbed → Indexing CronJob). 
+### Deploy the full E2E RAG indexing pipeline (Qdrant → FastEmbed → Indexing CronJob). [Docs](src/indexing_pipeline/README.md)
  * NOTE: Karpenter may take longer than 5-15 minutes to provision EC2 instances if the
  * cheapest matching instance type is not available in your account/region.
  * It will automatically retry with other c-family types. This is normal.
@@ -117,6 +105,6 @@ bash src/scripts/eks/run_indexing_pipeline.sh
 <details>
 <summary>▶ Expected output</summary>
 
-![alt text](src/scripts/archive/images/karpenter.png)
+![alt text](src/scripts/archive/images/indexing.png)
 
 </details>
