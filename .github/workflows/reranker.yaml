@@ -5,6 +5,7 @@ on:
     branches: [ main ]
     paths:
       - src/services/reranker/**
+      - .github/workflows/reranker.yaml
   pull_request:
     branches: [ main ]
     paths:

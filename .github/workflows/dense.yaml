@@ -5,6 +5,7 @@ on:
     branches: [ main ]
     paths:
       - src/services/dense/**
+      - .github/workflows/dense.yaml
   pull_request:
     branches: [ main ]
     paths:

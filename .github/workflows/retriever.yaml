@@ -5,6 +5,7 @@ on:
     branches: [ main ]
     paths:
       - src/services/retriever/**
+      - .github/workflows/retriever.yaml
   pull_request:
     branches: [ main ]
     paths:
@@ -46,7 +47,7 @@ jobs:
         run: |
           echo "arn=arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.ROLE_NAME }}" >> "$GITHUB_OUTPUT"
 
-      - name: Compute image metadata
+      - name: Compute image metadata.
         id: image-meta
         shell: bash
         run: |
