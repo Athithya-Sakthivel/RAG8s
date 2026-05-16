@@ -75,7 +75,7 @@ jobs:
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,mode=max,scope=frontend
 
-      - name: Run frontend smoke tests
+      - name: Run frontend smoke tests.
         shell: bash
         run: |
           set -euo pipefail
