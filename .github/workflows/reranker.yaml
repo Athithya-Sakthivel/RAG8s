@@ -5,10 +5,8 @@ on:
     branches: [ main ]
     paths:
       - src/services/reranker/**
-  pull_request:
-    branches: [ main ]
-    paths:
-      - src/services/reranker/**
+      - .github/workflows/reranker.yaml
+      
   workflow_dispatch:
 
 permissions:
@@ -22,9 +20,11 @@ concurrency:
 env:
   AWS_REGION: ap-south-1
   AWS_ACCOUNT_ID: 681802563986
-  AWS_ROLE_ARN: arn:aws:iam::681802563986:role/gh-actions-reranker
+  ROLE_NAME: gh-actions-reranker
+  AWS_ROLE_ARN: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.ROLE_NAME }}
   ECR_REPOSITORY: reranker
   IMAGE_NAME: reranker
+
 
 jobs:
   build-test-scan-push:
@@ -45,7 +45,8 @@ jobs:
         id: image-meta
         shell: bash
         run: |
-          set -euo pipefail
+           set -euo pipefail
+          export TF_VAR_region="ap-south-1"
           IMAGE_TAG="${IMAGE_TAG:-$(TZ=Asia/Kolkata date +%Y-%m-%d-%H-%M)--$(git rev-parse --short HEAD)}"
           REGISTRY_HOST="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
           PRIMARY_IMAGE="${REGISTRY_HOST}/${ECR_REPOSITORY}:${IMAGE_TAG}"
@@ -73,7 +74,8 @@ jobs:
       - name: Run service tests
         shell: bash
         run: |
-          set -euo pipefail
+           set -euo pipefail
+          export TF_VAR_region="ap-south-1"
           cd src/services/reranker
           export RERANKER_MODEL_NAME="${RERANKER_MODEL_NAME:-Xenova/ms-marco-MiniLM-L-6-v2}"
           export RERANKER_MAX_DOCS="${RERANKER_MAX_DOCS:-50}"
@@ -119,6 +121,7 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: bash
         run: |
-          set -euo pipefail
+           set -euo pipefail
+          export TF_VAR_region="ap-south-1"
           docker push "${{ steps.image-meta.outputs.primary_image }}"
           docker push "${{ steps.image-meta.outputs.staging_image }}"

@@ -64,7 +64,7 @@ sudo chmod a+r /etc/apt/sources.list.d/opentofu.list
 log "refreshing apt metadata after repo add"
 
 sudo apt-get update
-CLOUDFLARED_VERSION=2026.3.0 && \
+CLOUDFLARED_VERSION=2026.5.0 && \
 sudo curl -fL "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-amd64" \
 -o /usr/local/bin/cloudflared && \
 sudo chmod +x /usr/local/bin/cloudflared
@@ -135,8 +135,6 @@ curl -sSL -o argocd \
 
 chmod +x argocd
 sudo mv argocd /usr/local/bin/
-
-# convert favicon.png -define icon:auto-resize=256,128,64,48,32,16 favicon.ico
 
 curl -LsSf https://astral.sh/ruff/install.sh | sh && sudo mv "$HOME/.local/bin/ruff" /usr/local/bin/
 

@@ -31,9 +31,11 @@ case "$MODE" in
   *) usage ;;
 esac
 
-export TF_VAR_account_id="${TF_VAR_account_id:-${CLOUDFLARE_ACCOUNT_ID:-}}"
-export TF_VAR_zone_id="${TF_VAR_zone_id:-${CLOUDFLARE_ZONE_ID:-}}"
+# Export TF_VAR_domain FIRST before using it
 export TF_VAR_domain="${TF_VAR_domain:-${CLOUDFLARE_ZONE:-${DOMAIN:-}}}"
+export TF_VAR_account_id="$CLOUDFLARE_ACCOUNT_ID"
+# Now TF_VAR_domain is available for use in the curl command
+export TF_VAR_zone_id=$(curl -s -H "X-Auth-Key: $CLOUDFLARE_GLOBAL_API_KEY" -H "X-Auth-Email: $CLOUDFLARE_EMAIL" "https://api.cloudflare.com/client/v4/zones?name=${TF_VAR_domain}" | jq -r '.result[0].id')
 export TF_VAR_tunnel_name="${TF_VAR_tunnel_name:-${CLOUDFLARE_TUNNEL_NAME:-default-tunnel-1}}"
 export TF_VAR_enable_always_use_https="${TF_VAR_enable_always_use_https:-true}"
 export TF_VAR_enable_tls_1_3="${TF_VAR_enable_tls_1_3:-true}"
@@ -43,7 +45,7 @@ export TF_IN_AUTOMATION=1
 export TF_INPUT=0
 
 : "${TF_VAR_account_id:?TF_VAR_account_id or CLOUDFLARE_ACCOUNT_ID is required}"
-: "${TF_VAR_domain:?TF_VAR_domain or CLOUDFLARE_ZONE or DOMAIN is required}"
+: "${TF_VAR_domain:?TF_VAR_domain or DOMAIN is required}"
 
 if [[ -n "${CLOUDFLARE_API_TOKEN:-}" && ( -n "${CLOUDFLARE_API_KEY:-}" || -n "${CLOUDFLARE_GLOBAL_API_KEY:-}" ) ]]; then
   echo "ERROR: set either CLOUDFLARE_API_TOKEN or CLOUDFLARE_GLOBAL_API_KEY/CLOUDFLARE_API_KEY, not both" >&2

@@ -71,10 +71,7 @@ SECRET_KEY = os.getenv("CLOUDFLARE_SECRET_KEY", "token").strip() or "token"
 DEPLOYMENT_NAME = os.getenv("DEPLOYMENT_NAME", "cloudflared").strip() or "cloudflared"
 METRICS_SERVICE_NAME = os.getenv("METRICS_SERVICE_NAME", "cloudflared-metrics").strip() or "cloudflared-metrics"
 
-IMAGE = os.getenv(
-    "IMAGE",
-    "cloudflare/cloudflared:2026.3.0@sha256:6b599ca3e974349ead3286d178da61d291961182ec3fe9c505e1dd02c8ac31b0",
-).strip()
+IMAGE = os.getenv("IMAGE","docker.io/cloudflare/cloudflared:2026.5.0@sha256:59bab8d3aceec09bf6bdb07d6beca0225ca5cd7ab79436a87ea97978fe1dc4f9",).strip()
 
 REPLICAS = int(os.getenv("REPLICAS", "1"))
 METRICS_PORT = int(os.getenv("METRICS_PORT", "2000"))
@@ -141,9 +138,22 @@ def atomic_write_text(path: Path, content: str) -> None:
     logger.debug(f"Wrote file {path}")
 
 
-def run(cmd: list[str], stdin: str | None = None) -> None:
+def run(cmd: list[str], stdin: str | None = None, capture: bool = False) -> subprocess.CompletedProcess:
     logger.debug(f"Executing: {' '.join(map(str, cmd))}")
-    subprocess.run(list(map(str, cmd)), input=stdin, text=True, check=True)
+    if capture:
+        return subprocess.run(list(map(str, cmd)), input=stdin, text=True, check=True, 
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return subprocess.run(list(map(str, cmd)), input=stdin, text=True, check=True,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def ensure_namespace(namespace: str) -> None:
+    """Create the namespace if it does not already exist."""
+    try:
+        run(["kubectl", "get", "namespace", namespace], capture=True)
+    except subprocess.CalledProcessError:
+        logger.info(f"Creating namespace {namespace}")
+        run(["kubectl", "create", "namespace", namespace])
 
 
 def fatal(msg: str, code: int = 2) -> NoReturn:
@@ -563,24 +573,24 @@ def write_manifests(docs: list[dict[str, Any]]) -> None:
     atomic_write_text(OUT_DIR / "03-deployment.yaml", yaml_dump(docs[2]).rstrip() + "\n")
     atomic_write_text(OUT_DIR / "04-routes-reference.yaml", yaml_dump(docs[3]).rstrip() + "\n")
     atomic_write_text(OUT_DIR / "05-service.yaml", yaml_dump(docs[4]).rstrip() + "\n")
-    logger.info(f"Manifests written to {OUT_DIR}")
 
 
 def apply_secret(secret: dict[str, Any]) -> None:
-    logger.info("Applying tunnel credential to cluster")
+    ensure_namespace(NAMESPACE)
     run(["kubectl", "apply", "-f", "-"], stdin=yaml_dump(secret).rstrip() + "\n")
-    logger.info("Tunnel credential applied")
 
 
 def apply_rollout(docs: list[dict[str, Any]]) -> None:
-    logger.info(f"Applying workload manifests to namespace {NAMESPACE}")
+    ensure_namespace(NAMESPACE)
+    for ns in [ARGOCD_NAMESPACE, GRAFANA_NAMESPACE]:
+        if ns != NAMESPACE:
+            ensure_namespace(ns)
+    
     payload = "\n---\n".join(yaml_dump(d).rstrip() for d in docs) + "\n"
     run(["kubectl", "apply", "-f", "-"], stdin=payload)
-    logger.info("Workload manifests applied")
 
 
 def delete_resources() -> None:
-    logger.info(f"Deleting cloudflared resources in namespace {NAMESPACE}")
     run(
         [
             "kubectl",
@@ -596,7 +606,6 @@ def delete_resources() -> None:
             "--ignore-not-found=true",
         ]
     )
-    logger.info("Delete operation completed")
 
 
 def main() -> None:
@@ -625,20 +634,25 @@ def main() -> None:
     docs, secret = build()
 
     if args.delete:
+        logger.info(f"Deleting resources from {NAMESPACE}")
         delete_resources()
+        logger.info("Resources deleted")
         return
 
     if args.write:
         write_manifests(docs)
+        logger.info(f"Manifests written to {OUT_DIR}")
         apply_secret(secret)
-        logger.info(f"Write operation complete; manifests are at {OUT_DIR}")
+        logger.info("Tunnel credential applied")
         return
 
     if args.rollout:
         write_manifests(docs)
+        logger.info(f"Manifests written to {OUT_DIR}")
         apply_secret(secret)
+        logger.info("Applying manifests")
         apply_rollout(docs)
-        logger.info(f"Rollout operation complete; manifests are at {OUT_DIR}")
+        logger.info("Rollout complete")
         return
 
 

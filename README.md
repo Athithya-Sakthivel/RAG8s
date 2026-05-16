@@ -69,6 +69,21 @@ bash src/infra/terraform/aws/run.sh --create --env staging
 aws eks update-kubeconfig --region ap-south-1 --name rag-eks-staging
 ```
 
+### Run this command to replace account id and aws region to trigger ci worklows to push ecr images
+```sh
+
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text) && \
+find .github/workflows -type f \( -name '*.yml' -o -name '*.yaml' \) -print0 | \
+xargs -0 perl -0pi -e "
+  s/^\\s*AWS_ACCOUNT_ID:\\s*\\d+\\s*\$/  AWS_ACCOUNT_ID: ${ACCOUNT_ID}/mg;
+  s/^\\s*AWS_REGION:\\s*.*\$/  AWS_REGION: ap-south-1/mg;
+  next if /TF_VAR_region=\"ap-south-1\"/;
+  s/^(.*set -euo pipefail.*)\$/ \$1\\n          export TF_VAR_region=\"ap-south-1\"/mg;
+" && \
+git add . && git commit -m "trigger all image CI" && git push origin main
+
+```
+
 ### Setup argocd
 ```sh
 export GIT_PAT=ghp_   # https://github.com/settings/tokens/new
@@ -108,3 +123,29 @@ bash src/scripts/eks/run_indexing_pipeline.sh
 ![alt text](src/scripts/archive/images/indexing.png)
 
 </details>
+
+
+### Provision the cloudflare resources. The script waits till you login to cloudflare and authorize the correct root domain
+
+```sh
+export CLOUDFLARE_ACCOUNT_ID=
+export CLOUDFLARE_GLOBAL_API_KEY=
+export CLOUDFLARE_EMAIL="athithya651@gmail.com"  
+export DOMAIN="athithya.site"   # root domain
+bash src/infra/terraform/cloudflare/run.sh --apply
+export CLOUDFLARE_TUNNEL_TOKEN="$(tofu -chdir=src/infra/terraform/cloudflare output -raw cloudflare_tunnel_token)"
+export CLOUDFLARE_TUNNEL_NAME="$(tofu -chdir=src/infra/terraform/cloudflare output -raw cloudflare_tunnel_name)"
+export CLOUDFLARE_TUNNEL_ID="$(tofu -chdir=src/infra/terraform/cloudflare output -raw cloudflare_tunnel_id)"
+python3 src/infra/core/cloudflared_setup.py --write
+
+```
+
+<details>
+<summary>▶ Expected output</summary>
+
+![alt text](src/scripts/archive/images/tunnel.png)
+
+</details>
+
+
+

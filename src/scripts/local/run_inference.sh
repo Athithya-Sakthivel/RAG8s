@@ -17,10 +17,6 @@ helm upgrade --install "${QDRANT_RELEASE:-qdrant}" qdrant/qdrant \
   --set resources.limits.cpu=1,resources.limits.memory=2Gi \
   --wait --timeout 15m
 
-export PER_POD=true
-export QDRANT_BACKUP_S3_PREFIX=qdrant/backups/
-export BACKUP_S3_BUCKET="$(cd src/infra/terraform/aws && tofu output -json s3_bucket_name_map | jq -r '.QDRANT_BACKUPS_BUCKET')"
-bash src/scripts/backups_and_restore.sh restore
 
 bash src/infra/core/argo_setup.sh --rollout
 

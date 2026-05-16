@@ -5,11 +5,7 @@ on:
     branches: [ main ]
     paths:
       - src/services/frontend/**
-  pull_request:
-    branches: [ main ]
-    paths:
-      - src/services/frontend/**
-  workflow_dispatch:
+      - .github/workflows/frontend.yaml
 
 permissions:
   contents: read
@@ -22,7 +18,8 @@ concurrency:
 env:
   AWS_REGION: ap-south-1
   AWS_ACCOUNT_ID: 681802563986
-  AWS_ROLE_ARN: arn:aws:iam::681802563986:role/gh-actions-frontend
+  ROLE_NAME: gh-actions-frontend
+  AWS_ROLE_ARN: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.ROLE_NAME }}
   ECR_REPOSITORY: frontend
   IMAGE_NAME: frontend
 
@@ -45,7 +42,8 @@ jobs:
         id: image-meta
         shell: bash
         run: |
-          set -euo pipefail
+           set -euo pipefail
+          export TF_VAR_region="ap-south-1"
           IMAGE_TAG="${IMAGE_TAG:-$(TZ=Asia/Kolkata date +%Y-%m-%d-%H-%M)--$(git rev-parse --short HEAD)}"
           REGISTRY_HOST="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
           PRIMARY_IMAGE="${REGISTRY_HOST}/${ECR_REPOSITORY}:${IMAGE_TAG}"
@@ -71,7 +69,8 @@ jobs:
       - name: Run frontend smoke tests
         shell: bash
         run: |
-          set -euo pipefail
+           set -euo pipefail
+          export TF_VAR_region="ap-south-1"
           bash src/services/frontend/test.sh
 
       - name: Scan built image with Trivy
@@ -108,6 +107,7 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: bash
         run: |
-          set -euo pipefail
+           set -euo pipefail
+          export TF_VAR_region="ap-south-1"
           docker push "${{ steps.image-meta.outputs.primary_image }}"
           docker push "${{ steps.image-meta.outputs.staging_image }}"
