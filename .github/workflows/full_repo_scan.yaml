@@ -39,7 +39,7 @@ jobs:
 
       - name: Prepare cache directories
         run: |
-           set -euo pipefail
+          set -euo pipefail
           export TF_VAR_region="ap-south-1"
           echo "[INFO] Creating cache directories"
           install -d -m 0777 "$RUNNER_TEMP/trivy-cache"
@@ -50,7 +50,7 @@ jobs:
           PYTHONWARNINGS: ignore
           TRIVY_CACHE_DIR: /home/appuser/.cache/trivy
         run: |
-           set -euo pipefail
+          set -euo pipefail
           export TF_VAR_region="ap-south-1"
 
           docker run --rm \

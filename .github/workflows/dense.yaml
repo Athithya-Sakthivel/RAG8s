@@ -5,8 +5,6 @@ on:
     branches: [ main ]
     paths:
       - src/services/dense/**
-      - .github/workflows/dense.yaml
-      
   pull_request:
     branches: [ main ]
     paths:
@@ -29,6 +27,7 @@ env:
   ECR_REPOSITORY: dense-model
   IMAGE_NAME: dense
 
+
 jobs:
   build-test-scan-push:
     name: Build, test, scan, publish dense image
@@ -48,7 +47,7 @@ jobs:
         id: image-meta
         shell: bash
         run: |
-           set -euo pipefail
+          set -euo pipefail
           export TF_VAR_region="ap-south-1"
           IMAGE_TAG="${IMAGE_TAG:-$(TZ=Asia/Kolkata date +%Y-%m-%d-%H-%M)--$(git rev-parse --short HEAD)}"
           REGISTRY_HOST="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
@@ -78,7 +77,7 @@ jobs:
       - name: Run service tests
         shell: bash
         run: |
-           set -euo pipefail
+          set -euo pipefail
           export TF_VAR_region="ap-south-1"
           cd src/services/dense
           export DENSE_MODEL_NAME="${DENSE_MODEL_NAME:-BAAI/bge-small-en-v1.5}"
@@ -122,7 +121,7 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: bash
         run: |
-           set -euo pipefail
+          set -euo pipefail
           export TF_VAR_region="ap-south-1"
           docker push "${{ steps.image-meta.outputs.primary_image }}"
           docker push "${{ steps.image-meta.outputs.staging_image }}"

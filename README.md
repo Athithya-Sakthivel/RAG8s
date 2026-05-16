@@ -69,19 +69,9 @@ bash src/infra/terraform/aws/run.sh --create --env staging
 aws eks update-kubeconfig --region ap-south-1 --name rag-eks-staging
 ```
 
-### Run this command to replace account id and aws region to trigger ci worklows to push ecr images
+### Run this script to replace account id and aws region to trigger ci worklows to push rag images to ecr
 ```sh
-
-ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text) && \
-find .github/workflows -type f \( -name '*.yml' -o -name '*.yaml' \) -print0 | \
-xargs -0 perl -0pi -e "
-  s/^\\s*AWS_ACCOUNT_ID:\\s*\\d+\\s*\$/  AWS_ACCOUNT_ID: ${ACCOUNT_ID}/mg;
-  s/^\\s*AWS_REGION:\\s*.*\$/  AWS_REGION: ap-south-1/mg;
-  next if /TF_VAR_region=\"ap-south-1\"/;
-  s/^(.*set -euo pipefail.*)\$/ \$1\\n          export TF_VAR_region=\"ap-south-1\"/mg;
-" && \
-git add . && git commit -m "trigger all image CI" && git push origin main
-
+bash src/scripts/replace.sh
 ```
 
 ### Setup argocd
