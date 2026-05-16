@@ -50,11 +50,9 @@ echo "[INFO] A private repo '$REPO_NAME' created and pushed. Only visible from y
 
 ### Login to aws and bootstrap the terrraform infrastructure
 ```sh
-export TF_VAR_environment="staging"
 export TF_VAR_region="ap-south-1"
-export TF_VAR_cluster_name="rag-eks-staging"
 export TF_VAR_github_repository="Athithya-Sakthivel/E2E-RAG-System"
-export TF_VAR_system_nodegroup_replicas=4
+
 bash src/infra/terraform/aws/run.sh --create --env staging
 ```
 <details>
@@ -74,11 +72,26 @@ aws eks update-kubeconfig --region ap-south-1 --name rag-eks-staging
 bash src/scripts/replace.sh
 ```
 
+<details>
+<summary>▶ Expected output</summary>
+
+![alt text](src/scripts/archive/images/ecr_push.png)
+
+</details>
+
 ### Setup argocd
 ```sh
 export GIT_PAT=ghp_   # https://github.com/settings/tokens/new
 bash src/infra/core/argo_setup.sh --rollout
 ```
+
+<details>
+<summary>▶ Expected output</summary>
+
+![alt text](src/scripts/archive/images/argo_setup.png)
+
+</details>
+
 
 
 ### Bootstrap karpenter for bursty, stateless workloads
@@ -137,5 +150,41 @@ python3 src/infra/core/cloudflared_setup.py --write
 
 </details>
 
+### Export these env vars and deploy the inference services retriever, frontend, valkey and cloudflared tunnel.  
+[Env vars](https://oauth2-proxy.github.io/oauth2-proxy/configuration/providers/google/#usage)
 
+```sh
+export GOOGLE_CLIENT_ID=
+export GOOGLE_CLIENT_SECRET=
+export MS_CLIENT_ID=
+export MS_CLIENT_SECRET=
+export MICROSOFT_ALLOWED_TENANT_IDS=
+export MICROSOFT_ALLOWED_DOMAINS=
+bash src/scripts/eks/run_inference_pipeline.sh
+```
+
+<details>
+<summary>▶ Expected output</summary>
+
+![alt text](src/scripts/archive/images/inference_svc.png)
+
+</details>
+
+
+
+### Setup the observability stack with optionally slack/pagerduty connection credentials
+```sh
+export CLICKHOUSE_USER=vector
+export CLICKHOUSE_PASSWORD=vectorpass
+export SLACK_WEBHOOK_URL=
+export PAGERDUTY_ROUTING_KEY=
+export ADMIN_PASSWORD=grafana
+bash src/infra/observability/setup.sh
+```
+
+Now Open your browser to access these services
+https Routes:
+- rag.<domain>      -> frontend service
+- argocd.<domain>   -> Argo CD server
+- grafana.<domain>  -> Grafana service
 

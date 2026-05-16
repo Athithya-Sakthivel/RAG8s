@@ -172,6 +172,8 @@ EOF
 
 log_success "Generated $INFERENCE_APP_YAML"
 
+bash src/infra/core/valkey_service.sh
+
 log_step "4/5 Applying ArgoCD Application"
 kubectl delete application inference -n argocd --ignore-not-found
 sleep 3

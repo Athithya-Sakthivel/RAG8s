@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/part-of: e2e-rag-system
   annotations:
     description: Inference services (frontend, retriever, cloudflared)
-    deployed-at: "2026-05-15T04:06:05Z"
+    deployed-at: "2026-05-16T06:56:00Z"
     aws-region: "ap-south-1"
 spec:
   project: default

@@ -90,4 +90,3 @@ curl http://localhost:8200/metrics
 - On first use, the model will be **downloaded** from Hugging Face Hub (cache persists in `/models_cache`).
 - For **batch processing**, you can send multiple texts in one request up to the configured batch size.
 - Prometheus metrics are exported on port 8200 at `/metrics`. Ensure your scrape configuration targets `rag-dense-model.inference:8200/metrics`.
---

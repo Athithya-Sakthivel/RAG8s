@@ -4,7 +4,7 @@ set -euo pipefail
 NAMESPACE="grafana"
 ADMIN_SECRET="grafana-admin"
 ADMIN_USER="admin"
-ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD:-grafana}"
+export ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD:-grafana}"
 DASHBOARDS_DIR="src/manifests/grafana-dashboards"
 
 # ── Namespace and admin secret ──────────────────────────────
@@ -45,8 +45,5 @@ for f in "$DASHBOARDS_DIR"/*.yaml; do
 done
 
 echo ""
-echo "✅ Grafana and all dashboards deployed."
-echo "   ArgoCD manages the Helm release (not the ConfigMaps)."
-echo "   Access: kubectl port-forward -n grafana svc/grafana 3000:80"
-echo ""
+echo "Grafana and all dashboards deployed."
 echo "   Login: admin / $ADMIN_PASSWORD"

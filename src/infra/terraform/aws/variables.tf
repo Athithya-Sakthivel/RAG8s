@@ -10,7 +10,7 @@ variable "region" {
 variable "environment" {
   description = "Logical environment name used for naming and tags."
   type        = string
-  default     = "prod"
+  default     = "staging"
 
   validation {
     condition     = length(trimspace(var.environment)) > 0
@@ -21,7 +21,7 @@ variable "environment" {
 variable "cluster_name" {
   description = "EKS cluster name."
   type        = string
-  default     = "rag-eks-prod"
+  default     = "rag-eks-staging"
 
   validation {
     condition     = length(trimspace(var.cluster_name)) > 0
@@ -43,7 +43,7 @@ variable "github_repository" {
 variable "system_nodegroup_replicas" {
   description = "Number of replicas for the system node group. Min, desired, and max will all be set to this value (no autoscaling)."
   type        = number
-  default     = 2
+  default     = 6
 
   validation {
     condition     = var.system_nodegroup_replicas >= 1 && var.system_nodegroup_replicas <= 10
@@ -169,9 +169,9 @@ variable "system_nodegroup" {
 
   default = {
     instance_type = "t3.small"
-    min_size      = 2
-    desired_size  = 2
-    max_size      = 3
+    min_size      = 6
+    desired_size  = 6
+    max_size      = 6
   }
 }
 
@@ -213,20 +213,6 @@ variable "s3_buckets" {
     versioning    = bool
     force_destroy = bool
   }))
-
-  default = {
-    DATA_S3_BUCKET = {
-      name          = "rag-prod-data-681802563986"
-      versioning    = true
-      force_destroy = false
-    }
-
-    QDRANT_BACKUPS_BUCKET = {
-      name          = "rag-prod-qdrant-backups-681802563986"
-      versioning    = true
-      force_destroy = false
-    }
-  }
 }
 
 variable "irsa_roles" {
