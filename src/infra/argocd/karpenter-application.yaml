@@ -1,18 +1,34 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: karpenter-bootstrap
+  name: karpenter
   namespace: argocd
 spec:
   project: default
-  source:
-    repoURL: "https://github.com/Athithya-Sakthivel/E2E-RAG-System.git"
-    targetRevision: "main"
-    path: src/infra/argocd/karpenter-bootstrap
   destination:
     server: https://kubernetes.default.svc
-    namespace: argocd
+    namespace: karpenter
+  sources:
+    - repoURL: public.ecr.aws/karpenter
+      chart: karpenter
+      targetRevision: 1.9.0
+      helm:
+        values: |
+          serviceAccount:
+            create: true
+            name: karpenter
+            annotations:
+              eks.amazonaws.com/role-arn: arn:aws:iam::681802563986:role/rag-eks-prod-karpenter
+          settings:
+            clusterName: rag-eks-prod
+            clusterEndpoint: https://C58C3F015EFB939229605B229B5CC039.gr7.ap-south-1.eks.amazonaws.com
+    - repoURL: https://github.com/Athithya-Sakthivel/E2E-RAG-System.git
+      targetRevision: main
+      path: src/manifests/karpenter
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
