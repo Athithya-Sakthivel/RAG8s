@@ -463,3 +463,7 @@ Note: The `debug` level has been removed. Use `info` for development diagnostics
 | Citation validation (anti-hallucination) | ✅ |
 | Presigned S3 URLs (read-only, configurable TTL) | ✅ |
 | Headless service for direct pod access | ✅ |
+<<<<<<< Updated upstream
+=======
+---
+>>>>>>> Stashed changes
