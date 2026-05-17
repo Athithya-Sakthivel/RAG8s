@@ -13,12 +13,64 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/Athithya-Sakthivel/E2E-RAG-System.git
-    targetRevision: main
-    path: src/infra/helm/fastembed_svc
+    repoURL: https://athithya-sakthivel.github.io/fastembed-inference-helm
+    chart: fastembed-inference
+    targetRevision: ">=0.1.0"
     helm:
-      valueFiles:
-        - values.yaml
+      values: |
+        global:
+          huggingface:
+            existingSecret: hf-token
+          cuda: false
+          networkPolicy:
+            enabled: true
+            allowedNamespaces: [inference, indexing]
+          nodeSelector:
+            node-type: compute
+          tolerations:
+            - key: "node-type"
+              operator: "Equal"
+              value: "compute"
+              effect: "NoSchedule"
+        dense:
+          enabled: true
+          preloadModel: true
+          modelName: "BAAI/bge-small-en-v1.5"
+          batchSize: 16
+          replicas: 1
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 2000m
+              memory: 1Gi
+        sparse:
+          enabled: true
+          preloadModel: true
+          modelName: "Qdrant/minicoil-v1"
+          batchSize: 16
+          replicas: 1
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: 4000m
+              memory: 2Gi
+        reranker:
+          enabled: true
+          preloadModel: true
+          modelName: "Xenova/ms-marco-MiniLM-L-6-v2"
+          batchSize: 16
+          replicas: 1
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: 4000m
+              memory: 2Gi
   destination:
     server: https://kubernetes.default.svc
     namespace: fastembed

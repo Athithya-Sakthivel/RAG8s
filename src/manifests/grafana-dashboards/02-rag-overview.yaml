@@ -10,10 +10,10 @@ data:
     {
       "uid": "rag-system-overview",
       "title": "RAG System Overview",
-      "tags": ["rag", "frontend", "retriever", "prometheus"],
+      "tags": ["rag", "frontend", "retriever", "prometheus", "fastembed"],
       "timezone": "browser",
       "schemaVersion": 39,
-      "version": 1,
+      "version": 2,
       "refresh": "30s",
       "editable": true,
       "panels": [
@@ -193,6 +193,270 @@ data:
           "fieldConfig": {
             "defaults": {
               "unit": "short",
+              "custom": {"lineWidth": 2, "fillOpacity": 10, "spanNulls": true},
+              "color": {"mode": "palette-classic"}
+            }
+          },
+          "options": {"legend": {"displayMode": "table", "placement": "right"}}
+        },
+
+        {
+          "type": "row",
+          "title": "Dense Embedding Service",
+          "gridPos": {"x": 0, "y": 20, "w": 24, "h": 1}
+        },
+        {
+          "type": "stat",
+          "title": "Dense Up",
+          "gridPos": {"x": 0, "y": 21, "w": 3, "h": 4},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "up{job=\"fastembed\", instance=~\".*dense-svc.*\"}"}],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]},
+              "color": {"mode": "thresholds"}
+            }
+          },
+          "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "value"}
+        },
+        {
+          "type": "stat",
+          "title": "Dense In‑Progress",
+          "gridPos": {"x": 3, "y": 21, "w": 3, "h": 4},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "sum(dense_requests_in_progress{job=\"fastembed\"})"}],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "color": {"mode": "thresholds"},
+              "decimals": 0
+            }
+          },
+          "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "value"}
+        },
+        {
+          "type": "timeseries",
+          "title": "Request Rate",
+          "gridPos": {"x": 6, "y": 21, "w": 6, "h": 4},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "sum(rate(dense_requests_total{job=\"fastembed\"}[5m])) by (status)", "legendFormat": "{{status}}"}],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "custom": {"lineWidth": 2, "fillOpacity": 10, "spanNulls": true},
+              "color": {"mode": "palette-classic"}
+            }
+          },
+          "options": {"legend": {"displayMode": "table", "placement": "right"}}
+        },
+        {
+          "type": "timeseries",
+          "title": "Latency P95",
+          "gridPos": {"x": 12, "y": 21, "w": 6, "h": 4},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "histogram_quantile(0.95, sum(rate(dense_request_duration_seconds_bucket{job=\"fastembed\"}[5m])) by (le))", "legendFormat": "P95"}],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 1},
+                  {"color": "red", "value": 5}
+                ]
+              },
+              "custom": {"lineWidth": 2, "fillOpacity": 10, "spanNulls": true},
+              "color": {"mode": "thresholds"}
+            }
+          },
+          "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+        },
+        {
+          "type": "timeseries",
+          "title": "Errors",
+          "gridPos": {"x": 18, "y": 21, "w": 6, "h": 4},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "sum(rate(dense_errors_total{job=\"fastembed\"}[5m])) by (error_type)", "legendFormat": "{{error_type}}"}],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "custom": {"lineWidth": 2, "fillOpacity": 10, "spanNulls": true},
+              "color": {"mode": "palette-classic"}
+            }
+          },
+          "options": {"legend": {"displayMode": "table", "placement": "right"}}
+        },
+
+        {
+          "type": "row",
+          "title": "Sparse Embedding Service",
+          "gridPos": {"x": 0, "y": 25, "w": 24, "h": 1}
+        },
+        {
+          "type": "stat",
+          "title": "Sparse Up",
+          "gridPos": {"x": 0, "y": 26, "w": 3, "h": 4},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "up{job=\"fastembed\", instance=~\".*sparse-svc.*\"}"}],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]},
+              "color": {"mode": "thresholds"}
+            }
+          },
+          "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "value"}
+        },
+        {
+          "type": "stat",
+          "title": "Sparse In‑Progress",
+          "gridPos": {"x": 3, "y": 26, "w": 3, "h": 4},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "sum(sparse_requests_in_progress{job=\"fastembed\"})"}],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "color": {"mode": "thresholds"},
+              "decimals": 0
+            }
+          },
+          "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "value"}
+        },
+        {
+          "type": "timeseries",
+          "title": "Request Rate",
+          "gridPos": {"x": 6, "y": 26, "w": 6, "h": 4},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "sum(rate(sparse_requests_total{job=\"fastembed\"}[5m])) by (status)", "legendFormat": "{{status}}"}],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "custom": {"lineWidth": 2, "fillOpacity": 10, "spanNulls": true},
+              "color": {"mode": "palette-classic"}
+            }
+          },
+          "options": {"legend": {"displayMode": "table", "placement": "right"}}
+        },
+        {
+          "type": "timeseries",
+          "title": "Latency P95",
+          "gridPos": {"x": 12, "y": 26, "w": 6, "h": 4},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "histogram_quantile(0.95, sum(rate(sparse_request_duration_seconds_bucket{job=\"fastembed\"}[5m])) by (le))", "legendFormat": "P95"}],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 1},
+                  {"color": "red", "value": 5}
+                ]
+              },
+              "custom": {"lineWidth": 2, "fillOpacity": 10, "spanNulls": true},
+              "color": {"mode": "thresholds"}
+            }
+          },
+          "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+        },
+        {
+          "type": "timeseries",
+          "title": "Errors",
+          "gridPos": {"x": 18, "y": 26, "w": 6, "h": 4},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "sum(rate(sparse_errors_total{job=\"fastembed\"}[5m])) by (error_type)", "legendFormat": "{{error_type}}"}],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "custom": {"lineWidth": 2, "fillOpacity": 10, "spanNulls": true},
+              "color": {"mode": "palette-classic"}
+            }
+          },
+          "options": {"legend": {"displayMode": "table", "placement": "right"}}
+        },
+
+        {
+          "type": "row",
+          "title": "Reranker Service",
+          "gridPos": {"x": 0, "y": 30, "w": 24, "h": 1}
+        },
+        {
+          "type": "stat",
+          "title": "Reranker Up",
+          "gridPos": {"x": 0, "y": 31, "w": 3, "h": 4},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "up{job=\"fastembed\", instance=~\".*reranker-svc.*\"}"}],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]},
+              "color": {"mode": "thresholds"}
+            }
+          },
+          "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "value"}
+        },
+        {
+          "type": "stat",
+          "title": "Reranker In‑Progress",
+          "gridPos": {"x": 3, "y": 31, "w": 3, "h": 4},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "sum(reranker_requests_in_progress{job=\"fastembed\"})"}],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "color": {"mode": "thresholds"},
+              "decimals": 0
+            }
+          },
+          "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "value"}
+        },
+        {
+          "type": "timeseries",
+          "title": "Request Rate",
+          "gridPos": {"x": 6, "y": 31, "w": 6, "h": 4},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "sum(rate(reranker_requests_total{job=\"fastembed\"}[5m])) by (status)", "legendFormat": "{{status}}"}],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "custom": {"lineWidth": 2, "fillOpacity": 10, "spanNulls": true},
+              "color": {"mode": "palette-classic"}
+            }
+          },
+          "options": {"legend": {"displayMode": "table", "placement": "right"}}
+        },
+        {
+          "type": "timeseries",
+          "title": "Latency P95",
+          "gridPos": {"x": 12, "y": 31, "w": 6, "h": 4},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "histogram_quantile(0.95, sum(rate(reranker_request_duration_seconds_bucket{job=\"fastembed\"}[5m])) by (le))", "legendFormat": "P95"}],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 1},
+                  {"color": "red", "value": 5}
+                ]
+              },
+              "custom": {"lineWidth": 2, "fillOpacity": 10, "spanNulls": true},
+              "color": {"mode": "thresholds"}
+            }
+          },
+          "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+        },
+        {
+          "type": "timeseries",
+          "title": "Errors",
+          "gridPos": {"x": 18, "y": 31, "w": 6, "h": 4},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "sum(rate(reranker_errors_total{job=\"fastembed\"}[5m])) by (error_type)", "legendFormat": "{{error_type}}"}],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
               "custom": {"lineWidth": 2, "fillOpacity": 10, "spanNulls": true},
               "color": {"mode": "palette-classic"}
             }

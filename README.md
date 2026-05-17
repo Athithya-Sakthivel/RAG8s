@@ -117,6 +117,7 @@ bash src/scripts/eks/bootstrap_karpenter.sh --rollout
  * Pods stay Pending until a compatible instance launches successfully.
 
 ```sh
+export HF_TOKEN=
 bash src/scripts/eks/run_indexing_pipeline.sh
 ```
 
@@ -139,7 +140,7 @@ bash src/infra/terraform/cloudflare/run.sh --apply
 export CLOUDFLARE_TUNNEL_TOKEN="$(tofu -chdir=src/infra/terraform/cloudflare output -raw cloudflare_tunnel_token)"
 export CLOUDFLARE_TUNNEL_NAME="$(tofu -chdir=src/infra/terraform/cloudflare output -raw cloudflare_tunnel_name)"
 export CLOUDFLARE_TUNNEL_ID="$(tofu -chdir=src/infra/terraform/cloudflare output -raw cloudflare_tunnel_id)"
-python3 src/infra/core/cloudflared_setup.py --write
+python3 src/infra/core/cloudflared_setup.py --write # to apply secrets
 
 ```
 
@@ -154,6 +155,7 @@ python3 src/infra/core/cloudflared_setup.py --write
 [Env vars](https://oauth2-proxy.github.io/oauth2-proxy/configuration/providers/google/#usage)
 
 ```sh
+export DOMAIN=
 export GOOGLE_CLIENT_ID=
 export GOOGLE_CLIENT_SECRET=
 export MS_CLIENT_ID=
@@ -176,10 +178,10 @@ bash src/scripts/eks/run_inference_pipeline.sh
 ```sh
 export CLICKHOUSE_USER=vector
 export CLICKHOUSE_PASSWORD=vectorpass
-export SLACK_WEBHOOK_URL=
+export SLACK_WEBHOOK_URL=$SLACK_WEBHOOK_UR
 export PAGERDUTY_ROUTING_KEY=
 export ADMIN_PASSWORD=grafana
-bash src/infra/observability/setup.sh
+bash src/scripts/eks/observability_setup.sh
 ```
 
 Now Open your browser to access these services

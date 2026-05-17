@@ -184,12 +184,13 @@ spec:
                   
           - job_name: 'fastembed'
             scrape_interval: 30s
+            metrics_path: /metrics
             static_configs:
               - targets:
-                  - 'rag-dense-model.fastembed:8200'
-                  - 'rag-sparse-model.fastembed:8201'
-                  - 'rag-reranker-model.fastembed:8202'
-
+                  - 'fastembed-dense-svc.fastembed:8200'
+                  - 'fastembed-sparse-svc.fastembed:8201'
+                  - 'fastembed-reranker-svc.fastembed:8202'
+                  
         serverFiles:
           alerts:
             groups:

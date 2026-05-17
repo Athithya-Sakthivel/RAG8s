@@ -244,6 +244,16 @@ sleep 10
 
 # 5. Apply FastEmbed
 log_step "5/6 Deploying FastEmbed via ArgoCD"
+# Replace with your actual Hugging Face token
+export HF_TOKEN="${HF_TOKEN:-your_huggingface_token_here}"
+
+kubectl create namespace fastembed --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl create secret generic hf-token \
+  --namespace fastembed \
+  --from-literal=HF_TOKEN="$HF_TOKEN" \
+  --dry-run=client -o yaml | kubectl apply -f -
+  
 kubectl apply -f "$FASTEMBED_APP"
 sleep 10
 

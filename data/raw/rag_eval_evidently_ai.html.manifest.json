@@ -1,8 +1,0 @@
-{
-  "file_hash": "1727751bedd932b4ed05c04bd6cf52eca93de632306e925ae001e932a522582f",
-  "mime_type": "text/html",
-  "parser_version": "2.42.1",
-  "pipeline_run_id": "d0ca7174-2df4-4f9a-9ec9-9cc12a0c7ae6",
-  "s3_key": "data/raw/rag_eval_evidently_ai.html",
-  "timestamp": "2026-05-09T10:40:11.989464Z"
-}

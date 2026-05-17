@@ -147,9 +147,10 @@ retriever:
     PROMETHEUS_PATH: /metrics
     BEDROCK_MODEL_ID: meta.llama3-8b-instruct-v1:0
     COLLECTION_NAME: default_rag_collection1
-    DENSE_URL: http://dense-svc.fastembed.svc.cluster.local:8200
-    SPARSE_URL: http://sparse-svc.fastembed.svc.cluster.local:8201
-    RERANKER_URL: http://reranker-svc.fastembed.svc.cluster.local:8202
+    DENSE_URL: http://fastembed-dense-svc.fastembed.svc.cluster.local:8200
+    SPARSE_URL: http://fastembed-sparse-svc.fastembed.svc.cluster.local:8201
+    RERANKER_URL: http://fastembed-reranker-svc.fastembed.svc.cluster.local:8202
+
     ENABLE_PRESIGNED_URLS: "true"
     PRESIGNED_URL_TTL_SECONDS: "1800"
   secrets:
