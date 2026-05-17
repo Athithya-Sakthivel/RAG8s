@@ -352,7 +352,7 @@ def generate_presigned_url_sync(
     }
     
     # For HTML: strip scripts but keep structure by serving as text/html 
-    # with sandbox attributes handled on frontend
+    # with sandbox attributes handled on frontend.
     if content_type.startswith("text/html"):
         params["ResponseContentType"] = "text/html; charset=utf-8"
     else:
