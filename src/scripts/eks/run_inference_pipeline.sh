@@ -114,7 +114,7 @@ spec:
               eks.amazonaws.com/role-arn: "${FRONTEND_IAM_ROLE}"
           env:
             # ---- Domain & Microsoft Auth ----
-            FRONTEND_HOSTNAME: "${DOMAIN}"
+            FRONTEND_HOSTNAME: "rag.${DOMAIN}"
             MS_TENANT_ID: "${MICROSOFT_ALLOWED_TENANT_IDS:-}"
             GOOGLE_ALLOWED_DOMAINS: "${GOOGLE_ALLOWED_DOMAINS:-gmail.com}"
             MICROSOFT_ALLOWED_DOMAINS: "${MICROSOFT_ALLOWED_DOMAINS:-outlook.com}"
@@ -204,16 +204,16 @@ spec:
             tokenSecretName: cloudflared-token
           ingress:
             rules:
-              - hostname: ${DOMAIN}
+              - hostname: rag.${DOMAIN}
                 path: /metrics
                 service: http_status:403
-              - hostname: ${DOMAIN}
+              - hostname: rag.${DOMAIN}
                 path: /healthz
                 service: http_status:403
-              - hostname: ${DOMAIN}
+              - hostname: rag.${DOMAIN}
                 path: /readyz
                 service: http_status:403
-              - hostname: ${DOMAIN}
+              - hostname: rag.${DOMAIN}
                 service: http://frontend.inference.svc.cluster.local:8000
                 originRequest:
                   connectTimeout: 10s
@@ -230,6 +230,7 @@ spec:
                   connectTimeout: 10s
                   keepAliveTimeout: 30s
             catchAll: http_status:404
+
   destination:
     server: https://kubernetes.default.svc
     namespace: ${NAMESPACE}

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/part-of: e2e-rag-system
   annotations:
     description: Inference services (frontend, retriever, cloudflared)
-    deployed-at: "2026-05-17T12:34:04Z"
+    deployed-at: "2026-05-17T13:17:28Z"
     aws-region: "ap-south-1"
 spec:
   project: default
@@ -131,17 +131,18 @@ spec:
                   connectTimeout: 10s
                   keepAliveTimeout: 30s
                   disableChunkedEncoding: false
-              - hostname: argocd.rag.athithya.site
+              - hostname: argocd.athithya.site
                 service: http://argocd-server.argocd.svc.cluster.local:80
                 originRequest:
                   connectTimeout: 10s
                   keepAliveTimeout: 30s
-              - hostname: grafana.rag.athithya.site
+              - hostname: grafana.athithya.site
                 service: http://grafana.grafana.svc.cluster.local:80
                 originRequest:
                   connectTimeout: 10s
                   keepAliveTimeout: 30s
             catchAll: http_status:404
+
   destination:
     server: https://kubernetes.default.svc
     namespace: inference

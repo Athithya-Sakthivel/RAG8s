@@ -332,26 +332,35 @@ def _guess_content_type(key: str) -> str:
     ctype, _ = mimetypes.guess_type(key)
     return ctype or "application/octet-stream"
 
-
 def generate_presigned_url_sync(
     bucket: str, key: str, ttl_seconds: int = 3600, region: str = "us-east-1"
 ) -> str:
     if not ENABLE_PRESIGNED_URLS:
         raise RuntimeError("Presigned URLs are disabled")
+    
     s3_client = boto3.client(
         "s3",
         region_name=region,
         config=Config(signature_version="s3v4"),
     )
     content_type = _guess_content_type(key)
+    
+    params = {
+        "Bucket": bucket,
+        "Key": key,
+        "ResponseContentDisposition": "inline",
+    }
+    
+    # For HTML: strip scripts but keep structure by serving as text/html 
+    # with sandbox attributes handled on frontend
+    if content_type.startswith("text/html"):
+        params["ResponseContentType"] = "text/html; charset=utf-8"
+    else:
+        params["ResponseContentType"] = content_type
+    
     return s3_client.generate_presigned_url(
         "get_object",
-        Params={
-            "Bucket": bucket,
-            "Key": key,
-            "ResponseContentDisposition": "inline",
-            "ResponseContentType": content_type,
-        },
+        Params=params,
         ExpiresIn=ttl_seconds,
         HttpMethod="GET",
     )

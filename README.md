@@ -155,7 +155,7 @@ python3 src/infra/core/cloudflared_setup.py --write # to apply secrets
 [Env vars](https://oauth2-proxy.github.io/oauth2-proxy/configuration/providers/google/#usage)
 
 ```sh
-export DOMAIN=
+export DOMAIN=athithya.site
 export GOOGLE_CLIENT_ID=
 export GOOGLE_CLIENT_SECRET=
 export MS_CLIENT_ID=
