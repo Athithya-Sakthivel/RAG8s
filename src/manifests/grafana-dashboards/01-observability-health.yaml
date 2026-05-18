@@ -1,4 +1,3 @@
-
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -128,7 +127,7 @@ data:
           "title": "Prometheus Storage",
           "gridPos": {"x": 6, "y": 6, "w": 6, "h": 6},
           "datasource": {"type": "prometheus", "uid": "prometheus"},
-          "targets": [{"refId": "A", "expr": "max(prometheus_tsdb_storage_blocks_bytes)"}],
+          "targets": [{"refId": "A", "expr": "max(prometheus_tsdb_storage_blocks_bytes + prometheus_tsdb_head_chunks_storage_size_bytes + prometheus_tsdb_wal_storage_size_bytes)"}],
           "fieldConfig": {
             "defaults": {
               "unit": "bytes",

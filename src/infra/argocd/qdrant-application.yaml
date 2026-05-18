@@ -16,7 +16,7 @@ spec:
     targetRevision: v1.17.1
     helm:
       values: |
-        replicaCount: 1
+        replicaCount: 3
         image:
           repository: docker.io/qdrant/qdrant
           tag: v1.17.1

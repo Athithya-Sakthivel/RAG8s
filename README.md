@@ -1,3 +1,78 @@
+[▶ Watch the Demo Video](https://youtu.be/ZUHSSoPiNHc)
+
+---
+
+**E2E-RAG-System** is an opinionated, AWS‑native, Kubernetes‑first platform for building and running a **production‑ready Retrieval‑Augmented Generation (RAG) system**.
+
+It provides a complete, end‑to‑end reference architecture for RAG on **Amazon EKS**—from multi‑format document ingestion to streaming LLM inference with verified, citation‑grounded answers.
+
+---
+
+### Architecture
+
+The design cleanly separates the RAG lifecycle into two planes:
+
+**Batch indexing plane**
+An incremental, idempotent CronJob pipeline that ingests raw documents (PDF, DOCX, audio, images, CSV, Markdown, HTML, …) from S3, normalises and OCRs them, splits into traceable chunks, generates dense and sparse embeddings via stateless FastEmbed microservices, and upserts into **Qdrant** with full positional metadata. Backups are triggered automatically by configurable thresholds.
+
+**Online inference plane**
+A low‑latency streaming request path that authenticates users via OIDC, performs exact and semantic cache lookups, embeds the query (dense + sparse in parallel), executes hybrid Qdrant search with Reciprocal Rank Fusion, optionally re‑ranks with a cross‑encoder, builds a strictly‑grounded numbered prompt, and streams the answer via AWS Bedrock. Every response is citation‑validated—hallucinated references are stripped, and users can open original documents with one‑click presigned S3 URLs.
+
+---
+
+### Infrastructure
+
+E2E‑RAG‑System is **AWS‑native by design**. Infrastructure is declared with **OpenTofu (Terraform)**, workloads run on **EKS** with an on‑demand system nodegroup for platform services and **Karpenter** for elastically provisioning spot instances for stateless, bursty inference workloads. All state lives in **S3** and **ECR**. Container images are built deterministically and pushed via **GitHub Actions OIDC**—no long‑lived credentials.
+
+---
+
+### Microservices
+
+| Service | Role | Key Details |
+|---------|------|-------------|
+| **Frontend** | OIDC gateway + chat UI | Serves the chat interface, handles Google/Microsoft sign-in, mints short-lived JWTs, proxies streaming requests |
+| **Retriever** | RAG orchestration engine | Cache → embed → hybrid search → rerank → Bedrock → validate citations |
+| **Dense Embedder** | Text → dense vectors | FastEmbed, 384‑dim L2‑normalized, stateless, lazy model loading |
+| **Sparse Embedder** | Text → sparse vectors | SPLADE++ via FastEmbed, stateless |
+| **Reranker** | Query × documents → scores | Cross‑encoder (MiniLM), auto‑triggered on low confidence |
+| **Indexing CronJob** | Document ingestion pipeline | Pre‑conversion → chunking → embedding → Qdrant upsert → conditional backup |
+| **Valkey** | Distributed rate limiting | Redis‑compatible, shared counters for SlowAPI, NetworkPolicy‑enforced isolation |
+| **Cloudflared** | Secure tunnel termination | Routes hostnames to internal ClusterIP services, blocks observability endpoints at edge, Prometheus metrics |
+
+---
+
+### Connectivity & Auth
+
+External access is provided through a single **Cloudflare Tunnel** (SSL strict, no public IPs or load balancers). Authentication uses **OAuth (Google, Microsoft)** with short‑lived JWTs and domain‑scoped allowlists. Rate limiting is per‑user (sub‑based, not IP), backed by **Valkey**.
+
+---
+
+### Observability
+
+Built‑in, no external SaaS required:
+- **Prometheus + Alertmanager** — 20+ alert rules, Slack notifications with inhibition
+- **Grafana** — auto‑discovered dashboards via ConfigMap sidecar
+- **Vector + ClickHouse** — structured JSON log aggregation with 30‑day retention
+
+---
+
+### Security
+
+Layered across the full stack:
+- **Edge:** Cloudflare Tunnel with SSL strict and endpoint filtering
+- **Auth:** OIDC with PKCE and CSRF state protection, ES256 JWTs (15‑min TTL), per‑provider domain/org/tenant allowlists
+- **Network:** Kubernetes NetworkPolicies isolating namespaces by function
+- **IAM:** IRSA for least‑privilege AWS access, GitHub Actions OIDC with per‑repo roles
+- **Runtime:** Read‑only root filesystems, non‑root containers, no privileged pods
+- **CI/CD:** Pre‑commit Gitleaks hook + CI‑side scanning (Gitleaks, Trivy, OpenGrep) on every commit
+- **GitOps:** Argo CD reconciles cluster state from Git, self‑heals drift, rollbacks via `git revert`
+
+---
+
+By combining hybrid retrieval, precise citation grounding, clean separation of batch and online concerns, declarative infrastructure, layered security, and comprehensive observability, E2E‑RAG‑System serves as a robust **foundation** for running RAG systems in real production environments.
+
+---
+
 # Get started
 
 ## Prerequisites
@@ -46,15 +121,20 @@ git pull
 git remote -v
 echo "[INFO] A private repo '$REPO_NAME' created and pushed. Only visible from your account."
 ```
+---
 
+### Phase 1: Infrastructure Foundation
 
-### Login to aws and bootstrap the terrraform infrastructure
+#### 1.1 Provision AWS Infrastructure
+Creates the VPC, EKS cluster, S3 buckets, ECR repositories, and all IAM roles. Uses OpenTofu (Terraform-compatible).
+
 ```sh
 export TF_VAR_region="ap-south-1"
 export TF_VAR_github_repository="Athithya-Sakthivel/E2E-RAG-System"
 
 bash src/infra/terraform/aws/run.sh --create --env staging
 ```
+
 <details>
 <summary>▶ Expected output</summary>
 
@@ -62,12 +142,19 @@ bash src/infra/terraform/aws/run.sh --create --env staging
 
 </details>
 
-### Login to the eks cluster as public endpoint enabled for staging cluster.
+#### 1.2 Connect to Your New EKS Cluster
+
 ```sh
 aws eks update-kubeconfig --region ap-south-1 --name rag-eks-staging
 ```
 
-### Run this script to replace account id and aws region to trigger ci worklows to push rag images to ecr. After 5 min open https://<REPO_URL>/actions
+---
+
+### Phase 2: Container Images (CI/CD)
+
+#### 2.1 Trigger Image Builds to ECR
+Replaces placeholder account IDs and region in CI workflow files so GitHub Actions can push images to your ECR. After running, open your repo's Actions tab — all 6 service images will build and push in ~5 minutes.
+
 ```sh
 bash src/scripts/replace.sh
 ```
@@ -79,7 +166,13 @@ bash src/scripts/replace.sh
 
 </details>
 
-### Setup argocd
+---
+
+### Phase 3: GitOps Controller & Auto-Scaling
+
+#### 3.1 Install Argo CD
+Deploys the GitOps controller that will sync all applications from this repo. Requires a GitHub personal access token for private repo access.
+
 ```sh
 export GIT_PAT=ghp_   # https://github.com/settings/tokens/new
 bash src/infra/core/argo_setup.sh --rollout
@@ -92,11 +185,10 @@ bash src/infra/core/argo_setup.sh --rollout
 
 </details>
 
+#### 3.2 Bootstrap Karpenter for Spot Instance Auto-Scaling
+Karpenter dynamically provisions EC2 instances for bursty, stateless workloads (model services, indexing jobs). It replaces the standard Kubernetes Cluster Autoscaler with faster, cost-optimized node provisioning.
 
-
-### Bootstrap karpenter for bursty, stateless workloads
 ```sh
-### ---- REQUIRED INPUTS ----
 export GH_REPO="https://github.com/Athithya-Sakthivel/E2E-RAG-System.git"
 export GH_BRANCH="main"
 export AWS_REGION="ap-south-1"
@@ -110,14 +202,17 @@ bash src/scripts/eks/bootstrap_karpenter.sh --rollout
 
 </details>
 
-### Deploy the full E2E RAG indexing pipeline (Qdrant → FastEmbed → Indexing CronJob). [Docs](src/indexing_pipeline/README.md)
- * NOTE: Karpenter may take longer than 5-15 minutes to provision EC2 instances if the
- * cheapest matching instance type is not available in your account/region.
- * It will automatically retry with other c-family types. This is normal.
- * Pods stay Pending until a compatible instance launches successfully.
+---
+
+### Phase 4: Data Ingestion & Vector Storage
+
+#### 4.1 Deploy the Indexing Pipeline
+Spins up Qdrant (3-node vector database), FastEmbed services (dense, sparse, reranker), and the indexing CronJob. This is where documents get ingested, chunked, embedded, and indexed.
+
+> ⚠️ **Note:** Karpenter may take 5–15 minutes to provision EC2 instances if the cheapest matching instance type is unavailable. It retries with other c-family types automatically. Pods will stay Pending until a compatible instance launches.
 
 ```sh
-export HF_TOKEN=
+export HF_TOKEN=   # Hugging Face token for model downloads
 bash src/scripts/eks/run_indexing_pipeline.sh
 ```
 
@@ -128,20 +223,28 @@ bash src/scripts/eks/run_indexing_pipeline.sh
 
 </details>
 
+---
 
-### Provision the cloudflare resources. The script waits till you login to cloudflare and authorize the correct root domain
+### Phase 5: External Access & DNS
+
+#### 5.1 Set Up Cloudflare Tunnel and DNS
+Creates DNS records and a Cloudflare Tunnel that securely routes traffic to your cluster — no LoadBalancers or public IPs needed. The script waits for you to authorize Cloudflare access.
 
 ```sh
 export CLOUDFLARE_ACCOUNT_ID=
 export CLOUDFLARE_GLOBAL_API_KEY=
-export CLOUDFLARE_EMAIL="athithya651@gmail.com"  
-export DOMAIN="athithya.site"   # root domain
+export CLOUDFLARE_EMAIL="athithya651@gmail.com"
+export DOMAIN="athithya.site"
+
 bash src/infra/terraform/cloudflare/run.sh --apply
+
+# Export tunnel credentials
 export CLOUDFLARE_TUNNEL_TOKEN="$(tofu -chdir=src/infra/terraform/cloudflare output -raw cloudflare_tunnel_token)"
 export CLOUDFLARE_TUNNEL_NAME="$(tofu -chdir=src/infra/terraform/cloudflare output -raw cloudflare_tunnel_name)"
 export CLOUDFLARE_TUNNEL_ID="$(tofu -chdir=src/infra/terraform/cloudflare output -raw cloudflare_tunnel_id)"
-python3 src/infra/core/cloudflared_setup.py --write # to apply secrets
 
+# Deploy cloudflared with secrets
+python3 src/infra/core/cloudflared_setup.py --write
 ```
 
 <details>
@@ -151,9 +254,14 @@ python3 src/infra/core/cloudflared_setup.py --write # to apply secrets
 
 </details>
 
-### Export these env vars and deploy the inference services retriever, frontend, valkey and cloudflared tunnel.  
-[Env vars](https://oauth2-proxy.github.io/oauth2-proxy/configuration/providers/google/#usage)
+---
 
+### Phase 6: Query Engine & User-Facing Services
+
+#### 6.1 Deploy the Inference Stack
+Launches the retriever (RAG pipeline), frontend (chat UI + OIDC auth), Valkey (rate limiting), and cloudflared tunnel pod. You'll need OAuth credentials for at least one provider.
+
+> 🔑 **OAuth Setup:** [Google](https://oauth2-proxy.github.io/oauth2-proxy/configuration/providers/google/#usage) | [Microsoft](https://oauth2-proxy.github.io/oauth2-proxy/configuration/providers/ms_entra_id)
 ```sh
 export DOMAIN=athithya.site
 export GOOGLE_CLIENT_ID=
@@ -172,22 +280,34 @@ bash src/scripts/eks/run_inference_pipeline.sh
 
 </details>
 
+---
 
+### Phase 7: Observability
 
-### Setup the observability stack with optionally slack/pagerduty connection credentials
+#### 7.1 Deploy Monitoring, Logging, and Alerting
+Sets up Prometheus (metrics + alerts), Grafana (dashboards), ClickHouse (log storage), and Vector (log collector). Optionally connect Slack and PagerDuty for alerts.
+
 ```sh
 export CLICKHOUSE_USER=vector
 export CLICKHOUSE_PASSWORD=vectorpass
-export SLACK_WEBHOOK_URL=$SLACK_WEBHOOK_UR
-export PAGERDUTY_ROUTING_KEY=
+export SLACK_WEBHOOK_URL=   # Optional: Slack alerting
+export PAGERDUTY_ROUTING_KEY=   # Optional: PagerDuty escalation
 export ADMIN_PASSWORD=grafana
 bash src/scripts/eks/observability_setup.sh
 ```
 
-Now Open your browser to access these services
-https Routes:
-- rag.<domain>      -> frontend service
-- argocd.<domain>   -> Argo CD server
-- grafana.<domain>  -> Grafana service
+---
 
-rag.<domain> will open the rag chat ui, login with a google/microsoft account , default configs allows all accounts
+### 🎉 You're Live!
+
+Open your browser and access:
+
+| URL | Service |
+|-----|---------|
+| `https://rag.<DOMAIN>` | RAG Chat UI (login with Google/Microsoft) |
+| `https://argocd.<DOMAIN>` | Argo CD (GitOps dashboard) |
+| `https://grafana.<DOMAIN>` | Grafana (observability dashboards) |
+
+> ℹ️ **Default auth:** OIDC login is configured to allow all accounts by default. Restrict via `GOOGLE_ALLOWED_DOMAINS` and `MICROSOFT_ALLOWED_TENANT_IDS` for production use.
+
+---

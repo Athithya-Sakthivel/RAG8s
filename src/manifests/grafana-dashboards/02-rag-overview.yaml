@@ -166,42 +166,6 @@ data:
         },
         {
           "type": "row",
-          "title": "Streams & Auth",
-          "gridPos": {"x": 0, "y": 14, "w": 24, "h": 1}
-        },
-        {
-          "type": "stat",
-          "title": "Active Generate Streams",
-          "gridPos": {"x": 0, "y": 15, "w": 6, "h": 4},
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
-          "targets": [{"refId": "A", "expr": "sum(frontend_active_requests{job=\"frontend-auth\",route=\"/generate/stream\"})"}],
-          "fieldConfig": {
-            "defaults": {
-              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
-              "color": {"mode": "thresholds"},
-              "decimals": 0
-            }
-          },
-          "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}, "textMode": "value"}
-        },
-        {
-          "type": "timeseries",
-          "title": "Auth Events (login/logout)",
-          "gridPos": {"x": 6, "y": 15, "w": 18, "h": 4},
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
-          "targets": [{"refId": "A", "expr": "sum(rate(frontend_auth_events_total{job=\"frontend-auth\"}[5m])) by (event, provider, outcome)", "legendFormat": "{{event}} ({{provider}}) {{outcome}}"}],
-          "fieldConfig": {
-            "defaults": {
-              "unit": "short",
-              "custom": {"lineWidth": 2, "fillOpacity": 10, "spanNulls": true},
-              "color": {"mode": "palette-classic"}
-            }
-          },
-          "options": {"legend": {"displayMode": "table", "placement": "right"}}
-        },
-
-        {
-          "type": "row",
           "title": "Dense Embedding Service",
           "gridPos": {"x": 0, "y": 20, "w": 24, "h": 1}
         },

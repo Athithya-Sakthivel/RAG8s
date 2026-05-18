@@ -75,12 +75,23 @@ jobs:
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,mode=max,scope=frontend
 
-      - name: Run frontend smoke tests.
+      - name: Run frontend smoke tests
         shell: bash
         run: |
           set -euo pipefail
           export TF_VAR_region="ap-south-1"
           bash src/services/frontend/test.sh
+
+      - name: ZAP Baseline Scan
+        if: always()  # Run even if smoke tests fail — still useful
+        uses: zaproxy/action-baseline@v0.15.0
+        with:
+          target: 'http://localhost:8000'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          docker_name: 'ghcr.io/zaproxy/zaproxy:stable'
+          fail_action: true
+          allow_issue_writing: false
+          cmd_options: '-I'
 
       - name: Scan built image with Trivy
         uses: aquasecurity/trivy-action@v0.35.0
