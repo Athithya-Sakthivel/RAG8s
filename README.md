@@ -403,3 +403,28 @@ kill %1 2>/dev/null || true
 ![alt text](src/scripts/archive/images/alert.png)
 
 </details>
+
+
+## Cleanup
+
+To tear down the entire infrastructure and avoid ongoing costs:
+
+> **Note:** Karpenter manages AWS resources (EC2 instances, VPC tags) outside of Terraform state. If `terraform destroy` hangs, manually delete the VPC and verify no orphaned EC2 instances remain.
+
+```sh
+# 1. Remove workloads to trigger Karpenter scale-down
+kubectl delete ns inference --ignore-not-found
+kubectl delete ns fastembed --ignore-not-found
+sleep 600   # Allow Karpenter to terminate spot instances
+
+# 2. Destroy Cloudflare resources
+bash src/infra/terraform/cloudflare/run.sh --destroy
+
+# 3. Destroy AWS infrastructure
+bash src/infra/terraform/aws/run.sh --destroy --env staging --yes-delete
+```
+
+**Post-cleanup verification:**
+- Confirm no EC2 instances remain in the region (spot + on-demand)
+- Verify the EKS cluster and associated security groups are removed
+- Check that S3 buckets and ECR repositories are deleted (or emptied if retention was configured)
