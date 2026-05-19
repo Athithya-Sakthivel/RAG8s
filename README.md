@@ -73,6 +73,43 @@ By combining hybrid retrieval, precise citation grounding, clean separation of b
 
 ---
 
+## Offline Evaluation
+
+Automated evaluation against a 75-record golden dataset, tracked in MLflow.
+`cat src/offline_eval/offline_eval_artifacts/summary.json`
+
+```json
+{
+  "meta": { "records": 75 },
+  "performance": { "success_rate": 1.0 },
+  "retrieval": {
+    "recall_at_k": 0.72,
+    "hit_rate_at_k": 0.72,
+    "mrr": 0.5793
+  },
+  "generation": {
+    "fact_coverage": 0.7769,
+    "groundedness": 0.9459,
+    "response_similarity": 0.2498
+  },
+  "citations": {
+    "citation_integrity": 0.8933
+  },
+  "errors": { "rate": 0.0 }
+}
+```
+
+| Dimension | Highlight |
+|-----------|-----------|
+| Retrieval | Recall@K 0.72, MRR 0.58 |
+| Generation | Groundedness 0.95, Fact Coverage 0.78 |
+| Citations | Integrity 0.89 (low hallucination) |
+| Reliability | 100% success, 0% errors |
+
+Each record defines query, expected chunk, reference answer, and expected facts. Evaluation measures retrieval accuracy, fact coverage, groundedness, and citation integrity across all records.
+
+---
+
 # Get started
 
 ## Prerequisites
@@ -311,3 +348,58 @@ Open your browser and access:
 > ℹ️ **Default auth:** OIDC login is configured to allow all accounts by default. Restrict via `GOOGLE_ALLOWED_DOMAINS` and `MICROSOFT_ALLOWED_TENANT_IDS` for production use.
 
 ---
+
+
+### Optional: Test Alerting and Disaster Recovery
+
+Simulate a complete Qdrant outage to verify Slack alerts fire and data can be restored from S3 backups.
+
+```sh
+# 1. Pause ArgoCD sync to prevent auto-healing during the test
+kubectl patch application qdrant -n argocd --type='merge' \
+  -p '{"spec": {"syncPolicy": null}}'
+
+# 2. Delete Qdrant and its persistent volumes
+kubectl delete pvc -n qdrant --all --ignore-not-found=true
+kubectl delete namespace qdrant --ignore-not-found=true
+
+# 3. Wait for the QdrantDown alert to trigger (~3 minutes)
+echo "Waiting for QdrantDown alert..."
+sleep 180
+
+# 4. Re-enable ArgoCD — it recreates Qdrant with fresh volumes
+kubectl patch application qdrant -n argocd --type='merge' \
+  -p '{"spec": {"syncPolicy": {"automated": {"prune": true, "selfHeal": true}}}}'
+echo "Waiting for ArgoCD to recreate Qdrant..."
+sleep 180
+
+# 5. Confirm Qdrant is back but empty
+kubectl port-forward -n qdrant svc/qdrant 6333:6333 &>/dev/null & sleep 3
+echo "Points before restore:"
+curl -s http://localhost:6333/collections/default_rag_collection1 | jq '.result.points_count // 0'
+kill %1 2>/dev/null || true
+
+# 6. Restore from the latest S3 backup
+export DATA_S3_BUCKET=$DATA_S3_BUCKET
+export QDRANT_BACKUP_S3_PREFIX="qdrant/backups/"
+bash src/scripts/backups_and_restore.sh restore
+
+# 7. Verify data recovery
+sleep 10
+kubectl port-forward -n qdrant svc/qdrant 6333:6333 &>/dev/null & sleep 3
+echo "Points after restore:"
+curl -s http://localhost:6333/collections/default_rag_collection1 | jq '.result.points_count // 0'
+kill %1 2>/dev/null || true
+```
+
+**What this validates:**
+- Alertmanager fires `QdrantDown` and notifies Slack
+- ArgoCD self-heals infrastructure when re-enabled
+- S3 backups are restorable with point-count parity
+
+<details>
+<summary>▶ Expected output</summary>
+
+![alt text](src/scripts/archive/images/alert.png)
+
+</details>
