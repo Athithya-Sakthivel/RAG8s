@@ -1,4 +1,4 @@
-[▶ Watch the Demo Video](https://youtu.be/ZUHSSoPiNHc)
+[▶ Watch the Demo Video](https://www.linkedin.com/posts/athithya-sakthivel-a23062341_rag-kubernetes-aws-activity-7462146634722881537-aUwm)
 
 ---
 
@@ -167,7 +167,7 @@ Creates the VPC, EKS cluster, S3 buckets, ECR repositories, and all IAM roles. U
 
 ```sh
 export TF_VAR_region="ap-south-1"
-export TF_VAR_github_repository="Athithya-Sakthivel/E2E-RAG-System"
+export TF_VAR_github_repository="Athithya-Sakthivel/E2E-RAG-System" # replace with REPO_NAME
 
 bash src/infra/terraform/aws/run.sh --create --env staging
 ```
@@ -249,7 +249,7 @@ Spins up Qdrant (3-node vector database), FastEmbed services (dense, sparse, rer
 > ⚠️ **Note:** Karpenter may take 5–15 minutes to provision EC2 instances if the cheapest matching instance type is unavailable. It retries with other c-family types automatically. Pods will stay Pending until a compatible instance launches.
 
 ```sh
-export HF_TOKEN=   # Hugging Face token for model downloads
+export HF_TOKEN=   # Hugging Face token for model downloads(optional)
 bash src/scripts/eks/run_indexing_pipeline.sh
 ```
 
