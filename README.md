@@ -1,4 +1,4 @@
-[▶ Watch the Demo Video](https://www.linkedin.com/posts/athithya-sakthivel-a23062341_rag-kubernetes-aws-activity-7462146634722881537-aUwm)
+[▶ Watch the Demo Video](https://www.youtube.com/watch?v=ZUHSSoPiNHc)
 
 ---
 
