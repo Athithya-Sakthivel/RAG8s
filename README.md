@@ -1,4 +1,4 @@
-[▶ Watch the Demo Video](https://www.linkedin.com/posts/athithya-sakthivel-a23062341_rag-kubernetes-aws-ugcPost-7462146556369068032-HWum/?utm_source=share&utm_medium=member_desktop&rcm=ACoAAFWdiTsBt7H3ZH4nN3qLvJW2_oMz8yoTOPc)
+## [▶ RAG Demo Video](https://www.linkedin.com/posts/athithya-sakthivel-a23062341_rag-kubernetes-aws-ugcPost-7462146556369068032-HWum/?utm_source=share&utm_medium=member_desktop&rcm=ACoAAFWdiTsBt7H3ZH4nN3qLvJW2_oMz8yoTOPc)
 
 ---
 
@@ -172,12 +172,8 @@ export TF_VAR_github_repository="Athithya-Sakthivel/E2E-RAG-System" # replace wi
 bash src/infra/terraform/aws/run.sh --create --env staging
 ```
 
-<details>
-<summary>▶ Expected output</summary>
-
 ![alt text](src/scripts/archive/images/tf.png)
 
-</details>
 
 #### 1.2 Connect to Your New EKS Cluster
 
@@ -196,12 +192,8 @@ Replaces placeholder account IDs and region in CI workflow files so GitHub Actio
 bash src/scripts/replace.sh
 ```
 
-<details>
-<summary>▶ Expected output</summary>
-
 ![alt text](src/scripts/archive/images/ecr_push.png)
 
-</details>
 
 ---
 
@@ -215,12 +207,8 @@ export GIT_PAT=ghp_   # https://github.com/settings/tokens/new
 bash src/infra/core/argo_setup.sh --rollout
 ```
 
-<details>
-<summary>▶ Expected output</summary>
-
 ![alt text](src/scripts/archive/images/argo_setup.png)
 
-</details>
 
 #### 3.2 Bootstrap Karpenter for Spot Instance Auto-Scaling
 Karpenter dynamically provisions EC2 instances for bursty, stateless workloads (model services, indexing jobs). It replaces the standard Kubernetes Cluster Autoscaler with faster, cost-optimized node provisioning.
@@ -232,12 +220,8 @@ export AWS_REGION="ap-south-1"
 bash src/scripts/eks/bootstrap_karpenter.sh --rollout
 ```
 
-<details>
-<summary>▶ Expected output</summary>
-
 ![alt text](src/scripts/archive/images/karpenter.png)
 
-</details>
 
 ---
 
@@ -253,12 +237,8 @@ export HF_TOKEN=   # Hugging Face token for model downloads(optional)
 bash src/scripts/eks/run_indexing_pipeline.sh
 ```
 
-<details>
-<summary>▶ Expected output</summary>
-
 ![alt text](src/scripts/archive/images/indexing.png)
 
-</details>
 
 ---
 
@@ -284,12 +264,8 @@ export CLOUDFLARE_TUNNEL_ID="$(tofu -chdir=src/infra/terraform/cloudflare output
 python3 src/infra/core/cloudflared_setup.py --write
 ```
 
-<details>
-<summary>▶ Expected output</summary>
-
 ![alt text](src/scripts/archive/images/tunnel.png)
 
-</details>
 
 ---
 
@@ -310,12 +286,7 @@ export MICROSOFT_ALLOWED_DOMAINS=
 bash src/scripts/eks/run_inference_pipeline.sh
 ```
 
-<details>
-<summary>▶ Expected output</summary>
-
 ![alt text](src/scripts/archive/images/inference_svc.png)
-
-</details>
 
 ---
 
@@ -335,17 +306,19 @@ bash src/scripts/eks/observability_setup.sh
 
 ---
 
-### 🎉 You're Live!
+### Deployment Complete
 
-Open your browser and access:
+Once deployment finishes, your environment should match the configuration demonstrated in the project video.
 
-| URL | Service |
-|-----|---------|
-| `https://rag.<DOMAIN>` | RAG Chat UI (login with Google/Microsoft) |
-| `https://argocd.<DOMAIN>` | Argo CD (GitOps dashboard) |
-| `https://grafana.<DOMAIN>` | Grafana (observability dashboards) |
+Open your browser and access the following services:
 
-> ℹ️ **Default auth:** OIDC login is configured to allow all accounts by default. Restrict via `GOOGLE_ALLOWED_DOMAINS` and `MICROSOFT_ALLOWED_TENANT_IDS` for production use.
+| URL                        | Service                                        |
+| -------------------------- | ---------------------------------------------- |
+| `https://rag.<DOMAIN>`     | RAG Chat UI (sign in with Google or Microsoft) |
+| `https://argocd.<DOMAIN>`  | Argo CD (GitOps dashboard)                     |
+| `https://grafana.<DOMAIN>` | Grafana (observability dashboards)             |
+
+> **Note:** OIDC authentication is configured to allow all Google and Microsoft accounts by default. For production deployments, restrict access using the env vars `GOOGLE_ALLOWED_DOMAINS` and `MICROSOFT_ALLOWED_TENANT_IDS`.
 
 ---
 
@@ -397,13 +370,7 @@ kill %1 2>/dev/null || true
 - ArgoCD self-heals infrastructure when re-enabled
 - S3 backups are restorable with point-count parity
 
-<details>
-<summary>▶ Expected output</summary>
-
 ![alt text](src/scripts/archive/images/alert.png)
-
-</details>
-
 
 ## Cleanup
 
