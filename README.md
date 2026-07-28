@@ -2,9 +2,9 @@
 
 ---
 
-**E2E-RAG-System** is a Kubernetes-based platform for building and running production-oriented Retrieval-Augmented Generation (RAG) systems on AWS.
+**E2E-RAG-System** is a production-ready, Kubernetes-native reference implementation for Retrieval-Augmented Generation (RAG) on AWS.
 
-It provides a complete, end‑to‑end reference architecture for RAG on **Amazon EKS**—from multi‑format document ingestion to streaming LLM inference with verified, citation‑grounded answers.
+Built on **Amazon EKS**, it delivers an end-to-end architecture spanning multi-format document ingestion, indexing, semantic retrieval, and streaming LLM inference, producing citation-grounded, verifiable responses suitable for real-world production workloads.
 
 ---
 
