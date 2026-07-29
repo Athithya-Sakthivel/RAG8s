@@ -20,7 +20,7 @@ A low‑latency streaming request path that authenticates users via OIDC, perfor
 
 ---
 
-<img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/10989b9d-c270-4fc6-a3e5-5a762b91b557" />
+<img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/f8c5ac0e-f5cf-4b7d-ad10-b21c64a36aa2" />
 
 
 ---
