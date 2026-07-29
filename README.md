@@ -38,7 +38,7 @@ Infrastructure is declared with **OpenTofu (Terraform)**, workloads run on **EKS
 | **Frontend** | OIDC gateway + chat UI | Serves the chat interface, handles Google/Microsoft sign-in, mints short-lived JWTs, proxies streaming requests |
 | **Retriever** | RAG orchestration engine | Cache → embed → hybrid search → rerank → Bedrock → validate citations |
 | **Dense Embedder** | Text → dense vectors | FastEmbed, 384‑dim L2‑normalized, stateless, lazy model loading |
-| **Sparse Embedder** | Text → sparse vectors | SPLADE++ via FastEmbed, stateless |
+| **Sparse Embedder** | Text → sparse vectors | FastEmbed, Qdrant/minicoil-v1, stateless |
 | **Reranker** | Query × documents → scores | Cross‑encoder (MiniLM), auto‑triggered on low confidence |
 | **Indexing CronJob** | Document ingestion pipeline | Pre‑conversion → chunking → embedding → Qdrant upsert → conditional backup |
 | **Valkey** | Distributed rate limiting | Redis‑compatible, shared counters for SlowAPI, NetworkPolicy‑enforced isolation |
@@ -287,9 +287,9 @@ python3 src/infra/core/cloudflared_setup.py --write
 ### Phase 6: Query Engine & User-Facing Services
 
 #### 6.1 Deploy the Inference Stack
-Launches the retriever (RAG pipeline), frontend (chat UI + OIDC auth), Valkey (rate limiting), and cloudflared tunnel pod. You'll need OAuth credentials for at least one provider.
+Launches the retriever (RAG pipeline), frontend (chat UI + OIDC authentication), Valkey (per-user rate limiting), and the Cloudflared tunnel. Configure OAuth credentials for Google, Microsoft, or both—enabling either provider is sufficient for user authentication.
 
-> 🔑 **OAuth Setup:** [Google](https://oauth2-proxy.github.io/oauth2-proxy/configuration/providers/google/#usage) | [Microsoft](https://oauth2-proxy.github.io/oauth2-proxy/configuration/providers/ms_entra_id)
+> 🔑 **OAuth Credentials** [Google](https://oauth2-proxy.github.io/oauth2-proxy/configuration/providers/google/#usage) | [Microsoft](https://oauth2-proxy.github.io/oauth2-proxy/configuration/providers/ms_entra_id)
 ```sh
 export DOMAIN=athithya.site
 export GOOGLE_CLIENT_ID=
