@@ -2,15 +2,22 @@
 
 ---
 
-**E2E-RAG-System** is a production-ready, Kubernetes-native reference implementation for Retrieval-Augmented Generation (RAG) on AWS.
+**E2E-RAG-System** is a Kubernetes-native Retrieval-Augmented Generation (RAG) platform built on AWS.
 
-Built on **Amazon EKS**, it delivers an end-to-end architecture spanning multi-format document ingestion, indexing, semantic retrieval, and streaming LLM inference, producing citation-grounded, verifiable responses suitable for real-world production workloads.
+Built on **Amazon EKS**, it implements the complete RAG lifecycle—from multi-format document ingestion, preprocessing, chunking, and indexing to hybrid retrieval, reranking, and streaming LLM inference. Every response is grounded in retrieved context, validated against supporting citations, and linked back to the original source documents through presigned S3 URLs.
 
 ---
 
 ### Architecture
 
-The design cleanly separates the RAG lifecycle into two planes:
+The architecture separates the RAG lifecycle into two independent execution planes:
+
+
+<img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/b6b79aed-a2ae-41a8-bd06-5b519ee0b9d3" />
+
+### Architecture
+
+The system separates the RAG lifecycle into two independent execution planes:
 
 **Batch indexing plane**
 An incremental, idempotent CronJob pipeline that ingests raw documents (PDF, DOCX, audio, images, CSV, Markdown, HTML, …) from S3, normalises and OCRs them, splits into traceable chunks, generates dense and sparse embeddings via stateless FastEmbed microservices, and upserts into **Qdrant** with full positional metadata. Backups are triggered automatically by configurable thresholds.
@@ -172,8 +179,10 @@ export TF_VAR_github_repository="Athithya-Sakthivel/E2E-RAG-System" # replace wi
 bash src/infra/terraform/aws/run.sh --create --env staging
 ```
 
+---
 ![alt text](src/scripts/archive/images/tf.png)
 
+---
 
 #### 1.2 Connect to Your New EKS Cluster
 
@@ -191,6 +200,8 @@ Replaces placeholder account IDs and region in CI workflow files so GitHub Actio
 ```sh
 bash src/scripts/replace.sh
 ```
+
+---
 
 ![alt text](src/scripts/archive/images/ecr_push.png)
 
@@ -220,6 +231,8 @@ export AWS_REGION="ap-south-1"
 bash src/scripts/eks/bootstrap_karpenter.sh --rollout
 ```
 
+---
+
 ![alt text](src/scripts/archive/images/karpenter.png)
 
 
@@ -236,6 +249,8 @@ Spins up Qdrant (3-node vector database), FastEmbed services (dense, sparse, rer
 export HF_TOKEN=   # Hugging Face token for model downloads(optional)
 bash src/scripts/eks/run_indexing_pipeline.sh
 ```
+
+---
 
 ![alt text](src/scripts/archive/images/indexing.png)
 
@@ -264,6 +279,8 @@ export CLOUDFLARE_TUNNEL_ID="$(tofu -chdir=src/infra/terraform/cloudflare output
 python3 src/infra/core/cloudflared_setup.py --write
 ```
 
+---
+
 ![alt text](src/scripts/archive/images/tunnel.png)
 
 
@@ -285,6 +302,8 @@ export MICROSOFT_ALLOWED_TENANT_IDS=
 export MICROSOFT_ALLOWED_DOMAINS=
 bash src/scripts/eks/run_inference_pipeline.sh
 ```
+
+---
 
 ![alt text](src/scripts/archive/images/inference_svc.png)
 
