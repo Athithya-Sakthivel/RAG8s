@@ -10,13 +10,6 @@ Built on **Amazon EKS**, it implements the complete RAG lifecycle—from multi-f
 
 ### Architecture
 
-The architecture separates the RAG lifecycle into two independent execution planes:
-
-
-<img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/b6b79aed-a2ae-41a8-bd06-5b519ee0b9d3" />
-
-### Architecture
-
 The system separates the RAG lifecycle into two independent execution planes:
 
 **Batch indexing plane**
@@ -24,6 +17,12 @@ An incremental, idempotent CronJob pipeline that ingests raw documents (PDF, DOC
 
 **Online inference plane**
 A low‑latency streaming request path that authenticates users via OIDC, performs exact and semantic cache lookups, embeds the query (dense + sparse in parallel), executes hybrid Qdrant search with Reciprocal Rank Fusion, optionally re‑ranks with a cross‑encoder, builds a strictly‑grounded numbered prompt, and streams the answer via AWS Bedrock. Every response is citation‑validated—hallucinated references are stripped, and users can open original documents with one‑click presigned S3 URLs.
+
+---
+
+
+<img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/b6b79aed-a2ae-41a8-bd06-5b519ee0b9d3" />
+
 
 ---
 
