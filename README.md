@@ -1,12 +1,10 @@
-## **ai-platform-on-eks** is a Kubernetes-native Retrieval-Augmented Generation (RAG) platform built on AWS.
+### `ai-platform-on-eks` is a production-grade AI platform on Amazon EKS, built around 8 independently deployable microservices that power Retrieval-Augmented Generation (RAG) workloads with GitOps, Infrastructure as Code, autoscaling, security, and end-to-end observability.
+> The platform implements the complete RAG lifecycle—from multi-format document ingestion, preprocessing, chunking, and indexing to hybrid retrieval, reranking, and streaming LLM inference. It delivers citation-grounded responses linked back to the original source documents through presigned S3 URLs.
 
-Built on **Amazon EKS**, it implements the complete RAG lifecycle—from multi-format document ingestion, preprocessing, chunking, and indexing to hybrid retrieval, reranking, and streaming LLM inference. Every response is grounded in retrieved context, validated against supporting citations, and linked back to the original source documents through presigned S3 URLs.
-
----
 
 ### Architecture
 
-The system separates the RAG lifecycle into two independent execution planes:
+The RAG lifecycle is separated into two independent execution planes:
 
 **Batch indexing plane**
 An incremental, idempotent CronJob pipeline that ingests raw documents (PDF, DOCX, audio, images, CSV, Markdown, HTML, …) from S3, normalises and OCRs them, splits into traceable chunks, generates dense and sparse embeddings via stateless FastEmbed microservices, and upserts into **Qdrant** with full positional metadata. Backups are triggered automatically by configurable thresholds.
