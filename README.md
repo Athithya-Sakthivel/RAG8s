@@ -124,7 +124,7 @@ Each record defines query, expected chunk, reference answer, and expected facts.
 
 ## Clone the repo and build the devcontainer(Reproducible). This will take 10-20 minutes. 
 ```sh 
-cd $HOME && rm -rf E2E-RAG-System && git clone https://github.com/Athithya-Sakthivel/E2E-RAG-System.git && cd E2E-RAG-System && code .
+cd $HOME && rm -rf ai-platform-on-eks && git clone https://github.com/Athithya-Sakthivel/ai-platform-on-eks.git && cd ai-platform-on-eks && code .
 ```
 > ctrl + shift + P -> paste `Dev containers: Rebuild Container Without Cache` and enter
 
@@ -217,7 +217,7 @@ bash src/infra/core/argo_setup.sh --rollout
 Karpenter dynamically provisions EC2 instances for bursty, stateless workloads (model services, indexing jobs). It replaces the standard Kubernetes Cluster Autoscaler with faster, cost-optimized node provisioning.
 
 ```sh
-export GH_REPO=$REPO_NAME # replace with REPO_NAME
+export GH_REPO= # replace with your repo url
 export GH_BRANCH="main"
 export AWS_REGION="ap-south-1"
 bash src/scripts/eks/bootstrap_karpenter.sh --rollout
