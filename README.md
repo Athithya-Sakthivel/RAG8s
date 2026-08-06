@@ -1,8 +1,4 @@
-## [▶ RAG Demo Video](https://www.linkedin.com/posts/athithya-sakthivel-a23062341_rag-kubernetes-aws-ugcPost-7462146556369068032-HWum/?utm_source=share&utm_medium=member_desktop&rcm=ACoAAFWdiTsBt7H3ZH4nN3qLvJW2_oMz8yoTOPc)
-
----
-
-**E2E-RAG-System** is a Kubernetes-native Retrieval-Augmented Generation (RAG) platform built on AWS.
+## **ai-platform-on-eks** is a Kubernetes-native Retrieval-Augmented Generation (RAG) platform built on AWS.
 
 Built on **Amazon EKS**, it implements the complete RAG lifecycle—from multi-format document ingestion, preprocessing, chunking, and indexing to hybrid retrieval, reranking, and streaming LLM inference. Every response is grounded in retrieved context, validated against supporting citations, and linked back to the original source documents through presigned S3 URLs.
 
@@ -74,7 +70,7 @@ Layered across the full stack:
 
 ---
 
-By combining hybrid retrieval, precise citation grounding, clean separation of batch and online concerns, declarative infrastructure, layered security, and comprehensive observability, E2E‑RAG‑System serves as a robust **foundation** for running RAG systems in real production environments.
+By combining hybrid retrieval, precise citation grounding, clean separation of batch and online concerns, declarative infrastructure, layered security, and comprehensive observability, ai-platform-on-eks serves as a robust **foundation** for running RAG systems in real production environments.
 
 ---
 
@@ -152,7 +148,7 @@ gh auth login
 ### Create a private repo in your gh account
 
 ```sh
-export REPO_NAME="E2E-RAG-System" # or any name
+export REPO_NAME="ai-platform-on-eks" # or any name
 git remote remove origin 2>/dev/null || true
 gh repo create "$REPO_NAME" --private >/dev/null 2>&1
 REMOTE_URL="https://github.com/$(gh api user | jq -r .login)/$REPO_NAME.git"
@@ -172,7 +168,7 @@ Creates the VPC, EKS cluster, S3 buckets, ECR repositories, and all IAM roles. U
 
 ```sh
 export TF_VAR_region="ap-south-1"
-export TF_VAR_github_repository="Athithya-Sakthivel/E2E-RAG-System" # replace with REPO_NAME
+export TF_VAR_github_repository="Athithya-Sakthivel/ai-platform-on-eks" # replace with REPO_NAME
 
 bash src/infra/terraform/aws/run.sh --create --env staging
 ```
@@ -223,7 +219,7 @@ bash src/infra/core/argo_setup.sh --rollout
 Karpenter dynamically provisions EC2 instances for bursty, stateless workloads (model services, indexing jobs). It replaces the standard Kubernetes Cluster Autoscaler with faster, cost-optimized node provisioning.
 
 ```sh
-export GH_REPO="https://github.com/Athithya-Sakthivel/E2E-RAG-System.git"
+export GH_REPO=$REPO_NAME # replace with REPO_NAME
 export GH_BRANCH="main"
 export AWS_REGION="ap-south-1"
 bash src/scripts/eks/bootstrap_karpenter.sh --rollout
@@ -324,6 +320,10 @@ bash src/scripts/eks/observability_setup.sh
 ---
 
 ### Deployment Complete
+
+## [▶ App Demo](https://www.linkedin.com/posts/athithya-sakthivel-a23062341_rag-kubernetes-aws-ugcPost-7462146556369068032-HWum/?utm_source=share&utm_medium=member_desktop&rcm=ACoAAFWdiTsBt7H3ZH4nN3qLvJW2_oMz8yoTOPc)
+
+---
 
 Once deployment finishes, your environment should match the configuration demonstrated in the project video.
 
