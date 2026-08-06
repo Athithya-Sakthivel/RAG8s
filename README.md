@@ -1,5 +1,5 @@
-### `ai-platform-on-eks` is a production-grade AI platform on Amazon EKS, built around 8 independently deployable microservices that power Retrieval-Augmented Generation (RAG) workloads with GitOps, Infrastructure as Code, autoscaling, security, and end-to-end observability.
-> The platform implements the complete RAG lifecycle—from multi-format document ingestion, preprocessing, chunking, and indexing to hybrid retrieval, reranking, and streaming LLM inference. It delivers citation-grounded responses linked back to the original source documents through presigned S3 URLs.
+### `RAG8s` is a production-grade RAG platform on kubernetes(EKS), built around 8 independently deployable microservices with streaming inference, OIDC/OAuth 2.1 authentication, per-user rate limiting, GitOps-driven deployments, Infrastructure as Code, spot autoscaling, observability and end-to-end security.   
+> The platform implements the complete Retrieval-Augmented Generation(RAG) lifecycle—from multi-format document ingestion, preprocessing, chunking, and indexing to hybrid retrieval, reranking, and streaming LLM inference. It delivers citation-grounded responses linked back to the original source documents through presigned S3 URLs.
 
 
 ### Architecture
@@ -124,7 +124,7 @@ Each record defines query, expected chunk, reference answer, and expected facts.
 
 ## Clone the repo and build the devcontainer(Reproducible). This will take 10-20 minutes. 
 ```sh 
-cd $HOME && rm -rf ai-platform-on-eks && git clone https://github.com/Athithya-Sakthivel/ai-platform-on-eks.git && cd ai-platform-on-eks && code .
+cd $HOME && rm -rf RAG8s && git clone https://github.com/Athithya-Sakthivel/RAG8s.git && cd RAG8s && code .
 ```
 > ctrl + shift + P -> paste `Dev containers: Rebuild Container Without Cache` and enter
 
@@ -146,7 +146,7 @@ gh auth login
 ### Create a private repo in your gh account
 
 ```sh
-export REPO_NAME="ai-platform-on-eks" # or any name
+export REPO_NAME="RAG8s" # or any name
 git remote remove origin 2>/dev/null || true
 gh repo create "$REPO_NAME" --private >/dev/null 2>&1
 REMOTE_URL="https://github.com/$(gh api user | jq -r .login)/$REPO_NAME.git"
@@ -166,7 +166,7 @@ Creates the VPC, EKS cluster, S3 buckets, ECR repositories, and all IAM roles. U
 
 ```sh
 export TF_VAR_region="ap-south-1"
-export TF_VAR_github_repository="Athithya-Sakthivel/ai-platform-on-eks" # replace with REPO_NAME
+export TF_VAR_github_repository=<user_name/<repo_name>" # replace with your username and $REPO_NAME
 
 bash src/infra/terraform/aws/run.sh --create --env staging
 ```
@@ -206,7 +206,7 @@ bash src/scripts/replace.sh
 Deploys the GitOps controller that will sync all applications from this repo. Requires a GitHub personal access token for private repo access.
 
 ```sh
-export GIT_PAT=ghp_   # https://github.com/settings/tokens/new
+export GIT_PAT=ghp_   # Visit https://github.com/settings/tokens/new
 bash src/infra/core/argo_setup.sh --rollout
 ```
 
@@ -217,7 +217,7 @@ bash src/infra/core/argo_setup.sh --rollout
 Karpenter dynamically provisions EC2 instances for bursty, stateless workloads (model services, indexing jobs). It replaces the standard Kubernetes Cluster Autoscaler with faster, cost-optimized node provisioning.
 
 ```sh
-export GH_REPO= # replace with your repo url
+export GH_REPO= # replace with your full repo url(eg. https://github.com/Athithya-Sakthivel/RAG8s.git)
 export GH_BRANCH="main"
 export AWS_REGION="ap-south-1"
 bash src/scripts/eks/bootstrap_karpenter.sh --rollout
@@ -238,7 +238,7 @@ Spins up Qdrant (3-node vector database), FastEmbed services (dense, sparse, rer
 > ⚠️ **Note:** Karpenter may take 5–15 minutes to provision EC2 instances if the cheapest matching instance type is unavailable. It retries with other c-family types automatically. Pods will stay Pending until a compatible instance launches.
 
 ```sh
-export HF_TOKEN=   # Hugging Face token for model downloads(optional)
+export HF_TOKEN=   # Hugging Face token for faster model downloads(optional)
 bash src/scripts/eks/run_indexing_pipeline.sh
 ```
 
