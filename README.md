@@ -1,4 +1,4 @@
-### `RAG8s` is a production-grade RAG platform on kubernetes(EKS), built around 8 independently deployable microservices with streaming inference, OIDC/OAuth 2.1 authentication, per-user rate limiting, GitOps-driven deployments, Infrastructure as Code, spot autoscaling, observability and end-to-end security.   
+### `RAG8s` is a production-grade RAG platform on kubernetes(EKS), built around 8 independently deployable microservices with streaming inference, OIDC authentication, per-user rate limiting, GitOps-driven deployments, Infrastructure as Code, spot autoscaling, observability and end-to-end security.   
 > The platform implements the complete Retrieval-Augmented Generation(RAG) lifecycle—from multi-format document ingestion, preprocessing, chunking, and indexing to hybrid retrieval, reranking, and streaming LLM inference. It delivers citation-grounded responses linked back to the original source documents through presigned S3 URLs.
 
 
@@ -31,9 +31,9 @@ Infrastructure is declared with **OpenTofu (Terraform)**, workloads run on **EKS
 |---------|------|-------------|
 | **Frontend** | OIDC gateway + chat UI | Serves the chat interface, handles Google/Microsoft sign-in, mints short-lived JWTs, proxies streaming requests |
 | **Retriever** | RAG orchestration engine | Cache → embed → hybrid search → rerank → Bedrock → validate citations |
-| **Dense Embedder** | Text → dense vectors | FastEmbed, 384‑dim L2‑normalized, stateless, lazy model loading |
+| **Dense Embedder** | Text → dense vectors | FastEmbed, BAAI/bge-small-en-v1.5, 384‑dim L2‑normalized, stateless |
 | **Sparse Embedder** | Text → sparse vectors | FastEmbed, Qdrant/minicoil-v1, stateless |
-| **Reranker** | Query × documents → scores | Cross‑encoder (MiniLM), auto‑triggered on low confidence |
+| **Reranker** | Query × documents → scores | Cross‑encoder (Xenova/ms-marco-MiniLM-L-6-v2), auto‑triggered on low confidence |
 | **Indexing CronJob** | Document ingestion pipeline | Pre‑conversion → chunking → embedding → Qdrant upsert → conditional backup |
 | **Valkey** | Distributed rate limiting | Redis‑compatible, shared counters for SlowAPI, NetworkPolicy‑enforced isolation |
 | **Cloudflared** | Secure tunnel termination | Routes hostnames to internal ClusterIP services, blocks observability endpoints at edge, Prometheus metrics |
@@ -83,7 +83,6 @@ Automated evaluation against a 75-record golden dataset, tracked in MLflow.
   "performance": { "success_rate": 1.0 },
   "retrieval": {
     "recall_at_k": 0.72,
-    "hit_rate_at_k": 0.72,
     "mrr": 0.5793
   },
   "generation": {
@@ -257,8 +256,8 @@ Creates DNS records and a Cloudflare Tunnel that securely routes traffic to your
 ```sh
 export CLOUDFLARE_ACCOUNT_ID=
 export CLOUDFLARE_GLOBAL_API_KEY=
-export CLOUDFLARE_EMAIL="athithya651@gmail.com"
-export DOMAIN="athithya.site"
+export CLOUDFLARE_EMAIL=       # example: "athithya651@gmail.com"
+export DOMAIN=                 # example: "athithya.site"
 
 bash src/infra/terraform/cloudflare/run.sh --apply
 
@@ -285,7 +284,7 @@ Launches the retriever (RAG pipeline), frontend (chat UI + OIDC authentication),
 
 > 🔑 **OAuth Credentials** [Google](https://oauth2-proxy.github.io/oauth2-proxy/configuration/providers/google/#usage) | [Microsoft](https://oauth2-proxy.github.io/oauth2-proxy/configuration/providers/ms_entra_id)
 ```sh
-export DOMAIN=athithya.site
+export DOMAIN=                 # example: athithya.site
 export GOOGLE_CLIENT_ID=
 export GOOGLE_CLIENT_SECRET=
 export MS_CLIENT_ID=
@@ -311,7 +310,7 @@ export CLICKHOUSE_USER=vector
 export CLICKHOUSE_PASSWORD=vectorpass
 export SLACK_WEBHOOK_URL=   # Optional: Slack alerting
 export PAGERDUTY_ROUTING_KEY=   # Optional: PagerDuty escalation
-export ADMIN_PASSWORD=grafana
+export ADMIN_PASSWORD=grafana # set strong password
 bash src/scripts/eks/observability_setup.sh
 ```
 
@@ -337,6 +336,19 @@ Open your browser and access the following services:
 
 ---
 
+<img width="1920" height="1080" alt="Screenshot (5)" src="https://github.com/user-attachments/assets/b4789f6f-867e-4b90-9f49-36df2b43e6dc" />
+
+---
+<img width="1920" height="1080" alt="Screenshot (6)" src="https://github.com/user-attachments/assets/bb3c79ec-ce63-4d12-9c96-5d0da11436f8" />
+
+---
+<img width="1920" height="1080" alt="Screenshot (7)" src="https://github.com/user-attachments/assets/ddbbb1ed-b981-4dc5-a123-26acd0633f2e" />
+
+---
+
+<img width="1920" height="1080" alt="Screenshot (8)" src="https://github.com/user-attachments/assets/a38618ed-403f-4367-9377-30100c0aac37" />
+
+---
 
 ### Optional: Test Alerting and Disaster Recovery
 
