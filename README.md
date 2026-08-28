@@ -1,31 +1,25 @@
 ### `RAG8s` is a production-grade RAG platform on kubernetes(EKS), built around 8 independently deployable microservices with streaming inference, OIDC authentication, per-user rate limiting, GitOps-driven deployments, Infrastructure as Code, spot autoscaling, observability and end-to-end security.   
 > The platform implements the complete Retrieval-Augmented Generation(RAG) lifecycle—from multi-format document ingestion, preprocessing, chunking, and indexing to hybrid retrieval, reranking, and streaming LLM inference. It delivers citation-grounded responses linked back to the original source documents through presigned S3 URLs.
 
-
-### Architecture
+---
+## Architecture
 
 The RAG lifecycle is separated into two independent execution planes:
 
-**Batch indexing plane**
-An incremental, idempotent CronJob pipeline that ingests raw documents (PDF, DOCX, audio, images, CSV, Markdown, HTML, …) from S3, normalises and OCRs them, splits into traceable chunks, generates dense and sparse embeddings via stateless FastEmbed microservices, and upserts into **Qdrant** with full positional metadata. Backups are triggered automatically by configurable thresholds.
+**Batch indexing plane:**
+  An incremental, idempotent CronJob pipeline that ingests raw documents (PDF, DOCX, audio, images, CSV, Markdown, HTML, …) from S3, normalises and OCRs them, splits into traceable chunks, generates dense and sparse embeddings via stateless FastEmbed microservices, and upserts into **Qdrant** with full positional metadata. Backups are triggered automatically by configurable thresholds.
 
-**Online inference plane**
-A low‑latency streaming request path that authenticates users via OIDC, performs exact and semantic cache lookups, embeds the query (dense + sparse in parallel), executes hybrid Qdrant search with Reciprocal Rank Fusion, optionally re‑ranks with a cross‑encoder, builds a strictly‑grounded numbered prompt, and streams the answer via AWS Bedrock. Every response is citation‑validated—hallucinated references are stripped, and users can open original documents with one‑click presigned S3 URLs.
-
----
+**Online inference plane:**
+  A low‑latency streaming request path that authenticates users via OIDC, performs exact and semantic cache lookups, embeds the query (dense + sparse in parallel), executes hybrid Qdrant search with Reciprocal Rank Fusion, optionally re‑ranks with a cross‑encoder, builds a strictly‑grounded numbered prompt, and streams the answer via AWS Bedrock. Every response is citation‑validated—hallucinated references are stripped, and users can open original documents with one‑click presigned S3 URLs.
 
 <img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/f8c5ac0e-f5cf-4b7d-ad10-b21c64a36aa2" />
 
 
----
-
-### Infrastructure
+## Cloud Infrastructure
 
 Infrastructure is declared with **OpenTofu (Terraform)**, workloads run on **EKS** with an on‑demand system nodegroup for platform services and **Karpenter** for elastically provisioning spot instances for stateless, bursty inference workloads. All state lives in **S3** and **ECR**. Container images are built deterministically and pushed via **GitHub Actions OIDC**—no long‑lived credentials.
 
----
-
-### Microservices
+## Microservices
 
 | Service | Role | Key Details |
 |---------|------|-------------|
@@ -38,24 +32,18 @@ Infrastructure is declared with **OpenTofu (Terraform)**, workloads run on **EKS
 | **Valkey** | Distributed rate limiting | Redis‑compatible, shared counters for SlowAPI, NetworkPolicy‑enforced isolation |
 | **Cloudflared** | Secure tunnel termination | Routes hostnames to internal ClusterIP services, blocks observability endpoints at edge, Prometheus metrics |
 
----
-
-### Connectivity & Auth
+## Connectivity & Auth
 
 External access is provided through a single **Cloudflare Tunnel** (SSL strict, no public IPs or load balancers). Authentication uses **OAuth (Google, Microsoft)** with short‑lived JWTs and domain‑scoped allowlists. Rate limiting is per‑user (sub‑based, not IP), backed by **Valkey**.
 
----
-
-### Observability
+## Observability
 
 Built‑in, no external SaaS required:
 - **Prometheus + Alertmanager** — 20+ alert rules, Slack notifications with inhibition
 - **Grafana** — auto‑discovered dashboards via ConfigMap sidecar
 - **Vector + ClickHouse** — structured JSON log aggregation with 30‑day retention
 
----
-
-### Security
+## Security
 
 Layered across the full stack:
 - **Edge:** Cloudflare Tunnel with SSL strict and endpoint filtering
@@ -65,12 +53,6 @@ Layered across the full stack:
 - **Runtime:** Read‑only root filesystems, non‑root containers, no privileged pods
 - **CI/CD:** Pre‑commit Gitleaks hook + CI‑side scanning (Gitleaks, Trivy, OpenGrep) on every commit
 - **GitOps:** Argo CD reconciles cluster state from Git, self‑heals drift, rollbacks via `git revert`
-
----
-
-By combining hybrid retrieval, precise citation grounding, clean separation of batch and online concerns, declarative infrastructure, layered security, and comprehensive observability, ai-platform-on-eks serves as a robust **foundation** for running RAG systems in real production environments.
-
----
 
 ## Offline Evaluation
 
@@ -106,10 +88,11 @@ Automated evaluation against a 75-record golden dataset, tracked in MLflow.
 
 Each record defines query, expected chunk, reference answer, and expected facts. Evaluation measures retrieval accuracy, fact coverage, groundedness, and citation integrity across all records.
 
+> By combining hybrid retrieval, precise citation grounding, clean separation of batch and online concerns, declarative infrastructure, layered security, and comprehensive observability, `RAG8s` serves as a robust **foundational infrastructure** for running RAG systems in real production environments.
+
 ---
 
-# Get started
-
+# Step-by-Step Deployment Guide
 ## Prerequisites
 1. Docker installed, running *without* sudo access
 2. **Visual Studio Code with the Dev Containers extension installed (for a deterministic environments): [https://code.visualstudio.com/docs/devcontainers/containers](https://code.visualstudio.com/docs/devcontainers/containers)**
@@ -181,8 +164,6 @@ bash src/infra/terraform/aws/run.sh --create --env staging
 aws eks update-kubeconfig --region ap-south-1 --name rag-eks-staging
 ```
 
----
-
 ### Phase 2: Container Images (CI/CD)
 
 #### 2.1 Trigger Image Builds to ECR
@@ -192,12 +173,7 @@ Replaces placeholder account IDs and region in CI workflow files so GitHub Actio
 bash src/scripts/replace.sh
 ```
 
----
-
 ![alt text](src/scripts/archive/images/ecr_push.png)
-
-
----
 
 ### Phase 3: GitOps Controller & Auto-Scaling
 
@@ -222,36 +198,29 @@ export AWS_REGION="ap-south-1"
 bash src/scripts/eks/bootstrap_karpenter.sh --rollout
 ```
 
----
-
 ![alt text](src/scripts/archive/images/karpenter.png)
-
-
----
 
 ### Phase 4: Data Ingestion & Vector Storage
 
-#### 4.1 Deploy the Indexing Pipeline
-Spins up Qdrant (3-node vector database), FastEmbed services (dense, sparse, reranker), and the indexing CronJob. This is where documents get ingested, chunked, embedded, and indexed.
+#### 4.1 Deploy the Indexing Pipeline.
+This phase sets up the complete document processing stack. It deploys Qdrant (a 3-node vector database for storing embeddings), FastEmbed services (three microservices for dense embeddings, sparse embeddings, and reranking), and finally the indexing CronJob that runs on a schedule.
 
-> ⚠️ **Note:** Karpenter may take 5–15 minutes to provision EC2 instances if the cheapest matching instance type is unavailable. It retries with other c-family types automatically. Pods will stay Pending until a compatible instance launches.
+Once deployed, this pipeline automatically handles the full document lifecycle: ingesting raw files from S3, converting them to text (including OCR for scanned documents), splitting them into smaller chunks, generating embeddings for each chunk, and indexing them into Qdrant for fast retrieval.
+
+Check the [documentation](src/indexing_pipeline/README.md) for configuration details and how the pipeline works under the hood.
 
 ```sh
 export HF_TOKEN=   # Hugging Face token for faster model downloads(optional)
 bash src/scripts/eks/run_indexing_pipeline.sh
 ```
-
----
+> ⚠️ **Note:** Karpenter may take 5–15 minutes to provision EC2 instances if the cheapest matching instance type is unavailable. It retries with other c-family types automatically. Pods will stay Pending until a compatible instance launches.
 
 ![alt text](src/scripts/archive/images/indexing.png)
-
-
----
 
 ### Phase 5: External Access & DNS
 
 #### 5.1 Set Up Cloudflare Tunnel and DNS
-Creates DNS records and a Cloudflare Tunnel that securely routes traffic to your cluster — no LoadBalancers or public IPs needed. The script waits for you to authorize Cloudflare access.
+Creates DNS records and a Cloudflare Tunnel that securely routes traffic to your cluster — no LoadBalancers or public IPs needed. The script waits for you to authorize Cloudflare access. 
 
 ```sh
 export CLOUDFLARE_ACCOUNT_ID=
@@ -269,20 +238,14 @@ export CLOUDFLARE_TUNNEL_ID="$(tofu -chdir=src/infra/terraform/cloudflare output
 # Deploy cloudflared with secrets
 python3 src/infra/core/cloudflared_setup.py --write
 ```
-
----
-
 ![alt text](src/scripts/archive/images/tunnel.png)
-
-
----
 
 ### Phase 6: Query Engine & User-Facing Services
 
 #### 6.1 Deploy the Inference Stack
-Launches the retriever (RAG pipeline), frontend (chat UI + OIDC authentication), Valkey (per-user rate limiting), and the Cloudflared tunnel. Configure OAuth credentials for Google, Microsoft, or both—enabling either provider is sufficient for user authentication.
+Launches the [retriever](src/services/retriever/README.md), [Chat UI + OIDC authentication](src/services/frontend), Valkey (for per-user rate limiting), and the [Cloudflared tunnel](https://developers.cloudflare.com/tunnel/). Configure OAuth credentials for Google, Microsoft, or both—enabling either provider is sufficient for user authentication.
 
-> 🔑 **OAuth Credentials** [Google](https://oauth2-proxy.github.io/oauth2-proxy/configuration/providers/google/#usage) | [Microsoft](https://oauth2-proxy.github.io/oauth2-proxy/configuration/providers/ms_entra_id)
+> 🔑 **Create OAuth Credentials** [Google](https://oauth2-proxy.github.io/oauth2-proxy/configuration/providers/google/#usage) | [Microsoft](https://oauth2-proxy.github.io/oauth2-proxy/configuration/providers/ms_entra_id)
 ```sh
 export DOMAIN=                 # example: athithya.site
 export GOOGLE_CLIENT_ID=
@@ -293,12 +256,7 @@ export MICROSOFT_ALLOWED_TENANT_IDS=
 export MICROSOFT_ALLOWED_DOMAINS=
 bash src/scripts/eks/run_inference_pipeline.sh
 ```
-
----
-
 ![alt text](src/scripts/archive/images/inference_svc.png)
-
----
 
 ### Phase 7: Observability
 
@@ -314,41 +272,27 @@ export ADMIN_PASSWORD=grafana # set strong password
 bash src/scripts/eks/observability_setup.sh
 ```
 
----
+### End-to-End System Complete
 
-### Deployment Complete
+## [▶ RAG Demo](https://www.linkedin.com/posts/athithya-sakthivel-a23062341_rag-kubernetes-aws-ugcPost-7462146556369068032-HWum/?utm_source=share&utm_medium=member_desktop&rcm=ACoAAFWdiTsBt7H3ZH4nN3qLvJW2_oMz8yoTOPc)
 
-## [▶ App Demo](https://www.linkedin.com/posts/athithya-sakthivel-a23062341_rag-kubernetes-aws-ugcPost-7462146556369068032-HWum/?utm_source=share&utm_medium=member_desktop&rcm=ACoAAFWdiTsBt7H3ZH4nN3qLvJW2_oMz8yoTOPc)
+Once deployment finishes, your environment should match the configuration demonstrated in the project video. Open your browser and access the following services:
 
----
-
-Once deployment finishes, your environment should match the configuration demonstrated in the project video.
-
-Open your browser and access the following services:
-
-| URL                        | Service                                        |
-| -------------------------- | ---------------------------------------------- |
-| `https://rag.<DOMAIN>`     | RAG Chat UI (sign in with Google or Microsoft) |
-| `https://argocd.<DOMAIN>`  | Argo CD (GitOps dashboard)                     |
-| `https://grafana.<DOMAIN>` | Grafana (observability dashboards)             |
+| URL                        | Service                                          |
+| -------------------------- | ------------------------------------------------ |
+| `https://rag.<DOMAIN>`     | RAG Chat UI (sign in with Google or Microsoft)   |
+| `https://argocd.<DOMAIN>`  | Argo CD (GitOps dashboard)                       |
+| `https://grafana.<DOMAIN>` | Grafana (observability dashboards)               |
 
 > **Note:** OIDC authentication is configured to allow all Google and Microsoft accounts by default. For production deployments, restrict access using the env vars `GOOGLE_ALLOWED_DOMAINS` and `MICROSOFT_ALLOWED_TENANT_IDS`.
 
----
-
 <img width="1920" height="1080" alt="Screenshot (5)" src="https://github.com/user-attachments/assets/b4789f6f-867e-4b90-9f49-36df2b43e6dc" />
 
----
 <img width="1920" height="1080" alt="Screenshot (6)" src="https://github.com/user-attachments/assets/bb3c79ec-ce63-4d12-9c96-5d0da11436f8" />
 
----
 <img width="1920" height="1080" alt="Screenshot (7)" src="https://github.com/user-attachments/assets/ddbbb1ed-b981-4dc5-a123-26acd0633f2e" />
 
----
-
 <img width="1920" height="1080" alt="Screenshot (8)" src="https://github.com/user-attachments/assets/a38618ed-403f-4367-9377-30100c0aac37" />
-
----
 
 ### Optional: Test Alerting and Disaster Recovery
 
@@ -399,11 +343,13 @@ kill %1 2>/dev/null || true
 
 ![alt text](src/scripts/archive/images/alert.png)
 
+---
+
 ## Cleanup
 
 To tear down the entire infrastructure and avoid ongoing costs:
 
-> **Note:** Karpenter manages AWS resources (EC2 instances, VPC tags) outside of Terraform state. If `terraform destroy` hangs, manually delete the VPC and verify no orphaned EC2 instances remain.
+> **Note:** Karpenter manages AWS resources (EC2 instances, VPC tags) outside Terraform state. If `terraform destroy` hangs, manually delete the VPC and verify no orphaned EC2 instances remain.
 
 ```sh
 # 1. Remove workloads to trigger Karpenter scale-down
@@ -419,6 +365,6 @@ bash src/infra/terraform/aws/run.sh --destroy --env staging --yes-delete
 ```
 
 **Post-cleanup verification:**
-- Confirm no EC2 instances remain in the region (spot + on-demand)
+- Confirm no EC2 instances remain in the TF_VAR_region
 - Verify the EKS cluster and associated security groups are removed
-- Check that S3 buckets and ECR repositories are deleted (or emptied if retention was configured)
+- Run `python3 src/scripts/eks/force_delete.py` as a last resort for orphaned resources
