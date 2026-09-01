@@ -167,7 +167,7 @@ aws eks update-kubeconfig --region ap-south-1 --name rag-eks-staging
 ### Phase 2: Container Images (CI/CD)
 
 #### 2.1 Trigger Image Builds to ECR
-Replaces placeholder account IDs and region in CI workflow files so GitHub Actions can push images to your ECR. After running, open your repo's Actions tab — all 6 service images will build and push in ~5 minutes.
+Replaces account IDs and region with your's in CI workflow files so GitHub Actions can push images to your ECR. After running, open your repo's Actions tab — all 6 service images will build and push in ~5 minutes.
 
 ```sh
 bash src/scripts/replace.sh
@@ -178,7 +178,7 @@ bash src/scripts/replace.sh
 ### Phase 3: GitOps Controller & Auto-Scaling
 
 #### 3.1 Install Argo CD
-Deploys the GitOps controller that will sync all applications from this repo. Requires a GitHub personal access token for private repo access.
+Deploys the GitOps controller that will sync all applications from this repo. Requires a GitHub personal access token for private repo access. The secret shown is temporary. 
 
 ```sh
 export GIT_PAT=ghp_   # Visit https://github.com/settings/tokens/new
@@ -189,7 +189,8 @@ bash src/infra/core/argo_setup.sh --rollout
 
 
 #### 3.2 Bootstrap Karpenter for Spot Instance Auto-Scaling
-Karpenter dynamically provisions EC2 instances for bursty, stateless workloads (model services, indexing jobs). It replaces the standard Kubernetes Cluster Autoscaler with faster, cost-optimized node provisioning.
+[Karpenter](https://karpenter.sh/docs/) provisions `node-type=compute:NoSchedule` nodes; workloads such as the Frontend, Retriever, Dense Embedder, Sparse Embedder, Reranker, Indexing CronJob, and Cloudflared tunnel target these nodes using the matching `node-type=compute toleration`, with a PDB protecting Cloudflared availability. When these workloads are unschedulable, Karpenter provisions EC2 Spot capacity and applies the `WhenEmptyOrUnderutilized` consolidation policy, consolidating underutilized nodes after 15 minutes.
+
 
 ```sh
 export GH_REPO= # replace with your full repo url(eg. https://github.com/Athithya-Sakthivel/RAG8s.git)
@@ -207,7 +208,7 @@ This phase sets up the complete document processing stack. It deploys Qdrant (a 
 
 Once deployed, this pipeline automatically handles the full document lifecycle: ingesting raw files from S3, converting them to text (including OCR for scanned documents), splitting them into smaller chunks, generating embeddings for each chunk, and indexing them into Qdrant for fast retrieval.
 
-Check the [documentation](src/indexing_pipeline/README.md) for configuration details and how the pipeline works under the hood.
+Check the [documentation](src/indexing_pipeline/README.md) for configuration details and how the indexing pipeline works under the hood.
 
 ```sh
 export HF_TOKEN=   # Hugging Face token for faster model downloads(optional)
@@ -220,7 +221,7 @@ bash src/scripts/eks/run_indexing_pipeline.sh
 ### Phase 5: External Access & DNS
 
 #### 5.1 Set Up Cloudflare Tunnel and DNS
-Creates DNS records and a Cloudflare Tunnel that securely routes traffic to your cluster — no LoadBalancers or public IPs needed. The script waits for you to authorize Cloudflare access. 
+Creates DNS records and a [Cloudflared/Argo tunnel](https://developers.cloudflare.com/tunnel/) that securely routes traffic to your cluster — no LoadBalancers or public IPs needed. The script waits for you to authorize Cloudflare access. 
 
 ```sh
 export CLOUDFLARE_ACCOUNT_ID=
