@@ -2,6 +2,7 @@
 > The platform implements the complete Retrieval-Augmented Generation(RAG) lifecycle—from multi-format document ingestion, preprocessing, chunking, and indexing to hybrid retrieval, reranking, and streaming LLM inference. It delivers citation-grounded responses linked back to the original source documents through presigned S3 URLs.
 
 ---
+
 ## Architecture
 
 The RAG lifecycle is separated into two independent execution planes:
@@ -366,6 +367,6 @@ bash src/infra/terraform/aws/run.sh --destroy --env staging --yes-delete
 ```
 
 **Post-cleanup verification:**
-- Confirm no EC2 instances remain in the TF_VAR_region
+- Confirm no RAG8s specific EC2 instances remain in the TF_VAR_region
 - Verify the EKS cluster and associated security groups are removed
 - Run `python3 src/scripts/eks/force_delete.py` as a last resort for orphaned resources
