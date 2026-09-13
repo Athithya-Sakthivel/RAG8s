@@ -1,32 +1,29 @@
 {
   "name": "E2E-RAG-System",
-  "build": {
-    "dockerfile": "Dockerfile",
-    "context": "."
-  },
+  "image": "ghcr.io/athithya-sakthivel/rag8s-devcontainer@sha256:b094f7ef0b1548a0a9f7b4f722afcc6c117b11e3a6fe22cc8ab9329e1608f6a4",
   "workspaceFolder": "/workspace",
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
   "remoteUser": "root",
   "forwardPorts": [
-  3000,    // Frontend UI dev server (optional)
-  3001,    // Frontend UI dev server alternate
-  8000,    // Frontend main service
-  8001,    // Retriever service
-  8080,    // Alternative HTTP port / dashboard
-  50051,   // gRPC (dense/sparse embedding services)
-  8005,    // Reranker service
-  7000,    // Qdrant HTTP API
-  7001,    // Qdrant gRPC API
-  7002,    // Qdrant internal cluster
-  7003,    // Qdrant metrics
-  6379,    // Valkey/Redis
-  2000,    // Cloudflared metrics
-  9153,    // CoreDNS metrics (Prometheus)
-  9090,    // Prometheus (if deployed)
-  30080,   // kind NodePort (configured in your cluster script)
-  443,     // HTTPS (Cloudflare tunnel origin)
-  80       // HTTP (redirect to HTTPS)
-],
+    3000,
+    3001,
+    8000,
+    8001,
+    8080,
+    50051,
+    8005,
+    7000,
+    7001,
+    7002,
+    7003,
+    6379,
+    2000,
+    9153,
+    9090,
+    30080,
+    443,
+    80
+  ],
   "runArgs": [
     "--privileged",
     "--network=host",
@@ -41,7 +38,6 @@
     "DOCKER_PROXY_HOST": "",
     "DOCKER_PROXY_PORT": ""
   },
-  "postCreateCommand": "bash src/scripts/local/bootstrap.sh",
   "customizations": {
     "vscode": {
       "extensions": [
