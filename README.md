@@ -3,6 +3,10 @@
 
 ---
 
+![alt text](src/scripts/archive/images/rag8s.gif)
+
+---
+
 ## Architecture
 
 The RAG lifecycle is separated into two independent execution planes:
@@ -13,8 +17,12 @@ The RAG lifecycle is separated into two independent execution planes:
 **Online inference plane:**
   A low‑latency streaming request path that authenticates users via OIDC, performs exact and semantic cache lookups, embeds the query (dense + sparse in parallel), executes hybrid Qdrant search with Reciprocal Rank Fusion, optionally re‑ranks with a cross‑encoder, builds a strictly‑grounded numbered prompt, and streams the answer via AWS Bedrock. Every response is citation‑validated—hallucinated references are stripped, and users can open original documents with one‑click presigned S3 URLs.
 
+---
+
 <img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/f8c5ac0e-f5cf-4b7d-ad10-b21c64a36aa2" />
 
+
+---
 
 ## Cloud Infrastructure
 
@@ -89,7 +97,7 @@ Automated evaluation against a 75-record golden dataset, tracked in MLflow.
 
 Each record defines query, expected chunk, reference answer, and expected facts. Evaluation measures retrieval accuracy, fact coverage, groundedness, and citation integrity across all records.
 
-> By combining hybrid retrieval, precise citation grounding, clean separation of batch and online concerns, declarative infrastructure, layered security, and comprehensive observability, `RAG8s` serves as a robust **foundational infrastructure** for running RAG systems in real production environments.
+> By combining hybrid retrieval, precise citation grounding, clean separation of batch and online concerns, declarative infrastructure, layered security, and comprehensive observability, `RAG8s` serves as a **robust foundation** for running RAG systems in real production environments.
 
 ---
 
@@ -126,6 +134,8 @@ gh auth login
 ✓ Authentication complete. Press Enter to continue...
 ```
 
+---
+
 ### Create a private repo in your gh account
 
 ```sh
@@ -155,7 +165,14 @@ bash src/infra/terraform/aws/run.sh --create --env staging
 ```
 
 ---
+
+
+<details>
+<summary>▶ Expected output</summary>
+
 ![alt text](src/scripts/archive/images/tf.png)
+
+</details>
 
 ---
 
@@ -164,6 +181,7 @@ bash src/infra/terraform/aws/run.sh --create --env staging
 ```sh
 aws eks update-kubeconfig --region ap-south-1 --name rag-eks-staging
 ```
+---
 
 ### Phase 2: Container Images (CI/CD)
 
@@ -174,7 +192,17 @@ Replaces account IDs and region with your's in CI workflow files so GitHub Actio
 bash src/scripts/replace.sh
 ```
 
+
+
+<details>
+<summary>▶ Expected output</summary>
+
 ![alt text](src/scripts/archive/images/ecr_push.png)
+
+</details>
+
+
+---
 
 ### Phase 3: GitOps Controller & Auto-Scaling
 
@@ -186,8 +214,16 @@ export GIT_PAT=ghp_   # Visit https://github.com/settings/tokens/new
 bash src/infra/core/argo_setup.sh --rollout
 ```
 
+<details>
+<summary>▶ Expected output</summary>
+
 ![alt text](src/scripts/archive/images/argo_setup.png)
 
+</details>
+
+
+
+---
 
 #### 3.2 Bootstrap Karpenter for Spot Instance Auto-Scaling
 [Karpenter](https://karpenter.sh/docs/) provisions `node-type=compute:NoSchedule` nodes; workloads such as the Frontend, Retriever, Dense Embedder, Sparse Embedder, Reranker, Indexing CronJob, and Cloudflared tunnel target these nodes using the matching `node-type=compute toleration`, with a PDB protecting Cloudflared availability. When these workloads are unschedulable, Karpenter provisions EC2 Spot capacity and applies the `WhenEmptyOrUnderutilized` consolidation policy, consolidating underutilized nodes after 15 minutes.
@@ -200,14 +236,23 @@ export AWS_REGION="ap-south-1"
 bash src/scripts/eks/bootstrap_karpenter.sh --rollout
 ```
 
-![alt text](src/scripts/archive/images/karpenter.png)
+<details>
+<summary>▶ Expected output</summary>
+
+![alt text](src/scripts/archive/images/karpenter_setup.png)
+
+</details>
+
+
+
+---
 
 ### Phase 4: Data Ingestion & Vector Storage
 
 #### 4.1 Deploy the Indexing Pipeline.
 This phase sets up the complete document processing stack. It deploys Qdrant (a 3-node vector database for storing embeddings), FastEmbed services (three microservices for dense embeddings, sparse embeddings, and reranking), and finally the indexing CronJob that runs on a schedule.
 
-Once deployed, this pipeline automatically handles the full document lifecycle: ingesting raw files from S3, converting them to text (including OCR for scanned documents), splitting them into smaller chunks, generating embeddings for each chunk, and indexing them into Qdrant for fast retrieval.
+Once deployed, this pipeline automatically handles the full document lifecycle: Uploads few pdfs and htmls to s3, ingests raw files from S3, converts them to text (including OCR for scanned documents), splitting them into smaller chunks, generating embeddings for each chunk, and indexing them into Qdrant for fast retrieval.
 
 Check the [documentation](src/indexing_pipeline/README.md) for configuration details and how the indexing pipeline works under the hood.
 
@@ -217,7 +262,15 @@ bash src/scripts/eks/run_indexing_pipeline.sh
 ```
 > ⚠️ **Note:** Karpenter may take 5–15 minutes to provision EC2 instances if the cheapest matching instance type is unavailable. It retries with other c-family types automatically. Pods will stay Pending until a compatible instance launches.
 
-![alt text](src/scripts/archive/images/indexing.png)
+<details>
+<summary>▶ Expected output</summary>
+
+![alt text](src/scripts/archive/images/indexing_pipeline.png)
+
+</details>
+
+
+---
 
 ### Phase 5: External Access & DNS
 
@@ -240,7 +293,16 @@ export CLOUDFLARE_TUNNEL_ID="$(tofu -chdir=src/infra/terraform/cloudflare output
 # Deploy cloudflared with secrets
 python3 src/infra/core/cloudflared_setup.py --write
 ```
-![alt text](src/scripts/archive/images/tunnel.png)
+
+<details>
+<summary>▶ Expected output</summary>
+
+![alt text](src/scripts/archive/images/cloudflare_tunnel.png)
+
+</details>
+
+
+---
 
 ### Phase 6: Query Engine & User-Facing Services
 
@@ -258,7 +320,16 @@ export MICROSOFT_ALLOWED_TENANT_IDS=
 export MICROSOFT_ALLOWED_DOMAINS=
 bash src/scripts/eks/run_inference_pipeline.sh
 ```
-![alt text](src/scripts/archive/images/inference_svc.png)
+
+<details>
+<summary>▶ Expected output</summary>
+
+![alt text](src/scripts/archive/images/inference_svcs.png)
+
+</details>
+
+
+---
 
 ### Phase 7: Observability
 
@@ -274,9 +345,11 @@ export ADMIN_PASSWORD=grafana # set strong password
 bash src/scripts/eks/observability_setup.sh
 ```
 
+---
+
 ### End-to-End System Complete
 
-## [▶ RAG Demo](https://www.linkedin.com/posts/athithya-sakthivel-a23062341_rag-kubernetes-aws-ugcPost-7462146556369068032-HWum/?utm_source=share&utm_medium=member_desktop&rcm=ACoAAFWdiTsBt7H3ZH4nN3qLvJW2_oMz8yoTOPc)
+## [▶ RAG8s Demo](https://www.linkedin.com/posts/athithya-sakthivel-a23062341_rag-kubernetes-aws-ugcPost-7462146556369068032-HWum/?utm_source=share&utm_medium=member_desktop&rcm=ACoAAFWdiTsBt7H3ZH4nN3qLvJW2_oMz8yoTOPc)
 
 Once deployment finishes, your environment should match the configuration demonstrated in the project video. Open your browser and access the following services:
 
@@ -288,13 +361,28 @@ Once deployment finishes, your environment should match the configuration demons
 
 > **Note:** OIDC authentication is configured to allow all Google and Microsoft accounts by default. For production deployments, restrict access using the env vars `GOOGLE_ALLOWED_DOMAINS` and `MICROSOFT_ALLOWED_TENANT_IDS`.
 
-<img width="1920" height="1080" alt="Screenshot (5)" src="https://github.com/user-attachments/assets/b4789f6f-867e-4b90-9f49-36df2b43e6dc" />
+<details>
+<summary>▶ Expected outputs</summary>
 
-<img width="1920" height="1080" alt="Screenshot (6)" src="https://github.com/user-attachments/assets/bb3c79ec-ce63-4d12-9c96-5d0da11436f8" />
+![alt text](src/scripts/archive/images/ui.png)
 
-<img width="1920" height="1080" alt="Screenshot (7)" src="https://github.com/user-attachments/assets/ddbbb1ed-b981-4dc5-a123-26acd0633f2e" />
+---
 
-<img width="1920" height="1080" alt="Screenshot (8)" src="https://github.com/user-attachments/assets/a38618ed-403f-4367-9377-30100c0aac37" />
+![alt text](src/scripts/archive/images/observability_health.png)
+
+---
+
+![alt text](src/scripts/archive/images/service_health.png)
+
+---
+
+![alt text](src/scripts/archive/images/argo_ui.png)
+
+---
+
+</details>
+
+
 
 ### Optional: Test Alerting and Disaster Recovery
 
@@ -343,7 +431,14 @@ kill %1 2>/dev/null || true
 - ArgoCD self-heals infrastructure when re-enabled
 - S3 backups are restorable with point-count parity
 
-![alt text](src/scripts/archive/images/alert.png)
+---
+
+<details>
+<summary>▶ Expected output</summary>
+
+![alt text](src/scripts/archive/images/alerts.png)
+
+</details>
 
 ---
 
