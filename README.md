@@ -1,5 +1,50 @@
-### `RAG8s` is a production-grade RAG platform on kubernetes(EKS), built around 8 independently deployable microservices with streaming inference, OIDC authentication, per-user rate limiting, GitOps-driven deployments, Infrastructure as Code, spot autoscaling, observability and end-to-end security.   
-> The platform implements the complete Retrieval-Augmented Generation(RAG) lifecycle—from multi-format document ingestion, preprocessing, chunking, and indexing to hybrid retrieval, reranking, and streaming LLM inference. It delivers citation-grounded responses linked back to the original source documents through presigned S3 URLs.
+# RAG8s
+
+A RAG platform on Kubernetes (EKS) covering the end-to-end retrieval-augmented generation lifecycle — multi-format ingestion, chunking, hybrid retrieval (dense + sparse with Reciprocal Rank Fusion), cross-encoder reranking, streaming inference via AWS Bedrock, and citation-grounded generation — across 8 independently deployable microservices.
+
+The LLMOps-relevant pieces:
+
+- **Evaluated against a golden set.** Automated offline evaluation over 75 curated records, tracked in MLflow. Latest run: groundedness **0.95**, citation integrity **0.89**, recall@k **0.72**.
+- **Guardrailed output.** Responses are citation-validated before streaming — hallucinated references are stripped, and users open the original source via one-click presigned S3 URLs.
+- **Cost-aware inference.** Exact and semantic response caching short-circuits the model call where possible; per-user rate limiting (Redis/Valkey, subject-based rather than IP-based) caps spend.
+- **Operable in production.** OIDC auth, GitOps delivery via Argo CD, Karpenter spot autoscaling for stateless workloads, 20+ Prometheus alerts, and structured log aggregation in ClickHouse.
+
+Read [Offline Evaluation](#offline-evaluation) for the full methodology, or jump to the [Deployment Guide](#step-by-step-deployment-guide).
+
+---
+
+## Table of Contents
+
+- [Architecture](#architecture)
+- [Cloud Infrastructure](#cloud-infrastructure)
+- [Microservices](#microservices)
+- [Connectivity & Auth](#connectivity--auth)
+- [Observability](#observability)
+- [Security](#security)
+- [Offline Evaluation](#offline-evaluation)
+- [Step-by-Step Deployment Guide](#step-by-step-deployment-guide)
+  - [Prerequisites](#prerequisites)
+  - [Clone the repo and build the devcontainer](#clone-the-repo-and-build-the-devcontainerreproducible-this-will-take-10-20-minutes)
+  - [Create a private repo](#create-a-private-repo-in-your-gh-account)
+  - [Phase 1 — Infrastructure Foundation](#phase-1--infrastructure-foundation)
+    - [1.1 Provision AWS Infrastructure](#11-provision-aws-infrastructure)
+    - [1.2 Connect to Your New EKS Cluster](#12-connect-to-your-new-eks-cluster)
+  - [Phase 2 — Container Images (CI/CD)](#phase-2--container-images-cicd)
+    - [2.1 Trigger Image Builds to ECR](#21-trigger-image-builds-to-ecr)
+  - [Phase 3 — GitOps Controller & Auto-Scaling](#phase-3--gitops-controller--auto-scaling)
+    - [3.1 Install Argo CD](#31-install-argo-cd)
+    - [3.2 Bootstrap Karpenter for Spot Instance Auto-Scaling](#32-bootstrap-karpenter-for-spot-instance-auto-scaling)
+  - [Phase 4 — Data Ingestion & Vector Storage](#phase-4--data-ingestion--vector-storage)
+    - [4.1 Deploy the Indexing Pipeline](#41-deploy-the-indexing-pipeline)
+  - [Phase 5 — External Access & DNS](#phase-5--external-access--dns)
+    - [5.1 Set Up Cloudflare Tunnel and DNS](#51-set-up-cloudflare-tunnel-and-dns)
+  - [Phase 6 — Query Engine & User-Facing Services](#phase-6--query-engine--user-facing-services)
+    - [6.1 Deploy the Inference Stack](#61-deploy-the-inference-stack)
+  - [Phase 7 — Observability](#phase-7--observability)
+    - [7.1 Deploy Monitoring, Logging, and Alerting](#71-deploy-monitoring-logging-and-alerting)
+  - [End-to-End System Complete](#end-to-end-system-complete)
+  - [Optional — Test Alerting and Disaster Recovery](#optional--test-alerting-and-disaster-recovery)
+  - [Cleanup](#cleanup)
 
 ---
 
@@ -102,9 +147,11 @@ Each record defines query, expected chunk, reference answer, and expected facts.
 ---
 
 # Step-by-Step Deployment Guide
+
 ## Prerequisites
-1. Docker installed, running *without* sudo access
-2. **Visual Studio Code with the Dev Containers extension installed (for a deterministic environments): [https://code.visualstudio.com/docs/devcontainers/containers](https://code.visualstudio.com/docs/devcontainers/containers)**
+
+1. **Docker installed and running _without_ sudo access. Non root required for devcontainer stability. Run `sudo usermod -aG docker $USER && newgrp docker` if not already**
+2. **Visual Studio Code with the Dev Containers extension installed (for a deterministic environment): [devcontainers](https://code.visualstudio.com/docs/devcontainers/containers)**
 3. **An AWS account with sufficient IAM permissions (AdministratorAccess or equivalent) to manage**:
    * Amazon EKS (Elastic Kubernetes Service)
    * EC2, VPCs, Subnets, and Security Groups
@@ -113,13 +160,15 @@ Each record defines query, expected chunk, reference answer, and expected facts.
    **AWS Free Tier is sufficient for development and testing purposes.**
 4. **A Cloudflare account with a registered domain, with permissions to manage DNS records and create Cloudflare Tunnels (cloudflared)**
 
-## Clone the repo and build the devcontainer(Reproducible). This will take 10-20 minutes. 
+## Clone the repo and build the devcontainer(Reproducible). This will take 10-20 minutes.
+
 ```sh 
 cd $HOME && rm -rf RAG8s && git clone https://github.com/Athithya-Sakthivel/RAG8s.git && cd RAG8s && code .
 ```
 > ctrl + shift + P -> paste `Dev containers: Rebuild Container Without Cache` and enter
 
 ### Open a new terminal and login to your gh account
+
 ```sh
 git config --global user.name "Your Name" && git config --global user.email you@example.com
 gh auth login
@@ -136,7 +185,7 @@ gh auth login
 
 ---
 
-### Create a private repo in your gh account
+## Create a private repo in your gh account
 
 ```sh
 export REPO_NAME="RAG8s" # or any name
@@ -150,11 +199,13 @@ git pull
 git remote -v
 echo "[INFO] A private repo '$REPO_NAME' created and pushed. Only visible from your account."
 ```
+
 ---
 
-### Phase 1: Infrastructure Foundation
+## Phase 1 — Infrastructure Foundation
 
-#### 1.1 Provision AWS Infrastructure
+### 1.1 Provision AWS Infrastructure
+
 Creates the VPC, EKS cluster, S3 buckets, ECR repositories, and all IAM roles. Uses OpenTofu (Terraform-compatible).
 
 ```sh
@@ -166,7 +217,6 @@ bash src/infra/terraform/aws/run.sh --create --env staging
 
 ---
 
-
 <details>
 <summary>▶ Expected output</summary>
 
@@ -176,23 +226,23 @@ bash src/infra/terraform/aws/run.sh --create --env staging
 
 ---
 
-#### 1.2 Connect to Your New EKS Cluster
+### 1.2 Connect to Your New EKS Cluster
 
 ```sh
 aws eks update-kubeconfig --region ap-south-1 --name rag-eks-staging
 ```
+
 ---
 
-### Phase 2: Container Images (CI/CD)
+## Phase 2 — Container Images (CI/CD)
 
-#### 2.1 Trigger Image Builds to ECR
+### 2.1 Trigger Image Builds to ECR
+
 Replaces account IDs and region with your's in CI workflow files so GitHub Actions can push images to your ECR. After running, open your repo's Actions tab — all 6 service images will build and push in ~5 minutes.
 
 ```sh
 bash src/scripts/replace.sh
 ```
-
-
 
 <details>
 <summary>▶ Expected output</summary>
@@ -201,12 +251,12 @@ bash src/scripts/replace.sh
 
 </details>
 
-
 ---
 
-### Phase 3: GitOps Controller & Auto-Scaling
+## Phase 3 — GitOps Controller & Auto-Scaling
 
-#### 3.1 Install Argo CD
+### 3.1 Install Argo CD
+
 Deploys the GitOps controller that will sync all applications from this repo. Requires a GitHub personal access token for private repo access. The secret shown is temporary. 
 
 ```sh
@@ -221,13 +271,11 @@ bash src/infra/core/argo_setup.sh --rollout
 
 </details>
 
-
-
 ---
 
-#### 3.2 Bootstrap Karpenter for Spot Instance Auto-Scaling
-[Karpenter](https://karpenter.sh/docs/) provisions `node-type=compute:NoSchedule` nodes; workloads such as the Frontend, Retriever, Dense Embedder, Sparse Embedder, Reranker, Indexing CronJob, and Cloudflared tunnel target these nodes using the matching `node-type=compute toleration`, with a PDB protecting Cloudflared availability. When these workloads are unschedulable, Karpenter provisions EC2 Spot capacity and applies the `WhenEmptyOrUnderutilized` consolidation policy, consolidating underutilized nodes after 15 minutes.
+### 3.2 Bootstrap Karpenter for Spot Instance Auto-Scaling
 
+[Karpenter](https://karpenter.sh/docs/) provisions `node-type=compute:NoSchedule` nodes; workloads such as the Frontend, Retriever, Dense Embedder, Sparse Embedder, Reranker, Indexing CronJob, and Cloudflared tunnel target these nodes using the matching `node-type=compute toleration`, with a PDB protecting Cloudflared availability. When these workloads are unschedulable, Karpenter provisions EC2 Spot capacity and applies the `WhenEmptyOrUnderutilized` consolidation policy, consolidating underutilized nodes after 15 minutes.
 
 ```sh
 export GH_REPO= # replace with your full repo url(eg. https://github.com/Athithya-Sakthivel/RAG8s.git)
@@ -243,13 +291,12 @@ bash src/scripts/eks/bootstrap_karpenter.sh --rollout
 
 </details>
 
-
-
 ---
 
-### Phase 4: Data Ingestion & Vector Storage
+## Phase 4 — Data Ingestion & Vector Storage
 
-#### 4.1 Deploy the Indexing Pipeline.
+### 4.1 Deploy the Indexing Pipeline
+
 This phase sets up the complete document processing stack. It deploys Qdrant (a 3-node vector database for storing embeddings), FastEmbed services (three microservices for dense embeddings, sparse embeddings, and reranking), and finally the indexing CronJob that runs on a schedule.
 
 Once deployed, this pipeline automatically handles the full document lifecycle: Uploads few pdfs and htmls to s3, ingests raw files from S3, converts them to text (including OCR for scanned documents), splitting them into smaller chunks, generating embeddings for each chunk, and indexing them into Qdrant for fast retrieval.
@@ -269,12 +316,12 @@ bash src/scripts/eks/run_indexing_pipeline.sh
 
 </details>
 
-
 ---
 
-### Phase 5: External Access & DNS
+## Phase 5 — External Access & DNS
 
-#### 5.1 Set Up Cloudflare Tunnel and DNS
+### 5.1 Set Up Cloudflare Tunnel and DNS
+
 Creates DNS records and a [Cloudflared/Argo tunnel](https://developers.cloudflare.com/tunnel/) that securely routes traffic to your cluster — no LoadBalancers or public IPs needed. The script waits for you to authorize Cloudflare access. 
 
 ```sh
@@ -301,15 +348,16 @@ python3 src/infra/core/cloudflared_setup.py --write
 
 </details>
 
-
 ---
 
-### Phase 6: Query Engine & User-Facing Services
+## Phase 6 — Query Engine & User-Facing Services
 
-#### 6.1 Deploy the Inference Stack
+### 6.1 Deploy the Inference Stack
+
 Launches the [retriever](src/services/retriever/README.md), [Chat UI + OIDC authentication](src/services/frontend), Valkey (for per-user rate limiting), and the [Cloudflared tunnel](https://developers.cloudflare.com/tunnel/). Configure OAuth credentials for Google, Microsoft, or both—enabling either provider is sufficient for user authentication.
 
 > 🔑 **Create OAuth Credentials** [Google](https://oauth2-proxy.github.io/oauth2-proxy/configuration/providers/google/#usage) | [Microsoft](https://oauth2-proxy.github.io/oauth2-proxy/configuration/providers/ms_entra_id)
+
 ```sh
 export DOMAIN=                 # example: athithya.site
 export GOOGLE_CLIENT_ID=
@@ -328,12 +376,12 @@ bash src/scripts/eks/run_inference_pipeline.sh
 
 </details>
 
-
 ---
 
-### Phase 7: Observability
+## Phase 7 — Observability
 
-#### 7.1 Deploy Monitoring, Logging, and Alerting
+### 7.1 Deploy Monitoring, Logging, and Alerting
+
 Sets up Prometheus (metrics + alerts), Grafana (dashboards), ClickHouse (log storage), and Vector (log collector). Optionally connect Slack and PagerDuty for alerts.
 
 ```sh
@@ -347,7 +395,7 @@ bash src/scripts/eks/observability_setup.sh
 
 ---
 
-### End-to-End System Complete
+## End-to-End System Complete
 
 ## [▶ RAG8s Demo](https://www.linkedin.com/posts/athithya-sakthivel-a23062341_rag-kubernetes-aws-ugcPost-7462146556369068032-HWum/?utm_source=share&utm_medium=member_desktop&rcm=ACoAAFWdiTsBt7H3ZH4nN3qLvJW2_oMz8yoTOPc)
 
@@ -382,9 +430,9 @@ Once deployment finishes, your environment should match the configuration demons
 
 </details>
 
+---
 
-
-### Optional: Test Alerting and Disaster Recovery
+## Optional — Test Alerting and Disaster Recovery
 
 Simulate a complete Qdrant outage to verify Slack alerts fire and data can be restored from S3 backups.
 
@@ -431,8 +479,6 @@ kill %1 2>/dev/null || true
 - ArgoCD self-heals infrastructure when re-enabled
 - S3 backups are restorable with point-count parity
 
----
-
 <details>
 <summary>▶ Expected output</summary>
 
@@ -465,3 +511,5 @@ bash src/infra/terraform/aws/run.sh --destroy --env staging --yes-delete
 - Confirm no RAG8s specific EC2 instances remain in the TF_VAR_region
 - Verify the EKS cluster and associated security groups are removed
 - Run `python3 src/scripts/eks/force_delete.py` as a last resort for orphaned resources
+
+---
