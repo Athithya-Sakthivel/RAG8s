@@ -6,45 +6,10 @@ The LLMOps-relevant pieces:
 
 - **Evaluated against a golden set.** Automated offline evaluation over 75 curated records, tracked in MLflow. Latest run: groundedness **0.95**, citation integrity **0.89**, recall@k **0.72**.
 - **Guardrailed output.** Responses are citation-validated before streaming — hallucinated references are stripped, and users open the original source via one-click presigned S3 URLs.
-- **Cost-aware inference.** Exact and semantic response caching short-circuits the model call where possible; per-user rate limiting (Redis/Valkey, subject-based rather than IP-based) caps spend.
-- **Operable in production.** OIDC auth, GitOps delivery via Argo CD, Karpenter spot autoscaling for stateless workloads, 20+ Prometheus alerts, and structured log aggregation in ClickHouse.
+- **Cost-aware inference. ** Exact and semantic response caching short-circuits the model call where possible; OAuth-authenticated users are rate-limited per user, subject-based rather than IP-based) to cap LLM spend.
+- **Operable in production.** 2.6 s end-to-end latency, OIDC authentication, GitOps delivery with Argo CD, Karpenter Spot autoscaling for stateless workloads, 20+ Prometheus alerts, and structured log aggregation in ClickHouse.
 
 Read [Offline Evaluation](#offline-evaluation) for the full methodology, or jump to the [Deployment Guide](#step-by-step-deployment-guide).
-
----
-
-## Table of Contents
-
-- [Architecture](#architecture)
-- [Cloud Infrastructure](#cloud-infrastructure)
-- [Microservices](#microservices)
-- [Connectivity & Auth](#connectivity--auth)
-- [Observability](#observability)
-- [Security](#security)
-- [Offline Evaluation](#offline-evaluation)
-- [Step-by-Step Deployment Guide](#step-by-step-deployment-guide)
-  - [Prerequisites](#prerequisites)
-  - [Clone the repo and build the devcontainer](#clone-the-repo-and-build-the-devcontainerreproducible-this-will-take-10-20-minutes)
-  - [Create a private repo](#create-a-private-repo-in-your-gh-account)
-  - [Phase 1 — Infrastructure Foundation](#phase-1--infrastructure-foundation)
-    - [1.1 Provision AWS Infrastructure](#11-provision-aws-infrastructure)
-    - [1.2 Connect to Your New EKS Cluster](#12-connect-to-your-new-eks-cluster)
-  - [Phase 2 — Container Images (CI/CD)](#phase-2--container-images-cicd)
-    - [2.1 Trigger Image Builds to ECR](#21-trigger-image-builds-to-ecr)
-  - [Phase 3 — GitOps Controller & Auto-Scaling](#phase-3--gitops-controller--auto-scaling)
-    - [3.1 Install Argo CD](#31-install-argo-cd)
-    - [3.2 Bootstrap Karpenter for Spot Instance Auto-Scaling](#32-bootstrap-karpenter-for-spot-instance-auto-scaling)
-  - [Phase 4 — Data Ingestion & Vector Storage](#phase-4--data-ingestion--vector-storage)
-    - [4.1 Deploy the Indexing Pipeline](#41-deploy-the-indexing-pipeline)
-  - [Phase 5 — External Access & DNS](#phase-5--external-access--dns)
-    - [5.1 Set Up Cloudflare Tunnel and DNS](#51-set-up-cloudflare-tunnel-and-dns)
-  - [Phase 6 — Query Engine & User-Facing Services](#phase-6--query-engine--user-facing-services)
-    - [6.1 Deploy the Inference Stack](#61-deploy-the-inference-stack)
-  - [Phase 7 — Observability](#phase-7--observability)
-    - [7.1 Deploy Monitoring, Logging, and Alerting](#71-deploy-monitoring-logging-and-alerting)
-  - [End-to-End System Complete](#end-to-end-system-complete)
-  - [Optional — Test Alerting and Disaster Recovery](#optional--test-alerting-and-disaster-recovery)
-  - [Cleanup](#cleanup)
 
 ---
 
@@ -66,12 +31,13 @@ The RAG lifecycle is separated into two independent execution planes:
 
 <img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/f8c5ac0e-f5cf-4b7d-ad10-b21c64a36aa2" />
 
-
 ---
 
 ## Cloud Infrastructure
 
 Infrastructure is declared with **OpenTofu (Terraform)**, workloads run on **EKS** with an on‑demand system nodegroup for platform services and **Karpenter** for elastically provisioning spot instances for stateless, bursty inference workloads. All state lives in **S3** and **ECR**. Container images are built deterministically and pushed via **GitHub Actions OIDC**—no long‑lived credentials.
+
+---
 
 ## Microservices
 
@@ -86,16 +52,22 @@ Infrastructure is declared with **OpenTofu (Terraform)**, workloads run on **EKS
 | **Valkey** | Distributed rate limiting | Redis‑compatible, shared counters for SlowAPI, NetworkPolicy‑enforced isolation |
 | **Cloudflared** | Secure tunnel termination | Routes hostnames to internal ClusterIP services, blocks observability endpoints at edge, Prometheus metrics |
 
+---
+
 ## Connectivity & Auth
 
 External access is provided through a single **Cloudflare Tunnel** (SSL strict, no public IPs or load balancers). Authentication uses **OAuth (Google, Microsoft)** with short‑lived JWTs and domain‑scoped allowlists. Rate limiting is per‑user (sub‑based, not IP), backed by **Valkey**.
 
+---
+
 ## Observability
 
 Built‑in, no external SaaS required:
-- **Prometheus + Alertmanager** — 20+ alert rules, Slack notifications with inhibition
+- **Prometheus + Alertmanager** — 20+ alert rules, Slack notifications with inhibition rules
 - **Grafana** — auto‑discovered dashboards via ConfigMap sidecar
 - **Vector + ClickHouse** — structured JSON log aggregation with 30‑day retention
+
+---
 
 ## Security
 
@@ -107,6 +79,8 @@ Layered across the full stack:
 - **Runtime:** Read‑only root filesystems, non‑root containers, no privileged pods
 - **CI/CD:** Pre‑commit Gitleaks hook + CI‑side scanning (Gitleaks, Trivy, OpenGrep) on every commit
 - **GitOps:** Argo CD reconciles cluster state from Git, self‑heals drift, rollbacks via `git revert`
+
+---
 
 ## Offline Evaluation
 
@@ -150,7 +124,7 @@ Each record defines query, expected chunk, reference answer, and expected facts.
 
 ## Prerequisites
 
-1. **Docker installed and running _without_ sudo access. Non root required for devcontainer stability. Run `sudo usermod -aG docker $USER && newgrp docker` if not already**
+1. **Docker installed and running _without_ sudo access. Non root is required for devcontainer stability. Run `sudo usermod -aG docker $USER && newgrp docker` if not already**
 2. **Visual Studio Code with the Dev Containers extension installed (for a deterministic environment): [devcontainers](https://code.visualstudio.com/docs/devcontainers/containers)**
 3. **An AWS account with sufficient IAM permissions (AdministratorAccess or equivalent) to manage**:
    * Amazon EKS (Elastic Kubernetes Service)
@@ -160,17 +134,23 @@ Each record defines query, expected chunk, reference answer, and expected facts.
    **AWS Free Tier is sufficient for development and testing purposes.**
 4. **A Cloudflare account with a registered domain, with permissions to manage DNS records and create Cloudflare Tunnels (cloudflared)**
 
-## Clone the repo and build the devcontainer(Reproducible). This will take 10-20 minutes.
+---
+
+## Clone the repo and build the devcontainer(Reproducible).
 
 ```sh 
-cd $HOME && rm -rf RAG8s && git clone https://github.com/Athithya-Sakthivel/RAG8s.git && cd RAG8s && code .
+cd $HOME && rm -rf RAG8s && git clone https://github.com/Athithya-Sakthivel/RAG8s.git
+cd RAG8s && code .
 ```
-> ctrl + shift + P -> paste `Dev containers: Rebuild Container Without Cache` and enter
+> Ctrl + Shift + P -> Paste `Dev containers: Rebuild Container Without Cache` and Enter. First-time build takes 5-15 minutes depending on network speed. You may create a github codespace instead if network is slow
 
-### Open a new terminal and login to your gh account
+---
+
+### Open a new terminal and login to your gh account as shown below
 
 ```sh
-git config --global user.name "Your Name" && git config --global user.email you@example.com
+git config --global user.name "Your Name"
+git config --global user.email you@example.com
 gh auth login
 
 ? What account do you want to log into? GitHub.com
@@ -185,7 +165,7 @@ gh auth login
 
 ---
 
-## Create a private repo in your gh account
+## Create a new private repo in your GitHub account
 
 ```sh
 export REPO_NAME="RAG8s" # or any name
@@ -208,25 +188,19 @@ echo "[INFO] A private repo '$REPO_NAME' created and pushed. Only visible from y
 
 Creates the VPC, EKS cluster, S3 buckets, ECR repositories, and all IAM roles. Uses OpenTofu (Terraform-compatible).
 
-```sh
+```bash
 export TF_VAR_region="ap-south-1"
-export TF_VAR_github_repository=<user_name/<repo_name>" # replace with your username and $REPO_NAME
-
+export TF_VAR_github_repository=<user_name/<repo_name>"    # replace with your username and $REPO_NAME
 bash src/infra/terraform/aws/run.sh --create --env staging
 ```
 
 ---
 
-<details>
-<summary>▶ Expected output</summary>
-
 ![alt text](src/scripts/archive/images/tf.png)
-
-</details>
 
 ---
 
-### 1.2 Connect to Your New EKS Cluster
+### 1.2 Connect to the New EKS Cluster
 
 ```sh
 aws eks update-kubeconfig --region ap-south-1 --name rag-eks-staging
@@ -244,12 +218,7 @@ Replaces account IDs and region with your's in CI workflow files so GitHub Actio
 bash src/scripts/replace.sh
 ```
 
-<details>
-<summary>▶ Expected output</summary>
-
 ![alt text](src/scripts/archive/images/ecr_push.png)
-
-</details>
 
 ---
 
@@ -259,76 +228,59 @@ bash src/scripts/replace.sh
 
 Deploys the GitOps controller that will sync all applications from this repo. Requires a GitHub personal access token for private repo access. The secret shown is temporary. 
 
-```sh
+```bash
 export GIT_PAT=ghp_   # Visit https://github.com/settings/tokens/new
 bash src/infra/core/argo_setup.sh --rollout
 ```
 
-<details>
-<summary>▶ Expected output</summary>
-
 ![alt text](src/scripts/archive/images/argo_setup.png)
 
-</details>
 
 ---
 
-### 3.2 Bootstrap Karpenter for Spot Instance Auto-Scaling
+### 3.2 Bootstrap Karpenter for the stateless workloads
 
-[Karpenter](https://karpenter.sh/docs/) provisions `node-type=compute:NoSchedule` nodes; workloads such as the Frontend, Retriever, Dense Embedder, Sparse Embedder, Reranker, Indexing CronJob, and Cloudflared tunnel target these nodes using the matching `node-type=compute toleration`, with a PDB protecting Cloudflared availability. When these workloads are unschedulable, Karpenter provisions EC2 Spot capacity and applies the `WhenEmptyOrUnderutilized` consolidation policy, consolidating underutilized nodes after 15 minutes.
+[Karpenter](https://karpenter.sh/docs/) automatically provisions EC2 Spot nodes labeled `node-type=compute:NoSchedule` for stateless workloads. The Frontend, Retriever, Embedders, Reranker, Indexing CronJob, and Cloudflared tunnel are scheduled onto these nodes using matching tolerations, while a Pod Disruption Budget keeps Cloudflared available. Underutilized nodes are automatically consolidated after 15 minutes (`WhenEmptyOrUnderutilized`).
 
-```sh
-export GH_REPO= # replace with your full repo url(eg. https://github.com/Athithya-Sakthivel/RAG8s.git)
+
+```bash
+export GH_REPO= # replace with your full repo url(https://github.com/<USER_NAME/$REPO_NAME.git)
 export GH_BRANCH="main"
 export AWS_REGION="ap-south-1"
 bash src/scripts/eks/bootstrap_karpenter.sh --rollout
 ```
 
-<details>
-<summary>▶ Expected output</summary>
-
 ![alt text](src/scripts/archive/images/karpenter_setup.png)
-
-</details>
 
 ---
 
-## Phase 4 — Data Ingestion & Vector Storage
-
-### 4.1 Deploy the Indexing Pipeline
+## Phase 4 — Data Ingestion & Vector Storage: Deploy the Indexing Pipeline
 
 This phase sets up the complete document processing stack. It deploys Qdrant (a 3-node vector database for storing embeddings), FastEmbed services (three microservices for dense embeddings, sparse embeddings, and reranking), and finally the indexing CronJob that runs on a schedule.
 
-Once deployed, this pipeline automatically handles the full document lifecycle: Uploads few pdfs and htmls to s3, ingests raw files from S3, converts them to text (including OCR for scanned documents), splitting them into smaller chunks, generating embeddings for each chunk, and indexing them into Qdrant for fast retrieval.
+Once deployed, this pipeline automatically handles the full document lifecycle: Uploads few pdfs and htmls to s3, ingests raw files from S3, converts them to text (including OCR for pages/slides with images), splitting them into smaller chunks, generating embeddings for each chunk, and indexing them into Qdrant for fast retrieval.
 
 Check the [documentation](src/indexing_pipeline/README.md) for configuration details and how the indexing pipeline works under the hood.
 
-```sh
-export HF_TOKEN=   # Hugging Face token for faster model downloads(optional)
+```bash
+export HF_TOKEN=   # Hugging Face token for faster model downloads (optional)
 bash src/scripts/eks/run_indexing_pipeline.sh
 ```
-> ⚠️ **Note:** Karpenter may take 5–15 minutes to provision EC2 instances if the cheapest matching instance type is unavailable. It retries with other c-family types automatically. Pods will stay Pending until a compatible instance launches.
-
-<details>
-<summary>▶ Expected output</summary>
+> **Note: ** Karpenter may take 5–15 minutes to provision EC2 instances if the cheapest matching instance type is unavailable. It retries with other c-family types automatically. Pods will stay Pending until a compatible instance launches.
 
 ![alt text](src/scripts/archive/images/indexing_pipeline.png)
 
-</details>
-
 ---
 
-## Phase 5 — External Access & DNS
-
-### 5.1 Set Up Cloudflare Tunnel and DNS
+## Phase 5 — External Access & DNS: Set Up Cloudflare Tunnel and DNS
 
 Creates DNS records and a [Cloudflared/Argo tunnel](https://developers.cloudflare.com/tunnel/) that securely routes traffic to your cluster — no LoadBalancers or public IPs needed. The script waits for you to authorize Cloudflare access. 
 
 ```sh
-export CLOUDFLARE_ACCOUNT_ID=
-export CLOUDFLARE_GLOBAL_API_KEY=
-export CLOUDFLARE_EMAIL=       # example: "athithya651@gmail.com"
-export DOMAIN=                 # example: "athithya.site"
+export CLOUDFLARE_ACCOUNT_ID=      # Cloudflare dashboard > Account Home > Search and enter "Copy account ID".
+export CLOUDFLARE_GLOBAL_API_KEY=  # https://dash.cloudflare.com/profile/api-tokens > API Keys
+export CLOUDFLARE_EMAIL=           # example: "athithya651@gmail.com"
+export DOMAIN=                     # example: "athithya.site"
 
 bash src/infra/terraform/cloudflare/run.sh --apply
 
@@ -341,40 +293,31 @@ export CLOUDFLARE_TUNNEL_ID="$(tofu -chdir=src/infra/terraform/cloudflare output
 python3 src/infra/core/cloudflared_setup.py --write
 ```
 
-<details>
-<summary>▶ Expected output</summary>
-
 ![alt text](src/scripts/archive/images/cloudflare_tunnel.png)
-
-</details>
 
 ---
 
-## Phase 6 — Query Engine & User-Facing Services
+## Phase 6 — Query Engine & User-Facing Services: Deploy the Inference Stack
 
-### 6.1 Deploy the Inference Stack
+Launches the [retriever](src/services/retriever/README.md), [Chat UI + OIDC authentication](src/services/frontend), Valkey (for per-user rate limiting), and the [Cloudflared tunnel](https://developers.cloudflare.com/tunnel/). Configure OAuth credentials for Google, Microsoft, or both—enabling *either provider is sufficient* for user authentication.
 
-Launches the [retriever](src/services/retriever/README.md), [Chat UI + OIDC authentication](src/services/frontend), Valkey (for per-user rate limiting), and the [Cloudflared tunnel](https://developers.cloudflare.com/tunnel/). Configure OAuth credentials for Google, Microsoft, or both—enabling either provider is sufficient for user authentication.
-
-> 🔑 **Create OAuth Credentials** [Google](https://oauth2-proxy.github.io/oauth2-proxy/configuration/providers/google/#usage) | [Microsoft](https://oauth2-proxy.github.io/oauth2-proxy/configuration/providers/ms_entra_id)
+> **Create OAuth Credentials** [Google](https://oauth2-proxy.github.io/oauth2-proxy/configuration/providers/google/#usage) | [Microsoft](https://oauth2-proxy.github.io/oauth2-proxy/configuration/providers/ms_entra_id)
 
 ```sh
-export DOMAIN=                 # example: athithya.site
-export GOOGLE_CLIENT_ID=
-export GOOGLE_CLIENT_SECRET=
-export MS_CLIENT_ID=
-export MS_CLIENT_SECRET=
-export MICROSOFT_ALLOWED_TENANT_IDS=
-export MICROSOFT_ALLOWED_DOMAINS=
+export DOMAIN=                 # Use the same $DOMAIN
+export GOOGLE_CLIENT_ID=             # Google OAuth client ID
+export GOOGLE_CLIENT_SECRET=          # Google OAuth client secret
+export GOOGLE_ALLOWED_DOMAINS="company.com,gmail.com"        # Comma-separated allowed email domains
+export MS_CLIENT_ID=                       # Azure AD application (client) ID
+export MS_CLIENT_SECRET=                   # Azure AD client secret 
+export MICROSOFT_ALLOWED_TENANT_IDS=       # Primary tenant ID (single-tenant or common)
+export MICROSOFT_ALLOWED_DOMAINS="outlook.com,company.com"   # Comma-separated allowed email domains
+
 bash src/scripts/eks/run_inference_pipeline.sh
 ```
 
-<details>
-<summary>▶ Expected output</summary>
 
 ![alt text](src/scripts/archive/images/inference_svcs.png)
-
-</details>
 
 ---
 
@@ -397,20 +340,19 @@ bash src/scripts/eks/observability_setup.sh
 
 ## End-to-End System Complete
 
-## [▶ RAG8s Demo](https://www.linkedin.com/posts/athithya-sakthivel-a23062341_rag-kubernetes-aws-ugcPost-7462146556369068032-HWum/?utm_source=share&utm_medium=member_desktop&rcm=ACoAAFWdiTsBt7H3ZH4nN3qLvJW2_oMz8yoTOPc)
+### [▶ RAG8s Full Demo](https://www.linkedin.com/posts/athithya-sakthivel-a23062341_rag-kubernetes-aws-ugcPost-7462146556369068032-HWum/?utm_source=share&utm_medium=member_desktop&rcm=ACoAAFWdiTsBt7H3ZH4nN3qLvJW2_oMz8yoTOPc)
 
-Once deployment finishes, your environment should match the configuration demonstrated in the project video. Open your browser and access the following services:
+The deployment reproduces the **ground-truth configuration** shown in the project demo, including semantic caching, OAuth-authenticated per-user rate limiting, hybrid retrieval, and the complete RAG inference pipeline.
 
-| URL                        | Service                                          |
-| -------------------------- | ------------------------------------------------ |
-| `https://rag.<DOMAIN>`     | RAG Chat UI (sign in with Google or Microsoft)   |
-| `https://argocd.<DOMAIN>`  | Argo CD (GitOps dashboard)                       |
-| `https://grafana.<DOMAIN>` | Grafana (observability dashboards)               |
+| URL | Service |
+|------|---------|
+| `https://rag.<DOMAIN>` | RAG Chat UI (Google/Microsoft sign-in) |
+| `https://argocd.<DOMAIN>` | Argo CD (GitOps dashboard) |
+| `https://grafana.<DOMAIN>` | Grafana (observability dashboards) |
 
-> **Note:** OIDC authentication is configured to allow all Google and Microsoft accounts by default. For production deployments, restrict access using the env vars `GOOGLE_ALLOWED_DOMAINS` and `MICROSOFT_ALLOWED_TENANT_IDS`.
+> **Note:** OIDC allows all Google and Microsoft accounts by default. For production, restrict access with `GOOGLE_ALLOWED_DOMAINS` and `MICROSOFT_ALLOWED_TENANT_IDS`.
 
-<details>
-<summary>▶ Expected outputs</summary>
+---
 
 ![alt text](src/scripts/archive/images/ui.png)
 
@@ -428,9 +370,6 @@ Once deployment finishes, your environment should match the configuration demons
 
 ---
 
-</details>
-
----
 
 ## Optional — Test Alerting and Disaster Recovery
 
@@ -479,12 +418,7 @@ kill %1 2>/dev/null || true
 - ArgoCD self-heals infrastructure when re-enabled
 - S3 backups are restorable with point-count parity
 
-<details>
-<summary>▶ Expected output</summary>
-
 ![alt text](src/scripts/archive/images/alerts.png)
-
-</details>
 
 ---
 
