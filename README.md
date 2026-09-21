@@ -5,9 +5,9 @@ A RAG platform on Kubernetes (EKS) covering the end-to-end retrieval-augmented g
 The LLMOps-relevant pieces:
 
 - **Evaluated against a golden set.** Automated offline evaluation over 75 curated records, tracked in MLflow. Latest run: groundedness **0.95**, citation integrity **0.89**, recall@k **0.72**.
-- **Guardrailed output.** Responses are citation-validated before streaming — hallucinated references are stripped, and users open the original source via one-click presigned S3 URLs.
-- **Cost-aware inference. ** Exact and semantic response caching short-circuits the model call where possible; OAuth-authenticated users are rate-limited per user, subject-based rather than IP-based) to cap LLM spend.
-- **Operable in production.** 2.6 s end-to-end latency, OIDC authentication, GitOps delivery with Argo CD, Karpenter Spot autoscaling for stateless workloads, 20+ Prometheus alerts, and structured log aggregation in ClickHouse.
+- **Guardrailed output.** Responses are citation-validated before streaming — hallucinated references are stripped, and so users can open the original docs and the page number via one-click pre-signed S3 URLs.
+- **Cost-aware inference.** Exact and semantic response caching short-circuits the model call where possible; OAuth-authenticated users are rate-limited 5 reqs/min to cap LLM spend.
+- **Operable in production.** 2.6 s end-to-end latency, OIDC authentication, GitOps delivery with Argo CD, Karpenter Spot autoscaling for stateless workloads, 20+ Prometheus alerts, and structured 30 days log aggregation in ClickHouse.
 
 Read [Offline Evaluation](#offline-evaluation) for the full methodology, or jump to the [Deployment Guide](#step-by-step-deployment-guide).
 
@@ -266,7 +266,7 @@ Check the [documentation](src/indexing_pipeline/README.md) for configuration det
 export HF_TOKEN=   # Hugging Face token for faster model downloads (optional)
 bash src/scripts/eks/run_indexing_pipeline.sh
 ```
-> **Note: ** Karpenter may take 5–15 minutes to provision EC2 instances if the cheapest matching instance type is unavailable. It retries with other c-family types automatically. Pods will stay Pending until a compatible instance launches.
+> **NOTE:** Karpenter may take 5–15 minutes to provision EC2 instances if the cheapest matching instance type is unavailable. It retries with other c-family types automatically. Pods will stay Pending until a compatible instance launches.
 
 ![alt text](src/scripts/archive/images/indexing_pipeline.png)
 
