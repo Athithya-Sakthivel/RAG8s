@@ -1,13 +1,13 @@
-# RAG8s
+# RAG8s — Enterprise RAG platform for internal knowledge bases
 
-A RAG platform on Kubernetes (EKS) covering the end-to-end retrieval-augmented generation lifecycle — multi-format ingestion, chunking, hybrid retrieval (dense + sparse with Reciprocal Rank Fusion), cross-encoder reranking, streaming inference via AWS Bedrock, and citation-grounded generation — across 8 independently deployable microservices.
+Ask questions of your own documents and get cited answers. Covers the end-to-end retrieval-augmented generation lifecycle — multi-format ingestion (PDF, DOCX, audio, images, CSV, Markdown, HTML), chunking, hybrid retrieval (dense + sparse with Reciprocal Rank Fusion), cross-encoder reranking, streaming inference via AWS Bedrock, and citation-grounded generation — across 8 independently deployable microservices on Kubernetes (EKS).
 
-The LLMOps-relevant pieces:
+Four things that set it apart:
 
-- **Evaluated against a golden set.** Automated offline evaluation over 75 curated records, tracked in MLflow. Latest run: groundedness **0.95**, citation integrity **0.89**, recall@k **0.72**.
-- **Guardrailed output.** Responses are citation-validated before streaming — hallucinated references are stripped, and so users can open the original docs and the page number via one-click pre-signed S3 URLs.
-- **Cost-aware inference.** Exact and semantic response caching short-circuits the model call where possible; OAuth-authenticated users are rate-limited 5 reqs/min to cap LLM spend.
-- **Operable in production.** 2.6 s end-to-end latency, OIDC authentication, GitOps delivery with Argo CD, Karpenter Spot autoscaling for stateless workloads, 20+ Prometheus alerts, and structured 30 days log aggregation in ClickHouse.
+- **Evaluated against a golden set** — automated offline evaluation over 75 curated records, tracked in MLflow. Latest run: groundedness **0.95**, citation integrity **0.89**, recall@k **0.72**.
+- **Guardrailed output** — responses are citation-validated before streaming; hallucinated references are stripped, so users can open the original document at the cited page via one-click pre-signed S3 URLs.
+- **Cost-aware inference** — exact and semantic response caching short-circuits the model call where possible; OAuth-authenticated users are rate-limited 5 reqs/min to cap LLM spend.
+- **Operable at org scale** — 2.6 s end-to-end latency, OIDC authentication, GitOps delivery with Argo CD, Karpenter Spot autoscaling for stateless workloads, 20+ Prometheus alerts, and structured 30-day log aggregation in ClickHouse.
 
 Read [Offline Evaluation](#offline-evaluation) for the full methodology, or jump to the [Deployment Guide](#step-by-step-deployment-guide).
 
