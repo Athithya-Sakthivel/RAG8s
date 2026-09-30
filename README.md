@@ -1,19 +1,19 @@
 # RAG8s — Enterprise RAG platform for internal knowledge bases
 
-Ask questions of your own documents and get cited answers. Covers the end-to-end retrieval-augmented generation lifecycle — multi-format ingestion (PDF, DOCX, audio, images, CSV, Markdown, HTML), chunking, hybrid retrieval (dense + sparse with Reciprocal Rank Fusion), cross-encoder reranking, streaming inference via AWS Bedrock, and citation-grounded generation — across 8 independently deployable microservices on Kubernetes (EKS).
+Ask questions of your own document corpus and get cited answers. Covers the end-to-end retrieval-augmented generation lifecycle — multi-format ingestion (PDF, DOCX, audio, images, CSV, Markdown, HTML), sentence-aware chunking, hybrid retrieval (dense + sparse with Reciprocal Rank Fusion), conditional cross-encoder reranking, streaming inference via AWS Bedrock, and citation-grounded generation — across 8 independently deployable microservices on Kubernetes (EKS).
 
-Four things that set it apart:
+**What makes this production-ready:**
 
-- **Evaluated against a golden set** — automated offline evaluation over 75 curated records, tracked in MLflow. Latest run: groundedness **0.95**, citation integrity **0.89**, recall@k **0.72**.
+- **Evaluated against a golden set** — offline evaluation over 75 curated records, tracked in MLflow. Latest run: groundedness **0.95**, citation integrity **0.89**, recall@3 **0.72** *(eval run at `top_k=3` to stay within Bedrock rate limits — smaller `top_k` keeps prompt tokens per query lower; production default is `top_k=5`)*.
 - **Guardrailed output** — responses are citation-validated before streaming; hallucinated references are stripped, so users can open the original document at the cited page via one-click pre-signed S3 URLs.
-- **Cost-aware inference** — exact and semantic response caching short-circuits the model call where possible; OAuth-authenticated users are rate-limited 5 reqs/min to cap LLM spend.
-- **Operable at org scale** — 2.6 s end-to-end latency, OIDC authentication, GitOps delivery with Argo CD, Karpenter Spot autoscaling for stateless workloads, 20+ Prometheus alerts, and structured 30-day log aggregation in ClickHouse.
+- **Cost-aware inference** — exact and semantic response caching short-circuits the model call where possible; authenticated users are rate-limited to **5 reqs/min by default — keyed on the JWT subject, not IP — to cap LLM spend**.
+- **Operable at org scale** — 2.6 s end-to-end latency, GitOps delivery with Argo CD, Karpenter Spot autoscaling for stateless workloads, 20+ Prometheus alerts, and structured 30-day log aggregation in ClickHouse.
 
-Read [Offline Evaluation](#offline-evaluation) for the full methodology, or jump to the [Deployment Guide](#step-by-step-deployment-guide).
+Read [RAG Pipeline](#rag-pipeline) for how retrieval actually works, [Offline Evaluation](#offline-evaluation) for the full methodology, or jump to the [Deployment Guide](#step-by-step-deployment-guide).
 
 ---
 
-![alt text](src/scripts/archive/images/rag8s.gif)
+![RAG8s demo](src/scripts/archive/images/rag8s.gif)
 
 ---
 
@@ -21,21 +21,128 @@ Read [Offline Evaluation](#offline-evaluation) for the full methodology, or jump
 
 The RAG lifecycle is separated into two independent execution planes:
 
-**Batch indexing plane:**
-  An incremental, idempotent CronJob pipeline that ingests raw documents (PDF, DOCX, audio, images, CSV, Markdown, HTML, …) from S3, normalises and OCRs them, splits into traceable chunks, generates dense and sparse embeddings via stateless FastEmbed microservices, and upserts into **Qdrant** with full positional metadata. Backups are triggered automatically by configurable thresholds.
+**Batch indexing plane.** An incremental, idempotent CronJob pipeline that ingests raw documents (PDF, DOCX, audio, images, CSV, Markdown, HTML, …) from S3, normalises and OCRs them, splits into traceable chunks, generates dense and sparse embeddings via stateless FastEmbed microservices, and upserts into **Qdrant** with full positional metadata. Backups are triggered automatically by configurable thresholds.
 
-**Online inference plane:**
-  A low‑latency streaming request path that authenticates users via OIDC, performs exact and semantic cache lookups, embeds the query (dense + sparse in parallel), executes hybrid Qdrant search with Reciprocal Rank Fusion, optionally re‑ranks with a cross‑encoder, builds a strictly‑grounded numbered prompt, and streams the answer via AWS Bedrock. Every response is citation‑validated—hallucinated references are stripped, and users can open original documents with one‑click presigned S3 URLs.
+**Online inference plane.** A low-latency streaming request path that authenticates users via OIDC, performs exact and semantic cache lookups, embeds the query (dense + sparse in parallel), executes hybrid Qdrant search with Reciprocal Rank Fusion, optionally re-ranks with a cross-encoder, builds a strictly-grounded numbered prompt, and streams the answer via AWS Bedrock. Every response is citation-validated — hallucinated references are stripped, and users can open original documents with one-click presigned S3 URLs.
+
+### Why embeddings are self-hosted but the LLM is managed
+
+The **embedding model is coupled to the index**. Swapping `bge-small-en-v1.5` for a different model changes the vector space; every point in Qdrant becomes incompatible and the entire corpus must be re-embedded and re-upserted. That makes the embedder a long-lived architectural decision, which is why it's self-hosted, versioned (`PARSER_VERSION`, `CORPUS_VERSION`), and part of the cache key.
+
+The **LLM is stateless**. Swapping Bedrock models, or moving to Anthropic direct or OpenAI, is a configuration change — the retriever's prompt construction is provider-agnostic, and no re-indexing is required. That asymmetry drove the split: **self-hosted embedders (coupled, harder to change) + managed Bedrock (stateless, easy to swap)**. It also means the LLM is the natural failover target — a second provider can be added behind a router without touching the index.
 
 ---
 
-<img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/f8c5ac0e-f5cf-4b7d-ad10-b21c64a36aa2" />
+<img width="1536" height="1024" alt="RAG8s architecture" src="https://github.com/user-attachments/assets/f8c5ac0e-f5cf-4b7d-ad10-b21c64a36aa2" />
+
+---
+
+## RAG Pipeline
+
+The operational heart of the system. Everything else — Kubernetes, IAM, observability — exists to make this pipeline reliable, debuggable, and cheap to run.
+
+> **Pipeline in one line:** exact cache → parallel dense+sparse embed → semantic cache → hybrid Qdrant with RRF → conditional cross-encoder rerank → numbered prompt → Bedrock with guardrails → structural citation validation → background cache write-back. Every external dependency has an independent circuit breaker and a fallback, so the failure mode is a worse answer, not an error.
+
+### Ingestion & chunking
+
+Chunking is **sentence-aware, token-bounded, and citation-traceable** — deliberately not fixed-character.
+
+- **Sentence segmentation** via spaCy (`en_core_web_sm`), with blank-`en`/`sentencizer` and regex fallbacks. Each sentence carries `(text, start_char, end_char)` so chunk boundaries map back to exact source positions.
+- **Token accounting** via tiktoken (`cl100k_base`) — the tokenizer family an LLM will actually see.
+- **Packing** — sentences greedily packed to `MAX_TOKENS_PER_CHUNK` (default **512**), boundaries always on sentence edges.
+- **Overlap** — `NUMBER_OF_OVERLAPPING_SENTENCES` (default **2**) preserves context across boundaries.
+- **Floor** — chunks under `MIN_TOKENS_PER_CHUNK` (default **100**) merge into the previous chunk, so orphan headers never become standalone chunks.
+- **Oversized sentences** split word-by-word, then at the token-ID level, so nothing is silently dropped.
+
+Every chunk carries: `document_id` (SHA-256 of source — content-addressed), `chunk_id` (`{doc_id}_p{page}_{idx}` — deterministic), `page_number`, `source_url`, `parser_version` (enables re-index on parser upgrade), `semantic_region` (intro/early/middle/late/footer — a positional proxy for structure), and `figures` (OCR/caption/table text).
+
+### PDF extraction
+
+PDFs get dedicated handling: PyMuPDF for layout and images, pdfplumber for tables. Text-block centers are x-clustered to detect and reflow multi-column layouts. Text overlapping a figure/table bbox by >25% is excluded from the prose stream; captions within 80pt below a figure attach to that figure. Images above 3 KB are OCR'd at 300 DPI via RapidOCR (ONNX), with Tesseract as fallback. `(cid:N)` font artifacts are stripped during cleaning.
+
+### Embedding models
+
+| Layer | Model | Dim | Rationale |
+|---|---|---|---|
+| Dense | `BAAI/bge-small-en-v1.5` | 384 | Best quality-per-latency for CPU ONNX; L2-normalized so cosine ≈ dot product |
+| Sparse | `Qdrant/minicoil-v1` | — | Learned sparse; subword tokenization handles OOV better than BM25 |
+| Reranker | `Xenova/ms-marco-MiniLM-L-6-v2` | — | Cross-encoder; small enough for CPU; only fires conditionally |
+
+Both embedders run as stateless [FastEmbed](https://qdrant.tech/documentation/fastembed/#what-is-fastembed) services on CPU. Self-hosting is deliberate — see [Why embeddings are self-hosted but the LLM is managed](#why-embeddings-are-self-hosted-but-the-llm-is-managed).
+
+### Retrieval
+
+A fixed, deterministic path — **a workflow, not an agent**:
+
+1. **Exact cache** lookup by `cache_id = hash(query_norm, corpus_version, prompt_version, retrieval_version, model_name, tenant_id, top_k, fetch_k)`. Hit returns immediately.
+2. **Query embedding** — dense and sparse in parallel via `asyncio.gather`, each behind its own circuit breaker. Failure of one degrades to single-vector mode.
+3. **Semantic cache** — strict threshold (~0.84) first, then relaxed (~0.78). On a hit, the entry is promoted to the exact cache in the background.
+4. **Hybrid search** — parallel Qdrant dense + sparse, fused via **Reciprocal Rank Fusion**.
+5. **Conditional reranking** — cross-encoder fires only when fusion confidence is low or top-1/top-2 are close.
+6. **Prompt construction** — top-`k` chunks numbered `[1]`, `[2]`, … in a grounded template.
+7. **Generation** — Bedrock streams with AWS Guardrails enabled.
+8. **Citation validation** — structural (see below).
+9. **Cache write-back** — in a `BackgroundTask` so the SSE stream isn't held open.
+
+**RRF** merges by rank, not score: `RRF(d) = Σ 1 / (k + rank_i(d))` with `k = 60`. Rank-based fusion avoids the scale mismatch between cosine similarity and learned-sparse scores, and needs no per-corpus weight tuning.
+
+**Conditional reranking** fires on low fusion confidence or a narrow top-1/top-2 gap. Rerank and fusion scores are softmax-normalized and blended: `α · softmax(rerank) + (1 − α) · softmax(fusion)`. Non-pool candidates keep their relative order and append after the reranked pool. **Reranker failure falls back to fusion order — it never fails the request.**
+
+Every response carries a `retrieval` metadata block (`mode`, `hybrid`, `dense_count`, `sparse_count`, `fused_count`, full `rerank_*` record) so the path is debuggable from the client side without reading server logs.
+
+### Caching
+
+- **Exact cache** — keyed by the composite hash above. Returns in microseconds. Invalidates automatically when any version component changes.
+- **Semantic cache** — dense-vector lookup against a `__semantic_cache` collection. Strict threshold first, relaxed second. Semantic hits promote to the exact cache, so near-duplicates converge to free hits.
+- **TTL + cleanup** — entries carry `CACHE_TTL_SECONDS`; a background loop purges expired entries.
+- **Write-back** — happens in a `BackgroundTask` for streaming responses.
+
+### Generation & guardrails
+
+Bedrock streams with AWS Guardrails enabled. The LLM client is behind a circuit breaker; repeated failures open it and short-circuit until the reset window. A background health loop polls Bedrock — if it's unhealthy, `deterministic_summarize` produces an extractive fallback from the retrieved passages. The prompt template is versioned (`PROMPT_VERSION`) and part of the cache key.
+
+### Citation validation — structural, not entailment
+
+Every `[N]` in the answer is checked against the passage indices actually inserted into the prompt. Invalid citations are **stripped**; if stripping empties the answer, `deterministic_summarize` fires. This catches the dominant failure mode — invented citation numbers — at zero added latency.
+
+It does **not** verify that a cited passage entails the sentence citing it. That's entailment checking and requires an NLI model or LLM-as-judge per response; it's a deliberate trade-off. `citation_integrity = 0.89` measures how often the model *attempts* an invalid citation — user-facing output has zero fake citations by construction.
+
+### Graceful degradation
+
+Every external dependency has a fallback. **The failure mode is a worse answer, not an error.**
+
+| Failure | Behavior |
+|---|---|
+| Dense embedder down | Retrieval proceeds sparse-only |
+| Sparse embedder down | Retrieval proceeds dense-only |
+| Qdrant semantic cache down | Pipeline bypasses cache, serves fresh |
+| Qdrant docs collection down | `/readyz` → `not_ready`; health loop re-bootstraps |
+| Reranker down | Fusion scores used as-is |
+| Bedrock down | `deterministic_summarize` extractive fallback |
+| Any component: breaker open | Component skipped; fallback path taken |
+
+Each dependency (cache, retrieval, dense, sparse, reranker, llm) has an **independent circuit breaker** — a failing reranker does not cascade into cache failures.
+
+### Latency budget
+
+
+| Stage | Time |
+|---|---|
+| Auth + exact-cache lookup | ~50 ms |
+| Parallel dense + sparse embedding | ~100 ms |
+| Hybrid Qdrant search (dense + sparse, parallel) | ~150 ms |
+| RRF fusion (in-process) | ~2–5 ms |
+| Cross-encoder rerank (when triggered) | ~300 ms |
+| Bedrock generation (streamed) | ~2 s (TTFT < 1 s) |
+| **End-to-end** | **~2.6 s** |
+
 
 ---
 
 ## Cloud Infrastructure
 
-Infrastructure is declared with **OpenTofu (Terraform)**, workloads run on **EKS** with an on‑demand system nodegroup for platform services and **Karpenter** for elastically provisioning spot instances for stateless, bursty inference workloads. All state lives in **S3** and **ECR**. Container images are built deterministically and pushed via **GitHub Actions OIDC**—no long‑lived credentials.
+Infrastructure is declared with **OpenTofu (Terraform)** and split across two providers. **AWS** hosts the compute and state: workloads run on **EKS** with an on-demand system nodegroup for platform services and **Karpenter** for elastically provisioning Spot instances for stateless, bursty inference workloads; all state lives in **S3** and **ECR**; container images are built deterministically and pushed via **GitHub Actions OIDC** — no long-lived credentials. **Cloudflare** sits at the edge: a single **Cloudflare Tunnel** terminates external traffic with SSL strict, provides DDoS mitigation, and exposes no public AWS IPs or load balancers.
+
 
 ---
 
@@ -45,54 +152,69 @@ Infrastructure is declared with **OpenTofu (Terraform)**, workloads run on **EKS
 |---------|------|-------------|
 | **Frontend** | OIDC gateway + chat UI | Serves the chat interface, handles Google/Microsoft sign-in, mints short-lived JWTs, proxies streaming requests |
 | **Retriever** | RAG orchestration engine | Cache → embed → hybrid search → rerank → Bedrock → validate citations |
-| **Dense Embedder** | Text → dense vectors | FastEmbed, BAAI/bge-small-en-v1.5, 384‑dim L2‑normalized, stateless |
-| **Sparse Embedder** | Text → sparse vectors | FastEmbed, Qdrant/minicoil-v1, stateless |
-| **Reranker** | Query × documents → scores | Cross‑encoder (Xenova/ms-marco-MiniLM-L-6-v2), auto‑triggered on low confidence |
-| **Indexing CronJob** | Document ingestion pipeline | Pre‑conversion → chunking → embedding → Qdrant upsert → conditional backup |
-| **Valkey** | Distributed rate limiting | Redis‑compatible, shared counters for SlowAPI, NetworkPolicy‑enforced isolation |
+| **Dense Embedder** | Text → dense vectors | FastEmbed, `BAAI/bge-small-en-v1.5`, 384-dim L2-normalized, stateless |
+| **Sparse Embedder** | Text → sparse vectors | FastEmbed, `Qdrant/minicoil-v1`, stateless |
+| **Reranker** | Query × documents → scores | Cross-encoder (`Xenova/ms-marco-MiniLM-L-6-v2`), auto-triggered on low confidence |
+| **Indexing CronJob** | Document ingestion pipeline | Pre-conversion → chunking → embedding → Qdrant upsert → [conditional backup](https://github.com/Athithya-Sakthivel/RAG8s/blob/main/src/indexing_pipeline/README.md#trigger-logic) |
+| **Valkey** | Distributed rate limiting | Redis-compatible, shared counters for SlowAPI, NetworkPolicy-enforced isolation |
 | **Cloudflared** | Secure tunnel termination | Routes hostnames to internal ClusterIP services, blocks observability endpoints at edge, Prometheus metrics |
 
 ---
 
 ## Connectivity & Auth
 
-External access is provided through a single **Cloudflare Tunnel** (SSL strict, no public IPs or load balancers). Authentication uses **OAuth (Google, Microsoft)** with short‑lived JWTs and domain‑scoped allowlists. Rate limiting is per‑user (sub‑based, not IP), backed by **Valkey**.
+External access is provided through a single **Cloudflare Tunnel** (SSL strict, no public IPs or load balancers). Authentication uses **OAuth (Google, Microsoft)** with short-lived JWTs and domain-scoped allowlists.
+
+**Two-tier rate limiting, with DDoS mitigation at the edge:**
+
+- **Cloudflare edge** — DDoS mitigation at the tunnel boundary; no public origin IPs, so volumetric attacks never reach the cluster.
+- **Per-user (JWT subject)** — default **5 reqs/min** at the frontend, to cap LLM spend per authenticated user.
+- **Per-IP** — `60/min` on `/generate/stream`, `30/min` on `/presign` at the Retriever, against unauthenticated and scripted traffic.
+
+Counters are shared across Retriever replicas via **Valkey**.
 
 ---
 
 ## Observability
 
-Built‑in, no external SaaS required:
+Built-in, no external SaaS required:
+
 - **Prometheus + Alertmanager** — 20+ alert rules, Slack notifications with inhibition rules
-- **Grafana** — auto‑discovered dashboards via ConfigMap sidecar
-- **Vector + ClickHouse** — structured JSON log aggregation with 30‑day retention
+- **Grafana** — auto-discovered dashboards via ConfigMap sidecar
+- **Vector + ClickHouse** — structured JSON log aggregation with 30-day retention
+
+Logs are emitted as structured JSON with `service`, `environment`, `instance`, `namespace`, and a per-request `x-request-id` propagated end-to-end. Every stage emits Prometheus metrics (`qdrant_query_count`, `qdrant_query_duration`, `cache_lookup_count`, `cache_lookup_duration`, `cache_write_count`, `cache_write_duration`, `pipeline_duration`, `pipeline_errors`, `service_ready`), so a request can be reconstructed from logs + metrics without reproducing it.
 
 ---
 
 ## Security
 
 Layered across the full stack:
+
 - **Edge:** Cloudflare Tunnel with SSL strict and endpoint filtering
-- **Auth:** OIDC with PKCE and CSRF state protection, ES256 JWTs (15‑min TTL), per‑provider domain/org/tenant allowlists
+- **Auth:** OIDC with PKCE and CSRF state protection, ES256 JWTs (15-min TTL), per-provider domain/org/tenant allowlists
 - **Network:** Kubernetes NetworkPolicies isolating namespaces by function
-- **IAM:** IRSA for least‑privilege AWS access, GitHub Actions OIDC with per‑repo roles
-- **Runtime:** Read‑only root filesystems, non‑root containers, no privileged pods
-- **CI/CD:** Pre‑commit Gitleaks hook + CI‑side scanning (Gitleaks, Trivy, OpenGrep) on every commit
-- **GitOps:** Argo CD reconciles cluster state from Git, self‑heals drift, rollbacks via `git revert`
+- **IAM:** IRSA for least-privilege AWS access, GitHub Actions OIDC with per-repo roles
+- **Runtime:** Read-only root filesystems, non-root containers, no privileged pods
+- **CI/CD:** Pre-commit Gitleaks hook + CI-side scanning (Gitleaks, Trivy, OpenGrep) on every commit
+- **GitOps:** Argo CD reconciles cluster state from Git, self-heals drift, rollbacks via `git revert`
 
 ---
 
 ## Offline Evaluation
 
 Automated evaluation against a 75-record golden dataset, tracked in MLflow.
-`cat src/offline_eval/offline_eval_artifacts/summary.json`
+
+```
+cat src/offline_eval/offline_eval_artifacts/summary.json
+```
 
 ```json
 {
-  "meta": { "records": 75 },
+  "meta": { "records": 75, "top_k": 3 },
   "performance": { "success_rate": 1.0 },
   "retrieval": {
-    "recall_at_k": 0.72,
+    "recall_at_3": 0.72,
     "mrr": 0.5793
   },
   "generation": {
@@ -109,14 +231,55 @@ Automated evaluation against a 75-record golden dataset, tracked in MLflow.
 
 | Dimension | Highlight |
 |-----------|-----------|
-| Retrieval | Recall@K 0.72, MRR 0.58 |
+| Retrieval | Recall@3 0.72, MRR 0.58 |
 | Generation | Groundedness 0.95, Fact Coverage 0.78 |
 | Citations | Integrity 0.89 (low hallucination) |
 | Reliability | 100% success, 0% errors |
 
-Each record defines query, expected chunk, reference answer, and expected facts. Evaluation measures retrieval accuracy, fact coverage, groundedness, and citation integrity across all records.
+### Golden set composition
+
+Each record defines:
+
+- `query` — a realistic employee question about the indexed corpus
+- `expected_chunk_id` — the chunk that should be retrieved
+- `reference_answer` — a hand-written ground-truth answer
+- `expected_facts[]` — the atomic facts that must appear in a complete answer
+
+75 records gives statistically meaningful signal on the four primary metrics, but is not enough to catch rare failure modes. A production expansion to 500+ records with adversarial cases is on the roadmap.
+
+### Metric definitions
+
+- **Recall@3** — fraction of queries where the expected chunk appears in the top-3 retrieved candidates.
+- **MRR** — mean of `1 / rank` of the first relevant result.
+- **Groundedness** — LLM-as-judge entailment score: fraction of claims in the generated answer that are supported by the retrieved passages.
+- **Fact coverage** — fraction of `expected_facts` present in the answer. It is a recall-oriented metric: extra correct information is not penalized.
+- **Citation integrity** — fraction of citation markers in the raw model output that reference a real retrieved passage, measured *before* stripping. This quantifies the raw hallucination rate; user-facing output has zero fake citations by construction.
+- **Response similarity** — BLEU against the reference answer. Reported for transparency but **not optimized**: RAG answers are paraphrases, so a correct answer shares almost no lexical surface with an independently written reference. Optimizing BLEU would be optimizing the wrong objective.
+
+### Eval caveats
+
+- **Offline evaluation was run with `top_k=3`** to stay within Bedrock rate limits across the 75-record set. Production default is `top_k=5`, so recall is expected to be higher in operation. The next run will report both recall@3 and recall@5.
+- **LLM-as-judge has biases.** It correlates well with human judgment but is not a substitute for it. A human-labeled subset for calibration is on the roadmap.
+- **No online evaluation yet.** Feedback signals (thumbs, citation clicks) are not collected; offline metrics can drift from production behavior.
 
 > By combining hybrid retrieval, precise citation grounding, clean separation of batch and online concerns, declarative infrastructure, layered security, and comprehensive observability, `RAG8s` serves as a **robust foundation** for running RAG systems in real production environments.
+
+---
+
+## Known Limitations
+
+- **No per-document access filtering.** Any authenticated user in an allowed domain can query the full corpus. Chunks already carry source-document metadata; the missing piece is a query-time filter against the user's group membership. This is the top gap for enterprise deployment.
+- **No deletion reconciliation.** Deleting a source document from S3 does not currently remove its chunks from Qdrant. The fix is a soft-tombstone step in the indexing CronJob — mark chunks deleted and filter at query time, so the operation is reversible and doesn't race with in-flight queries.
+- **Structural, not entailment-based, citation validation.** The current validator catches fake citation numbers but does not verify that a cited passage actually supports the sentence citing it. Full entailment checking requires an NLI model or LLM-as-judge per response and is a latency/cost trade-off. See the citation validation section above.
+- **Single LLM provider.** Bedrock is a single point of failure for generation. A router with an independent second provider (Anthropic direct, OpenAI) is on the roadmap; the design supports it because the LLM is stateless.
+- **No online evaluation.** Feedback signals are not collected. The offline metrics are meaningful in relative terms but may not reflect production behavior.
+- **Recall is capped by chunking and embedding model.** Recall@3 = 0.72 is bounded by fixed-size chunking and a small (384-dim, CPU) embedding model. Semantic chunking and a larger embedding model are the two highest-leverage levers, and both are measurable against the same golden set.
+
+### If I had one more sprint
+
+- **1. Add query-time access filtering.** Chunks already carry source metadata; the missing piece is a group-membership filter on the Qdrant query path — metadata filtering for single-tenant, per-tenant collections for hard isolation. This is the single change that makes RAG8s deployable inside a real org.
+- **2. Add a second LLM provider behind a router.** Bedrock is a single point of failure for generation. The design supports this because the LLM is stateless — a config-shaped change, not an architectural one.
+
 
 ---
 
@@ -124,29 +287,30 @@ Each record defines query, expected chunk, reference answer, and expected facts.
 
 ## Prerequisites
 
-1. **Docker installed and running _without_ sudo access. Non root is required for devcontainer stability. Run `sudo usermod -aG docker $USER && newgrp docker` if not already**
+1. **Docker installed and running _without_ sudo access. Non-root is required for devcontainer stability. Run `sudo usermod -aG docker $USER && newgrp docker` if not already.**
 2. **Visual Studio Code with the Dev Containers extension installed (for a deterministic environment): [devcontainers](https://code.visualstudio.com/docs/devcontainers/containers)**
-3. **An AWS account with sufficient IAM permissions (AdministratorAccess or equivalent) to manage**:
+3. **An AWS account with sufficient IAM permissions (AdministratorAccess or equivalent) to manage:**
    * Amazon EKS (Elastic Kubernetes Service)
    * EC2, VPCs, Subnets, and Security Groups
    * Amazon S3
    * IAM Roles, Policies, and Instance Profiles
    **AWS Free Tier is sufficient for development and testing purposes.**
-4. **A Cloudflare account with a registered domain, with permissions to manage DNS records and create Cloudflare Tunnels (cloudflared)**
+4. **A Cloudflare account with a registered domain, with permissions to manage DNS records and create Cloudflare Tunnels (cloudflared).**
 
 ---
 
-## Clone the repo and build the devcontainer(Reproducible).
+## Clone the repo and build the devcontainer (Reproducible).
 
-```sh 
+```sh
 cd $HOME && rm -rf RAG8s && git clone https://github.com/Athithya-Sakthivel/RAG8s.git
 cd RAG8s && code .
 ```
-> Ctrl + Shift + P -> Paste `Dev containers: Rebuild Container Without Cache` and Enter. First-time build takes 5-15 minutes depending on network speed. You may create a github codespace instead if network is slow
+
+> Ctrl + Shift + P → Paste `Dev containers: Rebuild Container Without Cache` and Enter. First-time build takes 5–15 minutes depending on network speed. You may create a GitHub codespace instead if network is slow.
 
 ---
 
-### Open a new terminal and login to your gh account as shown below
+### Open a new terminal and log in to your `gh` account as shown below
 
 ```sh
 git config --global user.name "Your Name"
@@ -159,7 +323,7 @@ gh auth login
 ? How would you like to authenticate GitHub CLI? Login with a web browser
 
 ! First copy your one-time code: <code>
-- Press Enter to open github.com in your browser... 
+- Press Enter to open github.com in your browser...
 ✓ Authentication complete. Press Enter to continue...
 ```
 
@@ -194,11 +358,7 @@ export TF_VAR_github_repository=<user_name/<repo_name>"    # replace with your u
 bash src/infra/terraform/aws/run.sh --create --env staging
 ```
 
----
-
-![alt text](src/scripts/archive/images/tf.png)
-
----
+![Terraform output](src/scripts/archive/images/tf.png)
 
 ### 1.2 Connect to the New EKS Cluster
 
@@ -212,13 +372,13 @@ aws eks update-kubeconfig --region ap-south-1 --name rag-eks-staging
 
 ### 2.1 Trigger Image Builds to ECR
 
-Replaces account IDs and region with your's in CI workflow files so GitHub Actions can push images to your ECR. After running, open your repo's Actions tab — all 6 service images will build and push in ~5 minutes.
+Replaces account IDs and region in CI workflow files so GitHub Actions can push images to your ECR. After running, open your repo's Actions tab — all 6 service images will build and push in ~5 minutes.
 
 ```sh
 bash src/scripts/replace.sh
 ```
 
-![alt text](src/scripts/archive/images/ecr_push.png)
+![ECR push](src/scripts/archive/images/ecr_push.png)
 
 ---
 
@@ -226,31 +386,27 @@ bash src/scripts/replace.sh
 
 ### 3.1 Install Argo CD
 
-Deploys the GitOps controller that will sync all applications from this repo. Requires a GitHub personal access token for private repo access. The secret shown is temporary. 
+Deploys the GitOps controller that will sync all applications from this repo. Requires a GitHub personal access token for private repo access. The secret shown is temporary.
 
 ```bash
 export GIT_PAT=ghp_   # Visit https://github.com/settings/tokens/new
 bash src/infra/core/argo_setup.sh --rollout
 ```
 
-![alt text](src/scripts/archive/images/argo_setup.png)
-
-
----
+![Argo setup](src/scripts/archive/images/argo_setup.png)
 
 ### 3.2 Bootstrap Karpenter for the stateless workloads
 
 [Karpenter](https://karpenter.sh/docs/) automatically provisions EC2 Spot nodes labeled `node-type=compute:NoSchedule` for stateless workloads. The Frontend, Retriever, Embedders, Reranker, Indexing CronJob, and Cloudflared tunnel are scheduled onto these nodes using matching tolerations, while a Pod Disruption Budget keeps Cloudflared available. Underutilized nodes are automatically consolidated after 15 minutes (`WhenEmptyOrUnderutilized`).
 
-
 ```bash
-export GH_REPO= # replace with your full repo url(https://github.com/<USER_NAME/$REPO_NAME.git)
+export GH_REPO= # replace with your full repo url (https://github.com/<USER_NAME/$REPO_NAME.git)
 export GH_BRANCH="main"
 export AWS_REGION="ap-south-1"
 bash src/scripts/eks/bootstrap_karpenter.sh --rollout
 ```
 
-![alt text](src/scripts/archive/images/karpenter_setup.png)
+![Karpenter setup](src/scripts/archive/images/karpenter_setup.png)
 
 ---
 
@@ -258,23 +414,24 @@ bash src/scripts/eks/bootstrap_karpenter.sh --rollout
 
 This phase sets up the complete document processing stack. It deploys Qdrant (a 3-node vector database for storing embeddings), FastEmbed services (three microservices for dense embeddings, sparse embeddings, and reranking), and finally the indexing CronJob that runs on a schedule.
 
-Once deployed, this pipeline automatically handles the full document lifecycle: Uploads few pdfs and htmls to s3, ingests raw files from S3, converts them to text (including OCR for pages/slides with images), splitting them into smaller chunks, generating embeddings for each chunk, and indexing them into Qdrant for fast retrieval.
+Once deployed, this pipeline automatically handles the full document lifecycle: upload a few PDFs and HTMLs to S3, ingest raw files from S3, convert them to text (including OCR for pages/slides with images), split them into smaller chunks, generate embeddings for each chunk, and index them into Qdrant for fast retrieval.
 
-Check the [documentation](src/indexing_pipeline/README.md) for configuration details and how the indexing pipeline works under the hood.
+See the [indexing pipeline documentation](src/indexing_pipeline/README.md) for configuration details.
 
 ```bash
 export HF_TOKEN=   # Hugging Face token for faster model downloads (optional)
 bash src/scripts/eks/run_indexing_pipeline.sh
 ```
+
 > **NOTE:** Karpenter may take 5–15 minutes to provision EC2 instances if the cheapest matching instance type is unavailable. It retries with other c-family types automatically. Pods will stay Pending until a compatible instance launches.
 
-![alt text](src/scripts/archive/images/indexing_pipeline.png)
+![Indexing pipeline](src/scripts/archive/images/indexing_pipeline.png)
 
 ---
 
 ## Phase 5 — External Access & DNS: Set Up Cloudflare Tunnel and DNS
 
-Creates DNS records and a [Cloudflared/Argo tunnel](https://developers.cloudflare.com/tunnel/) that securely routes traffic to your cluster — no LoadBalancers or public IPs needed. The script waits for you to authorize Cloudflare access. 
+Creates DNS records and a [Cloudflared/Argo tunnel](https://developers.cloudflare.com/tunnel/) that securely routes traffic to your cluster — no LoadBalancers or public IPs needed. The script waits for you to authorize Cloudflare access.
 
 ```sh
 export CLOUDFLARE_ACCOUNT_ID=      # Cloudflare dashboard > Account Home > Search and enter "Copy account ID".
@@ -293,13 +450,13 @@ export CLOUDFLARE_TUNNEL_ID="$(tofu -chdir=src/infra/terraform/cloudflare output
 python3 src/infra/core/cloudflared_setup.py --write
 ```
 
-![alt text](src/scripts/archive/images/cloudflare_tunnel.png)
+![Cloudflare tunnel](src/scripts/archive/images/cloudflare_tunnel.png)
 
 ---
 
 ## Phase 6 — Query Engine & User-Facing Services: Deploy the Inference Stack
 
-Launches the [retriever](src/services/retriever/README.md), [Chat UI + OIDC authentication](src/services/frontend), Valkey (for per-user rate limiting), and the [Cloudflared tunnel](https://developers.cloudflare.com/tunnel/). Configure OAuth credentials for Google, Microsoft, or both—enabling *either provider is sufficient* for user authentication.
+Launches the [retriever](src/services/retriever/README.md), [Chat UI + OIDC authentication](src/services/frontend), Valkey (for per-user rate limiting), and the [Cloudflared tunnel](https://developers.cloudflare.com/tunnel/). Configure OAuth credentials for Google, Microsoft, or both — enabling *either provider is sufficient* for user authentication.
 
 > **Create OAuth Credentials** [Google](https://oauth2-proxy.github.io/oauth2-proxy/configuration/providers/google/#usage) | [Microsoft](https://oauth2-proxy.github.io/oauth2-proxy/configuration/providers/ms_entra_id)
 
@@ -309,15 +466,14 @@ export GOOGLE_CLIENT_ID=             # Google OAuth client ID
 export GOOGLE_CLIENT_SECRET=          # Google OAuth client secret
 export GOOGLE_ALLOWED_DOMAINS="company.com,gmail.com"        # Comma-separated allowed email domains
 export MS_CLIENT_ID=                       # Azure AD application (client) ID
-export MS_CLIENT_SECRET=                   # Azure AD client secret 
+export MS_CLIENT_SECRET=                   # Azure AD client secret
 export MICROSOFT_ALLOWED_TENANT_IDS=       # Primary tenant ID (single-tenant or common)
 export MICROSOFT_ALLOWED_DOMAINS="outlook.com,company.com"   # Comma-separated allowed email domains
 
 bash src/scripts/eks/run_inference_pipeline.sh
 ```
 
-
-![alt text](src/scripts/archive/images/inference_svcs.png)
+![Inference services](src/scripts/archive/images/inference_svcs.png)
 
 ---
 
@@ -352,24 +508,15 @@ The deployment reproduces the **ground-truth configuration** shown in the projec
 
 > **Note:** OIDC allows all Google and Microsoft accounts by default. For production, restrict access with `GOOGLE_ALLOWED_DOMAINS` and `MICROSOFT_ALLOWED_TENANT_IDS`.
 
----
+![UI](src/scripts/archive/images/ui.png)
 
-![alt text](src/scripts/archive/images/ui.png)
+![Observability health](src/scripts/archive/images/observability_health.png)
 
----
+![Service health](src/scripts/archive/images/service_health.png)
 
-![alt text](src/scripts/archive/images/observability_health.png)
-
----
-
-![alt text](src/scripts/archive/images/service_health.png)
+![Argo UI](src/scripts/archive/images/argo_ui.png)
 
 ---
-
-![alt text](src/scripts/archive/images/argo_ui.png)
-
----
-
 
 ## Optional — Test Alerting and Disaster Recovery
 
@@ -414,11 +561,12 @@ kill %1 2>/dev/null || true
 ```
 
 **What this validates:**
+
 - Alertmanager fires `QdrantDown` and notifies Slack
 - ArgoCD self-heals infrastructure when re-enabled
 - S3 backups are restorable with point-count parity
 
-![alt text](src/scripts/archive/images/alerts.png)
+![Alerts](src/scripts/archive/images/alerts.png)
 
 ---
 
@@ -432,7 +580,7 @@ To tear down the entire infrastructure and avoid ongoing costs:
 # 1. Remove workloads to trigger Karpenter scale-down
 kubectl delete ns inference --ignore-not-found
 kubectl delete ns fastembed --ignore-not-found
-sleep 600   # Allow Karpenter to terminate spot instances
+sleep 600 
 
 # 2. Destroy Cloudflare resources
 bash src/infra/terraform/cloudflare/run.sh --destroy
@@ -442,7 +590,8 @@ bash src/infra/terraform/aws/run.sh --destroy --env staging --yes-delete
 ```
 
 **Post-cleanup verification:**
-- Confirm no RAG8s specific EC2 instances remain in the TF_VAR_region
+
+- Confirm no RAG8s-specific EC2 instances remain in the `TF_VAR_region`
 - Verify the EKS cluster and associated security groups are removed
 - Run `python3 src/scripts/eks/force_delete.py` as a last resort for orphaned resources
 
