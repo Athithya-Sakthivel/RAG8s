@@ -1,6 +1,6 @@
 annotated-doc==0.0.4
 annotated-types==0.7.0
-anyio==4.13.0
+anyio==4.14.2
 Authlib==1.7.1
 certifi==2026.4.22
 cffi==2.0.0
@@ -25,7 +25,7 @@ prometheus_client==0.25.0
 pycparser==3.0
 pydantic==2.13.3
 pydantic_core==2.46.3
-PyJWT==2.12.1
+PyJWT==2.14.0
 redis==5.3.1
 slowapi==0.1.9
 starlette==1.0.0

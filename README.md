@@ -97,10 +97,6 @@ Every response carries a `retrieval` metadata block (`mode`, `hybrid`, `dense_co
 - **TTL + cleanup** — entries carry `CACHE_TTL_SECONDS`; a background loop purges expired entries.
 - **Write-back** — happens in a `BackgroundTask` for streaming responses.
 
-### Generation & guardrails
-
-Bedrock streams with AWS Guardrails enabled. The LLM client is behind a circuit breaker; repeated failures open it and short-circuit until the reset window. A background health loop polls Bedrock — if it's unhealthy, `deterministic_summarize` produces an extractive fallback from the retrieved passages. The prompt template is versioned (`PROMPT_VERSION`) and part of the cache key.
-
 ### Citation validation — structural, not entailment
 
 Every `[N]` in the answer is checked against the passage indices actually inserted into the prompt. Invalid citations are **stripped**; if stripping empties the answer, `deterministic_summarize` fires. This catches the dominant failure mode — invented citation numbers — at zero added latency.
