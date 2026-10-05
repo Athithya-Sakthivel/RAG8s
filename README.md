@@ -9,7 +9,7 @@ Ask questions of your own document corpus and get cited answers. Covers the end-
 - **Cost-aware inference** — exact and semantic response caching short-circuits the model call where possible; authenticated users are rate-limited to **5 reqs/min by default — keyed on the JWT subject, not IP — to cap LLM spend**.
 - **Operable at org scale** — 2.6 s end-to-end latency, GitOps delivery with Argo CD, Karpenter Spot autoscaling for stateless workloads, 20+ Prometheus alerts, and structured 30-day log aggregation in ClickHouse.
 
-Read [RAG Pipeline](#rag-pipeline) for how retrieval actually works, [Offline Evaluation](#offline-evaluation) for the full methodology, or jump to the [Deployment Guide](#step-by-step-deployment-guide).
+Read [RAG Pipeline](#rag-pipeline-overview) for how retrieval actually works, [Offline Evaluation](#offline-evaluation) for the full methodology, or jump to the [Deployment Guide](#step-by-step-deployment-guide).
 
 ---
 
@@ -58,7 +58,7 @@ PDFs get dedicated handling: PyMuPDF for layout and images, pdfplumber for table
 ### Why Embeddings Are Self-Hosted but the LLM Is Managed
 
 **Embeddings are coupled to the index.** Changing the embedding model changes the vector space, requiring the corpus to be re-embedded and Qdrant to be rebuilt. This makes the embedder a long-lived, versioned component.
-**The LLM is stateless.** Bedrock models can be changed without re-indexing because retrieval and prompt construction are provider-agnostic. A second LLM provider can also be added as a failover.
+**The LLM is stateless.** Bedrock models can be changed without re-indexing because retrieval and prompt construction are provider-agnostic.
 
 ### Retrieval
 
