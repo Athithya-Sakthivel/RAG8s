@@ -21,15 +21,10 @@ Read [RAG Pipeline](#rag-pipeline) for how retrieval actually works, [Offline Ev
 
 The RAG lifecycle is separated into two independent execution planes:
 
-**Batch indexing plane.** An incremental, idempotent CronJob pipeline that ingests raw documents (PDF, DOCX, audio, images, CSV, Markdown, HTML, …) from S3, normalises and OCRs them, splits into traceable chunks, generates dense and sparse embeddings via stateless FastEmbed microservices, and upserts into **Qdrant** with full positional metadata. Backups are triggered automatically by configurable thresholds.
+**Batch indexing plane.** An incremental, idempotent CronJob pipeline that ingests raw documents (PDF, DOCX, audio, images, CSV, Markdown, HTML, …) from S3, normalises and OCRs them, splits them into traceable chunks, generates dense and sparse embeddings via stateless FastEmbed microservices, and upserts them into **Qdrant** with full positional metadata. Backups are triggered automatically by configurable thresholds. [Batch Indexing Pipeline](src/indexing_pipeline/README.md)
 
-**Online inference plane.** A low-latency streaming request path that authenticates users via OIDC, performs exact and semantic cache lookups, embeds the query (dense + sparse in parallel), executes hybrid Qdrant search with Reciprocal Rank Fusion, optionally re-ranks with a cross-encoder, builds a strictly-grounded numbered prompt, and streams the answer via AWS Bedrock. Every response is citation-validated — hallucinated references are stripped, and users can open original documents with one-click presigned S3 URLs.
+**Online inference plane.** A low-latency streaming request path that authenticates users via OIDC, performs exact and semantic cache lookups, embeds the query (dense + sparse in parallel), executes hybrid Qdrant search with Reciprocal Rank Fusion, optionally re-ranks with a cross-encoder, builds a strictly grounded numbered prompt, and streams the answer via AWS Bedrock. Every response is citation-validated—hallucinated references are stripped, and users can open original documents with one-click presigned S3 URLs. [Inference Pipeline](src/services/inference_pipeline.md)
 
-### Why embeddings are self-hosted but the LLM is managed
-
-The **embedding model is coupled to the index**. Swapping `bge-small-en-v1.5` for a different model changes the vector space; every point in Qdrant becomes incompatible and the entire corpus must be re-embedded and re-upserted. That makes the embedder a long-lived architectural decision, which is why it's self-hosted, versioned (`PARSER_VERSION`, `CORPUS_VERSION`), and part of the cache key.
-
-The **LLM is stateless**. Swapping Bedrock models, or moving to Anthropic direct or OpenAI, is a configuration change — the retriever's prompt construction is provider-agnostic, and no re-indexing is required. That asymmetry drove the split: **self-hosted embedders (coupled, harder to change) + managed Bedrock (stateless, easy to swap)**. It also means the LLM is the natural failover target — a second provider can be added behind a router without touching the index.
 
 ---
 
@@ -37,7 +32,7 @@ The **LLM is stateless**. Swapping Bedrock models, or moving to Anthropic direct
 
 ---
 
-## RAG Pipeline
+## RAG Pipeline Overview
 
 The operational heart of the system. Everything else — Kubernetes, IAM, observability — exists to make this pipeline reliable, debuggable, and cheap to run.
 
@@ -56,19 +51,14 @@ Chunking is **sentence-aware, token-bounded, and citation-traceable** — delibe
 
 Every chunk carries: `document_id` (SHA-256 of source — content-addressed), `chunk_id` (`{doc_id}_p{page}_{idx}` — deterministic), `page_number`, `source_url`, `parser_version` (enables re-index on parser upgrade), `semantic_region` (intro/early/middle/late/footer — a positional proxy for structure), and `figures` (OCR/caption/table text).
 
-### PDF extraction
+### Document Extraction (e.g., PDF)
 
 PDFs get dedicated handling: PyMuPDF for layout and images, pdfplumber for tables. Text-block centers are x-clustered to detect and reflow multi-column layouts. Text overlapping a figure/table bbox by >25% is excluded from the prose stream; captions within 80pt below a figure attach to that figure. Images above 3 KB are OCR'd at 300 DPI via RapidOCR (ONNX), with Tesseract as fallback. `(cid:N)` font artifacts are stripped during cleaning.
 
-### Embedding models
+### Why Embeddings Are Self-Hosted but the LLM Is Managed
 
-| Layer | Model | Dim | Rationale |
-|---|---|---|---|
-| Dense | `BAAI/bge-small-en-v1.5` | 384 | Best quality-per-latency for CPU ONNX; L2-normalized so cosine ≈ dot product |
-| Sparse | `Qdrant/minicoil-v1` | — | Learned sparse; subword tokenization handles OOV better than BM25 |
-| Reranker | `Xenova/ms-marco-MiniLM-L-6-v2` | — | Cross-encoder; small enough for CPU; only fires conditionally |
-
-Both embedders run as stateless [FastEmbed](https://qdrant.tech/documentation/fastembed/#what-is-fastembed) services on CPU. Self-hosting is deliberate — see [Why embeddings are self-hosted but the LLM is managed](#why-embeddings-are-self-hosted-but-the-llm-is-managed).
+**Embeddings are coupled to the index.** Changing the embedding model changes the vector space, requiring the corpus to be re-embedded and Qdrant to be rebuilt. This makes the embedder a long-lived, versioned component.
+**The LLM is stateless.** Bedrock models can be changed without re-indexing because retrieval and prompt construction are provider-agnostic. A second LLM provider can also be added as a failover.
 
 ### Retrieval
 
@@ -99,46 +89,13 @@ Every response carries a `retrieval` metadata block (`mode`, `hybrid`, `dense_co
 
 ### Citation validation — structural, not entailment
 
-Every `[N]` in the answer is checked against the passage indices actually inserted into the prompt. Invalid citations are **stripped**; if stripping empties the answer, `deterministic_summarize` fires. This catches the dominant failure mode — invented citation numbers — at zero added latency.
-
-It does **not** verify that a cited passage entails the sentence citing it. That's entailment checking and requires an NLI model or LLM-as-judge per response; it's a deliberate trade-off. `citation_integrity = 0.89` measures how often the model *attempts* an invalid citation — user-facing output has zero fake citations by construction.
-
-### Graceful degradation
-
-Every external dependency has a fallback. **The failure mode is a worse answer, not an error.**
-
-| Failure | Behavior |
-|---|---|
-| Dense embedder down | Retrieval proceeds sparse-only |
-| Sparse embedder down | Retrieval proceeds dense-only |
-| Qdrant semantic cache down | Pipeline bypasses cache, serves fresh |
-| Qdrant docs collection down | `/readyz` → `not_ready`; health loop re-bootstraps |
-| Reranker down | Fusion scores used as-is |
-| Bedrock down | `deterministic_summarize` extractive fallback |
-| Any component: breaker open | Component skipped; fallback path taken |
-
-Each dependency (cache, retrieval, dense, sparse, reranker, llm) has an **independent circuit breaker** — a failing reranker does not cascade into cache failures.
-
-### Latency budget
-
-
-| Stage | Time |
-|---|---|
-| Auth + exact-cache lookup | ~50 ms |
-| Parallel dense + sparse embedding | ~100 ms |
-| Hybrid Qdrant search (dense + sparse, parallel) | ~150 ms |
-| RRF fusion (in-process) | ~2–5 ms |
-| Cross-encoder rerank (when triggered) | ~300 ms |
-| Bedrock generation (streamed) | ~2 s (TTFT < 1 s) |
-| **End-to-end** | **~2.6 s** |
-
+Every `[N]` in the answer is checked against the passage indices actually inserted into the prompt. Invalid citations are **stripped**; if stripping empties the answer, `deterministic_summarize` fires. This catches the dominant failure mode — invented citation numbers — at zero added latency. It does **not** verify that a cited passage entails the sentence citing it.
 
 ---
 
 ## Cloud Infrastructure
 
 Infrastructure is declared with **OpenTofu (Terraform)** and split across two providers. **AWS** hosts the compute and state: workloads run on **EKS** with an on-demand system nodegroup for platform services and **Karpenter** for elastically provisioning Spot instances for stateless, bursty inference workloads; all state lives in **S3** and **ECR**; container images are built deterministically and pushed via **GitHub Actions OIDC** — no long-lived credentials. **Cloudflare** sits at the edge: a single **Cloudflare Tunnel** terminates external traffic with SSL strict, provides DDoS mitigation, and exposes no public AWS IPs or load balancers.
-
 
 ---
 
@@ -264,18 +221,17 @@ Each record defines:
 
 ## Known Limitations
 
-- **No per-document access filtering.** Any authenticated user in an allowed domain can query the full corpus. Chunks already carry source-document metadata; the missing piece is a query-time filter against the user's group membership. This is the top gap for enterprise deployment.
-- **No deletion reconciliation.** Deleting a source document from S3 does not currently remove its chunks from Qdrant. The fix is a soft-tombstone step in the indexing CronJob — mark chunks deleted and filter at query time, so the operation is reversible and doesn't race with in-flight queries.
-- **Structural, not entailment-based, citation validation.** The current validator catches fake citation numbers but does not verify that a cited passage actually supports the sentence citing it. Full entailment checking requires an NLI model or LLM-as-judge per response and is a latency/cost trade-off. See the citation validation section above.
-- **Single LLM provider.** Bedrock is a single point of failure for generation. A router with an independent second provider (Anthropic direct, OpenAI) is on the roadmap; the design supports it because the LLM is stateless.
-- **No online evaluation.** Feedback signals are not collected. The offline metrics are meaningful in relative terms but may not reflect production behavior.
-- **Recall is capped by chunking and embedding model.** Recall@3 = 0.72 is bounded by fixed-size chunking and a small (384-dim, CPU) embedding model. Semantic chunking and a larger embedding model are the two highest-leverage levers, and both are measurable against the same golden set.
+- **No per-document access filtering.** Authenticated users can query the full corpus. Query-time group-based filtering is required for enterprise access control.
+- **No deletion reconciliation.** Deleting a source from S3 does not remove its Qdrant chunks. Soft tombstones with query-time filtering are planned.
+- **Structural citation validation only.** Invalid citation IDs are detected, but citation entailment is not verified.
+- **Single LLM provider.** Bedrock is currently the only generation provider.
+- **No online evaluation.** Production feedback signals are not yet collected.
+- **Retrieval recall depends on chunking and embeddings.** Recall@3 is currently 0.72; semantic chunking and a larger embedding model are the main improvement levers.
 
-### If I had one more sprint
+## If I Had One More Sprint
 
-- **1. Add query-time access filtering.** Chunks already carry source metadata; the missing piece is a group-membership filter on the Qdrant query path — metadata filtering for single-tenant, per-tenant collections for hard isolation. This is the single change that makes RAG8s deployable inside a real org.
-- **2. Add a second LLM provider behind a router.** Bedrock is a single point of failure for generation. The design supports this because the LLM is stateless — a config-shaped change, not an architectural one.
-
+1. **Add query-time access filtering.** Enforce group-based Qdrant filters; use per-tenant collections where hard isolation is required.
+2. **Add an LLM failover provider.** Route to a second provider when Bedrock is unavailable.
 
 ---
 
