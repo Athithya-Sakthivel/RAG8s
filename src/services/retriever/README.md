@@ -442,28 +442,3 @@ Note: The `debug` level has been removed. Use `info` for development diagnostics
 | `Dockerfile` | Multi-stage build, runs on port 8001 |
 
 ---
-
-## Production Checklist
-
-| Item | Status |
-|------|--------|
-| Auth handled externally | ✅ |
-| Prometheus metrics on `/metrics` | ✅ |
-| Structured JSON logs to stdout (no debug level) | ✅ |
-| Request ID propagation to downstream | ✅ |
-| Circuit breakers on all dependencies | ✅ |
-| Retry with exponential backoff | ✅ |
-| Graceful shutdown (30s timeout) | ✅ |
-| Fast health loop shutdown (0.5s intervals) | ✅ |
-| Metric label cardinality validated | ✅ |
-| Cache TTL with background cleanup | ✅ |
-| Streaming SSE with disconnect detection | ✅ |
-| IP-based rate limiting (60 req/min) | ✅ |
-| Startup/liveness/readiness probes | ✅ |
-| Citation validation (anti-hallucination) | ✅ |
-| Presigned S3 URLs (read-only, configurable TTL) | ✅ |
-| Headless service for direct pod access | ✅ |
-<<<<<<< Updated upstream
-=======
----
->>>>>>> Stashed changes

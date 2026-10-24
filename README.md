@@ -413,7 +413,7 @@ python3 src/infra/core/cloudflared_setup.py --write
 
 ## Phase 6 — Query Engine & User-Facing Services: Deploy the Inference Stack
 
-Launches the [retriever](src/services/retriever/README.md), [Chat UI + OIDC authentication](src/services/frontend), Valkey (for per-user rate limiting), and the [Cloudflared tunnel](https://developers.cloudflare.com/tunnel/). Configure OAuth credentials for Google, Microsoft, or both — enabling *either provider is sufficient* for user authentication.
+Launches the retriever, Chat UI with OIDC authentication, Valkey for per-user rate limiting, and a Cloudflare Tunnel. Configure Google OAuth, Microsoft OAuth, or both; either provider is sufficient for authentication.
 
 > **Create OAuth Credentials** [Google](https://oauth2-proxy.github.io/oauth2-proxy/configuration/providers/google/#usage) | [Microsoft](https://oauth2-proxy.github.io/oauth2-proxy/configuration/providers/ms_entra_id)
 
