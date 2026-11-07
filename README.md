@@ -1,17 +1,17 @@
-# RAG8s — Enterprise RAG Platform for Internal Knowledge Bases
+# RAG8s — End-to-End RAG Platform for Internal Knowledge Bases
 
-RAG8s is a production-focused Retrieval-Augmented Generation (RAG) platform built on Kubernetes (AWS EKS), comprising eight independently deployable microservices. It combines streaming inference, OIDC authentication, per-user rate limiting, GitOps deployments, Infrastructure as Code, Karpenter Spot autoscaling, and end-to-end observability.
+RAG8s is a production-focused Retrieval-Augmented Generation (RAG) platform built on Kubernetes (AWS EKS), comprising 8 independently deployable microservices. It combines streaming inference, OIDC authentication, per-user rate limiting, GitOps deployments, Infrastructure as Code, Karpenter Spot, and end-to-end observability.
 
-The platform implements the complete RAG lifecycle: document ingestion, preprocessing, sentence-aware chunking, vector indexing, hybrid retrieval, conditional reranking, and streaming LLM inference. Application-managed citations reference retrieved passages and link to original documents through pre-signed S3 URLs.
+> The platform implements the complete RAG lifecycle: document ingestion, preprocessing, sentence-aware chunking, vector indexing, hybrid retrieval, conditional reranking, and streaming LLM inference. Application-managed citations reference retrieved passages and link to original documents through pre-signed S3 URLs.
 
-RAG8s is designed for querying indexed company documentation, technical manuals, internal policies, and operational runbooks, where reliable retrieval and traceable sources matter more than real-time data ingestion.
+RAG8s is designed for querying indexed company documentation, technical manuals, internal policies, and operational runbooks, where reliable retrieval and **traceable sources matter more than real-time data ingestion**.
 
 ### Key Features
 
 - **Offline evaluation** — 75 curated test records tracked in MLflow. Latest results: groundedness **0.95**, citation integrity **0.89**, and recall@3 **0.72**. Evaluation uses `top_k=3` to stay within Bedrock rate limits; production defaults to `top_k=5`.
-- **Citation grounding** — the application assigns citation IDs to retrieved passages; the LLM references these predefined IDs. Invalid citation IDs are stripped, and valid citations link to source documents through pre-signed S3 URLs.
+- **Citation grounding** — the application assigns citation IDs to retrieved passages; the LLM references these predefined IDs. Invalid IDs are stripped. Valid **citations deep-link authenticated users to the exact page** and region via pre-signed S3 URLs.
 - **Cost and access control** — exact and semantic caching reduce redundant model calls. Rate limiting defaults to **5 requests/minute per authenticated user**, keyed by JWT subject rather than IP, spot EC2s for stateless. 
-- **Observability** — Prometheus metrics and 24 alerts, structured logs retained in ClickHouse for 30 days, and retrieval metadata for debugging.
+- **Observability** — Prometheus metrics and 24 alerts with inhibition rules, structured logs retained in ClickHouse for 30 days, and retrieval metadata for debugging.
 
 ## Explore the Platform
 
@@ -25,7 +25,7 @@ RAG8s is designed for querying indexed company documentation, technical manuals,
 
 ![RAG8s demo](src/scripts/archive/images/rag8s.gif)
 
-*The embedded GIF is a preview*. Open the [full demo](https://www.linkedin.com/posts/athithya-sakthivel-a23062341_rag-kubernetes-aws-ugcPost-7462146556369068032-HWum/) for a clearer view.
+*The embedded GIF is a preview.* Open the [full demo](https://www.linkedin.com/posts/athithya-sakthivel-a23062341_rag-kubernetes-aws-ugcPost-7462146556369068032-HWum/) which covers semantic caching, groundedness, rate limiting, and end-to-end latency.
 
 ---
 
@@ -45,6 +45,8 @@ A low-latency streaming pipeline with OIDC authentication, per-user rate limitin
 
 <img width="1536" height="1024" alt="RAG8s architecture" src="https://github.com/user-attachments/assets/f8c5ac0e-f5cf-4b7d-ad10-b21c64a36aa2" />
 
+---
+
 # RAG Pipeline Overview
 
 The operational heart of the system. Everything else — Kubernetes, IAM, observability — exists to make this pipeline reliable, debuggable, and cheap to run.
@@ -53,7 +55,7 @@ The operational heart of the system. Everything else — Kubernetes, IAM, observ
 
 ## 1. Document Extraction & Chunking (e.g., PDF)
 
-**PDF extraction** uses PyMuPDF for text, layout, and images, and pdfplumber for tables. Column layouts are reconstructed from text-block coordinates. Captions are associated with figures, and images larger than 3 KB are processed using RapidOCR at 300 DPI, with Tesseract as a fallback. Font artifacts are removed during cleaning.
+**PDF extraction** uses PyMuPDF for text, layout, and images, and pdfplumber for tables. Column layouts are reconstructed from text-block coordinates. Captions are associated with figures, and images larger than 3 KB are processed using **RapidOCR at 300 DPI** with Tesseract as a fallback. Font artifacts are removed during cleaning.
 
 **Chunking** preserves sentence boundaries and source traceability:
 
@@ -144,6 +146,8 @@ Infrastructure is managed with OpenTofu across AWS and Cloudflare.
 | [Valkey](https://valkey.io/topics/quickstart/) | Distributed rate limiting | Shared rate-limit counters across Retriever replicas; NetworkPolicy isolation |
 | [Cloudflared](https://developers.cloudflare.com/tunnel/) | Secure external connectivity | Cloudflare Tunnel to internal services; observability endpoints blocked at edge; Prometheus metrics |
 
+> **Note:** The 8 entries above are the deployable units counted by this platform — six application services and two infrastructure components (Valkey, Cloudflared). Stateful stores (Qdrant, ClickHouse) and the observability stack are provisioned separately and are not counted as microservices.
+
 ---
 
 ## Connectivity & Auth
@@ -161,7 +165,7 @@ External traffic enters through a single **Cloudflare Tunnel** with strict SSL a
 
 Built-in, no external SaaS required:
 
-- **Prometheus + Alertmanager** — 20+ alert rules, Slack notifications with inhibition rules
+- **Prometheus + Alertmanager** — 24 alert rules, Slack notifications with inhibition rules
 - **Grafana** — auto-discovered dashboards via ConfigMap sidecar
 - **Vector + ClickHouse** — structured JSON log aggregation with 30-day retention
 
@@ -231,12 +235,11 @@ The 75-record evaluation provides an initial signal across four metrics but may 
 ## Limitations
 
 - **Not designed for real-time ingestion.** Documents are indexed through a scheduled batch pipeline, making RAG8s better suited to internal knowledge bases, technical documentation, policies, and runbooks that update periodically rather than continuously.
+- **Retrieval recall depends on chunking and embeddings.** Recall@5 is expected to improve with the production default `top_k=5`. Further gains can be achieved through larger embedding models and an updated evaluation dataset.
 - **No per-document access filtering.** Authenticated users can query the full corpus. Query-time group-based filtering is required for enterprise access control.
 - **No deletion reconciliation.** Deleting a source from S3 does not remove its Qdrant chunks. Soft tombstones with query-time filtering are planned.
-- **Structural citation validation only.** Invalid citation IDs are detected, but citation entailment is not verified.
 - **Single LLM provider.** Bedrock is currently the only generation provider.
-- **Retrieval recall depends on chunking and embeddings.** Recall@5 is expected to improve with the production default `top_k=5`. Further gains can be achieved through larger embedding models and an updated evaluation dataset.
-  
+
 ---
 
 # Step-by-Step Deployment Guide
@@ -352,9 +355,11 @@ bash src/infra/core/argo_setup.sh --rollout
 
 ![Argo setup](src/scripts/archive/images/argo_setup.png)
 
+---
+
 ### 3.2 Bootstrap Karpenter for the stateless workloads
 
-[Karpenter](https://karpenter.sh/docs/) automatically provisions EC2 Spot nodes labeled `node-type=compute:NoSchedule` for stateless workloads. The Frontend, Retriever, Embedders, Reranker, Indexing CronJob, and Cloudflared tunnel are scheduled onto these nodes using matching tolerations, while a Pod Disruption Budget keeps Cloudflared available. Underutilized nodes are automatically consolidated after 15 minutes (`WhenEmptyOrUnderutilized`).
+**[Karpenter](src/scripts/eks/bootstrap_karpenter.sh)** provisions EC2 Spot nodes labeled `node-type=compute` with a `NoSchedule` taint; the **stateless workloads** carry matching tolerations to schedule there, and a Pod Disruption Budget keeps Cloudflare tunnel available. **Stateful stores** and the observability stack stay on the **on-demand EKS node group**, and underutilized Spot nodes consolidate after 15 minutes via the `WhenEmptyOrUnderutilized` policy.
 
 ```bash
 export GH_REPO= # replace with your full repo url (https://github.com/<USER_NAME/$REPO_NAME.git)
@@ -451,9 +456,9 @@ bash src/scripts/eks/observability_setup.sh
 
 ---
 
-## End-to-End System Complete
+## End-to-End System Deployed
 
-The deployment reproduces the **ground-truth configuration** shown in the project demo, including semantic caching, OAuth-authenticated per-user rate limiting, hybrid retrieval, and the complete RAG inference pipeline.
+The deployment reproduces the ground-truth configuration *as shown in the [full demo](https://www.linkedin.com/posts/athithya-sakthivel-a23062341_rag-kubernetes-aws-ugcPost-7462146556369068032-HWum/)*, including semantic caching, OAuth-authenticated per-user rate limiting, hybrid retrieval, and the complete RAG inference pipeline.
 
 | URL | Service |
 |------|---------|
