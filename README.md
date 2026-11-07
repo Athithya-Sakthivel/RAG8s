@@ -374,9 +374,9 @@ bash src/scripts/eks/bootstrap_karpenter.sh --rollout
 
 ## Phase 4 — Data Ingestion & Vector Storage: Deploy the Indexing Pipeline
 
-This phase sets up the complete document processing stack. It deploys Qdrant (a 3-node vector database for storing embeddings), FastEmbed services (three microservices for dense embeddings, sparse embeddings, and reranking), and finally the indexing CronJob that runs on a schedule.
+This phase sets up the complete document processing stack. It deploys Qdrant cluster, FastEmbed services, and finally the indexing CronJob that runs on a schedule.
 
-Once deployed, this pipeline automatically handles the full document lifecycle: upload a few PDFs and HTMLs to S3, ingest raw files from S3, convert them to text (including OCR for pages/slides with images), split them into smaller chunks, generate embeddings for each chunk, and index them into Qdrant for fast retrieval.
+Once deployed, this pipeline automatically handles the full document lifecycle: upload a few PDFs and HTMLs to S3, ingest raw files from S3, convert them to text (including OCR for pages/slides with images), split them into smaller chunks, generate embeddings for each chunk, index them into Qdrant for fast retrieval and conditionally performs qdrant backups.
 
 See the [indexing pipeline documentation](src/indexing_pipeline/README.md) for configuration details.
 
