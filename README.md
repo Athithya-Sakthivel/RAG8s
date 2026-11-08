@@ -1,17 +1,18 @@
 # RAG8s — End-to-End RAG Platform for Internal Knowledge Bases
 
-RAG8s is a production-focused Retrieval-Augmented Generation (RAG) platform built on Kubernetes (AWS EKS), comprising 8 independently deployable microservices. It combines streaming inference, OIDC authentication, per-user rate limiting, GitOps deployments, Infrastructure as Code, Karpenter Spot, and end-to-end observability.
+RAG8s is a production-oriented Retrieval-Augmented Generation (RAG) platform built on Kubernetes (AWS EKS), comprising 8 independently deployable microservices. It integrates streaming inference, OIDC authentication, per-user rate limiting, GitOps deployments, Infrastructure as Code, Karpenter Spot capacity, and end-to-end observability.
 
-> The platform implements the complete RAG lifecycle: document ingestion, preprocessing, sentence-aware chunking, vector indexing, hybrid retrieval, conditional reranking, and streaming LLM inference. Application-managed citations reference retrieved passages and link to original documents through pre-signed S3 URLs.
+The platform implements the complete RAG lifecycle: document ingestion, preprocessing, sentence-aware chunking, vector indexing, hybrid retrieval, conditional reranking, and streaming LLM inference. Application-managed citations link generated answers to retrieved passages and original documents through pre-signed S3 URLs.
 
-RAG8s is designed for querying indexed company documentation, technical manuals, internal policies, and operational runbooks, where reliable retrieval and **traceable sources matter more than real-time data ingestion**.
+RAG8s targets internal knowledge bases containing company documentation, technical manuals, policies, and operational runbooks, prioritizing reliable retrieval and traceable sources over real-time data ingestion.
 
 ### Key Features
 
-- **Offline evaluation** — 75 curated test records tracked in MLflow. Latest results: groundedness **0.95**, citation integrity **0.89**, and recall@3 **0.72**. Evaluation uses `top_k=3` to stay within Bedrock rate limits; production defaults to `top_k=5`.
-- **Citation grounding** — the application assigns citation IDs to retrieved passages; the LLM references these predefined IDs. Invalid IDs are stripped. Valid **citations deep-link authenticated users to the exact page** and region via pre-signed S3 URLs.
-- **Cost and access control** — exact and semantic caching reduce redundant model calls. Rate limiting defaults to **5 requests/minute per authenticated user**, keyed by JWT subject rather than IP, spot EC2s for stateless. 
-- **Observability** — Prometheus metrics and 24 alerts with inhibition rules, structured logs retained in ClickHouse for 30 days, and retrieval metadata for debugging.
+- **Citation grounding** — The application assigns citation IDs to retrieved passages, which the LLM references. Invalid IDs are stripped; valid citations deep-link authenticated users to the exact document page and region through pre-signed S3 URLs.
+- **Offline evaluation** — 75 curated test records tracked in MLflow. Latest results: groundedness **0.95**, citation integrity **0.89**, and recall@5 **0.72**.
+- **Cost and access control** — Exact and semantic caching reduce redundant model calls. Rate limiting defaults to **5 requests/minute per authenticated user**, keyed by JWT subject rather than IP.
+- **Observability** — Prometheus metrics, 24 alerts with inhibition rules, structured logs retained in ClickHouse for 30 days, and retrieval metadata for debugging.
+
 
 ## Explore the Platform
 
@@ -195,10 +196,15 @@ cat src/offline_eval/offline_eval_artifacts/summary.json
 
 ```json
 {
-  "meta": { "records": 75, "top_k": 3 },
-  "performance": { "success_rate": 1.0 },
+  "meta": {
+    "records": 75
+  },
+  "performance": {
+    "success_rate": 1.0
+  },
   "retrieval": {
-    "recall_at_3": 0.72,
+    "recall_at_k": 0.72,
+    "hit_rate_at_k": 0.72,
     "mrr": 0.5793
   },
   "generation": {
@@ -209,7 +215,9 @@ cat src/offline_eval/offline_eval_artifacts/summary.json
   "citations": {
     "citation_integrity": 0.8933
   },
-  "errors": { "rate": 0.0 }
+  "errors": {
+    "rate": 0.0
+  }
 }
 ```
 
@@ -235,10 +243,10 @@ The 75-record evaluation provides an initial signal across four metrics but may 
 ## Limitations
 
 - **Not designed for real-time ingestion.** Documents are indexed through a scheduled batch pipeline, making RAG8s better suited to internal knowledge bases, technical documentation, policies, and runbooks that update periodically rather than continuously.
-- **Retrieval recall depends on chunking and embeddings.** Recall@5 is expected to improve with the production default `top_k=5`. Further gains can be achieved through larger embedding models and an updated evaluation dataset.
+- **AWS vendor lock-in** — The platform is tightly coupled to AWS services, including Amazon Bedrock for LLM inference, EKS for orchestration, S3 for document storage, and AWS IAM for identity and access management.
+- **Retrieval quality and evaluation improvements.** Further improvements will come from a representative evaluation dataset, systematic retrieval experiments, and iterative tuning of chunking strategies, embedding models, and retrieval parameters.
 - **No per-document access filtering.** Authenticated users can query the full corpus. Query-time group-based filtering is required for enterprise access control.
 - **No deletion reconciliation.** Deleting a source from S3 does not remove its Qdrant chunks. Soft tombstones with query-time filtering are planned.
-- **Single LLM provider.** Bedrock is currently the only generation provider.
 
 ---
 
