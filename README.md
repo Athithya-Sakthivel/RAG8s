@@ -204,13 +204,11 @@ cat src/offline_eval/offline_eval_artifacts/summary.json
   },
   "retrieval": {
     "recall_at_k": 0.72,
-    "hit_rate_at_k": 0.72,
     "mrr": 0.5793
   },
   "generation": {
     "fact_coverage": 0.7769,
     "groundedness": 0.9459,
-    "response_similarity": 0.2498
   },
   "citations": {
     "citation_integrity": 0.8933
