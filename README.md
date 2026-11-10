@@ -1,18 +1,22 @@
 # RAG8s — End-to-End RAG Platform for Internal Knowledge Bases
 
-RAG8s is a production-oriented Retrieval-Augmented Generation (RAG) platform built on Kubernetes (AWS EKS), comprising 8 independently deployable microservices. It integrates streaming inference, OIDC authentication, per-user rate limiting, GitOps deployments, Infrastructure as Code, Karpenter Spot capacity, and end-to-end observability.
+**RAG8s** is a production-oriented **Retrieval-Augmented Generation (RAG)** platform on **Kubernetes (AWS EKS)**.
+It is built as **8 independently deployable microservices** and covers the full RAG lifecycle: **document ingestion and chunking**, **hybrid retrieval with conditional reranking**, and **streaming LLM inference**. **Citations are assigned by the application rather than the model**, linking answers to retrieved passages and to the original documents through **pre-signed S3 URLs**.
 
-The platform implements the complete RAG lifecycle: document ingestion, preprocessing, sentence-aware chunking, vector indexing, hybrid retrieval, conditional reranking, and streaming LLM inference. Application-managed citations link generated answers to retrieved passages and original documents through pre-signed S3 URLs.
+**RAG8s** is designed for **internal knowledge bases** — company documentation, technical manuals, policies, and operational runbooks — where content is **curated and updates periodically**. It is **not built for real-time ingestion** of continuously changing data streams
 
-RAG8s targets internal knowledge bases containing company documentation, technical manuals, policies, and operational runbooks, prioritizing reliable retrieval and traceable sources over real-time data ingestion.
+The platform also provides **OIDC authentication**, **per-user rate limiting**, **GitOps deployments**, **Infrastructure as Code**, **Karpenter Spot capacity for stateless**, and **end-to-end observability**.
+
+---
 
 ### Key Features
 
-- **Citation grounding** — The application assigns citation IDs to retrieved passages, which the LLM references. Invalid IDs are stripped; valid citations deep-link authenticated users to the exact document page and region through pre-signed S3 URLs.
-- **Offline evaluation** — 75 curated test records tracked in MLflow. Latest results: groundedness **0.95**, citation integrity **0.89**, and recall@5 **0.72**.
-- **Cost and access control** — Exact and semantic caching reduce redundant model calls. Rate limiting defaults to **5 requests/minute per authenticated user**, keyed by JWT subject rather than IP.
+- **Citation Grounding** — The application assigns citation IDs to retrieved passages, which the LLM references. Invalid IDs are stripped; valid citations deep-link authenticated users to the exact document page and region through pre-signed S3 URLs.
+- **Offline Evaluation** — 75 curated test records tracked in MLflow. Latest results: groundedness **0.95**, citation integrity **0.89**, and recall@5 **0.72**.
+- **Cost and Access Control** — Exact and semantic caching reduce redundant model calls. Rate limiting defaults to **5 requests/minute per authenticated user**, keyed by JWT subject rather than IP.
 - **Observability** — Prometheus metrics, 24 alerts with inhibition rules, structured logs retained in ClickHouse for 30 days, and retrieval metadata for debugging.
 
+---
 
 ## Explore the Platform
 
@@ -26,7 +30,7 @@ RAG8s targets internal knowledge bases containing company documentation, technic
 
 ![RAG8s demo](src/scripts/archive/images/rag8s.gif)
 
-*The embedded GIF is a preview.* Open the [full demo](https://www.linkedin.com/posts/athithya-sakthivel-a23062341_rag-kubernetes-aws-ugcPost-7462146556369068032-HWum/) which covers semantic caching, groundedness, rate limiting, and end-to-end latency.
+**The embedded GIF is a preview Open the [full demo](https://www.linkedin.com/posts/athithya-sakthivel-a23062341_rag-kubernetes-aws-ugcPost-7462146556369068032-HWum/) which covers semantic caching, groundedness, rate limiting, and end-to-end latency.**
 
 ---
 
@@ -34,13 +38,9 @@ RAG8s targets internal knowledge bases containing company documentation, technic
 
 The RAG lifecycle is separated into two independent execution planes:
 
-**[Batch Indexing Plane](src/indexing_pipeline/README.md)**
+**[Batch Indexing Plane](src/indexing_pipeline/README.md)** — An **incremental, idempotent** CronJob pipeline that ingests raw documents (PDF, DOCX, audio, images, CSV, Markdown, HTML, …) from S3, normalizes and OCRs them, splits them into **traceable chunks**, generates dense and sparse embeddings via stateless **FastEmbed** microservices, and upserts into **Qdrant** with full **positional metadata**. Backups are triggered automatically by **configurable thresholds**.
 
-An incremental, idempotent pipeline that ingests documents from S3, extracts and normalizes content, performs OCR, creates traceable chunks, generates dense and sparse embeddings, and upserts them into Qdrant with positional metadata. Configurable thresholds trigger automatic backups.
-
-**[Online Inference Plane](src/services/inference_pipeline.md)**
-
-A low-latency streaming pipeline with OIDC authentication, per-user rate limiting, exact and semantic caching, hybrid Qdrant retrieval with Reciprocal Rank Fusion (RRF), and conditional cross-encoder reranking. Answers stream from AWS Bedrock with predefined citation IDs validated against retrieved passages and links to original documents via pre-signed S3 URLs.
+**[Online Inference Plane](src/services/inference_pipeline.md)** — A **low-latency streaming** request path that authenticates users via **OIDC**, performs exact and semantic cache lookups, embeds the query (dense and sparse in parallel), executes **hybrid Qdrant search with Reciprocal Rank Fusion**, optionally re-ranks with a **cross-encoder**, builds a **strictly-grounded numbered prompt**, and streams the answer via **AWS Bedrock**. Every response is **citation-validated** — hallucinated references are stripped, and users can open original documents with one-click **pre-signed S3 URLs**.
 
 ---
 
@@ -50,42 +50,44 @@ A low-latency streaming pipeline with OIDC authentication, per-user rate limitin
 
 # RAG Pipeline Overview
 
-The operational heart of the system. Everything else — Kubernetes, IAM, observability — exists to make this pipeline reliable, debuggable, and cheap to run.
+The operational heart of the system. Everything else — Kubernetes, IAM, observability — exists to make this pipeline **reliable, debuggable, and cheap to run**.
 
-> Inference Control Flow: exact cache → parallel dense+sparse embed → semantic cache → hybrid Qdrant with RRF → conditional cross-encoder rerank → numbered prompt → Bedrock with guardrails → structural citation validation → background cache write-back. Every external dependency has an independent circuit breaker and a fallback, so the failure mode is a worse answer, not an error.
+> **Inference control flow:** exact cache → parallel dense+sparse embed → semantic cache → hybrid Qdrant + RRF → conditional cross-encoder rerank → numbered prompt → Bedrock with guardrails → structural citation validation → background cache write-back. Every external dependency has an independent **circuit breaker and fallback**, so the failure mode is a **worse answer, not an error**.
 
-## 1. Document Extraction & Chunking (e.g., PDF)
+<details>
+<summary><strong>1. Document Extraction &amp; Chunking (e.g., PDF)</strong></summary>
 
-**PDF extraction** uses PyMuPDF for text, layout, and images, and pdfplumber for tables. Column layouts are reconstructed from text-block coordinates. Captions are associated with figures, and images larger than 3 KB are processed using **RapidOCR at 300 DPI** with Tesseract as a fallback. Font artifacts are removed during cleaning.
+**PDF extraction** uses **PyMuPDF** for text, layout, and images, and **pdfplumber** for tables. Column layouts are reconstructed from text-block coordinates. Captions are tied to figures, and images larger than 3 KB are processed with **RapidOCR at 300 DPI**, falling back to **Tesseract**. Font artifacts are stripped during cleaning.
 
-**Chunking** preserves sentence boundaries and source traceability:
+**Chunking** preserves **sentence boundaries** and **source traceability**:
 
-- spaCy sentence segmentation, with fallback strategies.
+- **spaCy** sentence segmentation, with fallback strategies.
 - Token counting with `tiktoken` (`cl100k_base`).
-- Maximum chunk size: `512` tokens by default.
-- Sentence overlap: `2` by default.
-- Minimum chunk size: `100` tokens by default; smaller chunks merge with the previous chunk.
+- Defaults: **512-token** max chunk, **2-sentence** overlap, **100-token** minimum (smaller chunks merge into the previous).
 - Oversized sentences are split to prevent content loss.
 
-Each chunk stores deterministic identifiers, source and page metadata, parser version, semantic region, and associated figure, OCR, caption, or table content.
+Each chunk stores a deterministic ID, source and page metadata, parser version, semantic region, and any associated figure, OCR, caption, or table content.
+
+</details>
 
 ## 2. Retrieval
 
-Retrieval follows a fixed workflow rather than an agent loop.
+Retrieval follows a fixed workflow, not an agent loop.
 
-1. **Exact cache:** Returns cached answers using a key derived from the normalized query, corpus and prompt versions, retrieval version, model, tenant, `top_k`, and `fetch_k`.
-2. **Parallel embeddings:** Dense and sparse query embeddings are generated concurrently, each protected by an independent circuit breaker.
-3. **Semantic cache:** Searches using a strict similarity threshold of approximately `0.84`, followed by a relaxed threshold of `0.78`.
-4. **Hybrid search:** Qdrant retrieves dense and sparse results in parallel and combines them using Reciprocal Rank Fusion (RRF).
-5. **Conditional reranking:** A cross-encoder reranks results when retrieval confidence is low or the top two candidates have similar scores.
+1. **Exact cache:** Returns cached answers keyed on the normalized query, corpus/prompt/retrieval versions, model, tenant, `top_k`, and `fetch_k`.
+2. **Parallel embeddings:** Dense and sparse query embeddings are generated concurrently, each behind its own **circuit breaker**.
+3. **Semantic cache:** Searches at a strict similarity threshold of ~**0.84**, then a relaxed **0.78**.
+4. **Hybrid search:** Qdrant retrieves dense and sparse results in parallel and fuses them with **Reciprocal Rank Fusion (RRF)**.
+5. **Conditional reranking:** A **cross-encoder** reranks when retrieval confidence is low or the top two candidates score similarly.
 6. **Prompt construction:** Retrieved passages are numbered and inserted into a grounded prompt.
-7. **Generation:** Amazon Bedrock streams the answer with AWS Guardrails enabled.
-8. **Citation validation:** The application validates generated citation references against the passages supplied in the prompt.
-9. **Cache write-back:** Results are cached in a background task without delaying the response stream.
+7. **Generation:** Amazon Bedrock streams the answer with **AWS Guardrails** enabled.
+8. **Citation validation:** Generated citation references are checked against the passages supplied in the prompt.
+9. **Cache write-back:** Results are cached in a background task, off the response stream.
 
-### Hybrid Ranking: Reciprocal Rank Fusion (RRF)
+<details>
+<summary><strong>Hybrid ranking: Reciprocal Rank Fusion (RRF)</strong></summary>
 
-Reciprocal Rank Fusion combines dense and sparse results using their ranks rather than raw scores, allowing the two retrieval methods to be merged without requiring their score scales to match.
+RRF merges dense and sparse results by **rank rather than raw score**, so the two methods' score scales don't need to match.
 
 ```text
 RRF(d) = Σ [1 / (60 + rank_r(d))]
@@ -96,31 +98,36 @@ Where:
 - `d` is a document.
 - `R` is the set of ranked result lists.
 - `rank_r(d)` is the position of document `d` in list `r`.
-- `60` is the RRF constant, which reduces the influence of lower-ranked results.
+- **`60`** is the RRF constant, which dampens the influence of lower-ranked results.
 
-### Reranking
+</details>
 
-Reranking runs only when needed. Normalized reranker and fusion scores are blended using a configurable weight, `α`. Candidates outside the reranking pool retain their relative order and follow the reranked results. If reranking fails, the system falls back to the original fusion ranking.
+<details>
+<summary><strong>Reranking</strong></summary>
+
+Reranking runs **only when needed**. Normalized reranker and fusion scores are blended by weight **α**; candidates outside the rerank pool keep their order and follow the reranked results. On failure, the system **falls back to the original fusion ranking**.
+
+</details>
 
 ## 3. Citation Grounding
 
-**Citations are assigned by the application, not invented by the LLM.** Retrieved passages receive numbered identifiers (`[1]`, `[2]`, etc.) before being added to the prompt. The LLM references these identifiers in its answer.
+**Citations are assigned by the application, not invented by the LLM.** Passages receive numbered identifiers (`[1]`, `[2]`, …) before entering the prompt; the LLM cites those identifiers.
 
-After generation, the application checks every citation against the supplied passages and removes invalid references. If validation leaves the answer empty, `deterministic_summarize` provides a fallback.
+After generation, the application checks every citation against the supplied passages and removes invalid references. If validation leaves the answer empty, **`deterministic_summarize`** provides a fallback.
 
-This prevents invalid citation IDs but does not verify whether a cited passage semantically supports the associated claim.
+This catches invalid IDs but **does not verify that a cited passage actually supports its claim**.
 
 ## 4. Caching and Resilience
 
 - **Exact cache:** Avoids repeated retrieval and generation for identical requests.
 - **Semantic cache:** Reuses answers for sufficiently similar queries; cache hits are promoted to the exact cache.
-- **Expiration:** Entries expire according to env var `CACHE_TTL_SECONDS` and are removed by a background cleanup loop.
-- **Fault tolerance:** Independent circuit breakers and fallbacks allow degraded operation when external components fail.
-- **Observability:** Responses expose retrieval mode, dense and sparse result counts, fused result counts, and reranking metadata.
+- **Expiration:** Entries expire per `CACHE_TTL_SECONDS` and are removed by a background cleanup loop.
+- **Fault tolerance:** Independent circuit breakers and fallbacks allow **degraded operation** when external components fail.
+- **Observability:** Responses expose retrieval mode, dense/sparse/fused result counts, and reranking metadata.
 
 ## 5. Embedding and Generation Models
 
-Embeddings are self-hosted because changing the embedding model requires re-embedding the corpus and rebuilding the Qdrant index. Generation uses Amazon Bedrock, allowing the LLM to change independently without re-indexing the corpus.
+Embeddings are **self-hosted**, because changing the embedding model means **re-embedding the corpus and rebuilding the Qdrant index**. Generation uses **Amazon Bedrock**, so the LLM can change **without re-indexing**.
 
 ---
 
@@ -143,52 +150,50 @@ Infrastructure is managed with OpenTofu across AWS and Cloudflare.
 | [Dense Embedder](src/services/dense/README.md) | Dense vector generation | **CPU by default**, FastEmbed, `BAAI/bge-small-en-v1.5`, 384-dimensional normalized vectors |
 | [Sparse Embedder](src/services/sparse/README.md) | Sparse vector generation | **CPU by default**, FastEmbed, `Qdrant/minicoil-v1`, stateless |
 | [Reranker](src/services/reranker/README.md) | Document relevance scoring | **CPU by default**, cross-encoder `Xenova/ms-marco-MiniLM-L-6-v2`, conditionally triggered |
-| [Indexing CronJob](src/indexing_pipeline/README.md) | Batch document ingestion | Document conversion → chunking → embedding → Qdrant upserts → [conditional backups](https://github.com/Athithya-Sakthivel/RAG8s/blob/main/src/indexing_pipeline/README.md#trigger-logic) |
+| [Indexing CronJob](src/indexing_pipeline/README.md) | Batch document ingestion | Document conversion → chunking → embedding → Qdrant upserts → [conditional backups](src/indexing_pipeline/README.md#trigger-logic) |
 | [Valkey](https://valkey.io/topics/quickstart/) | Distributed rate limiting | Shared rate-limit counters across Retriever replicas; NetworkPolicy isolation |
 | [Cloudflared](https://developers.cloudflare.com/tunnel/) | Secure external connectivity | Cloudflare Tunnel to internal services; observability endpoints blocked at edge; Prometheus metrics |
 
 > **Note:** The 8 entries above are the deployable units counted by this platform — six application services and two infrastructure components (Valkey, Cloudflared). Stateful stores (Qdrant, ClickHouse) and the observability stack are provisioned separately and are not counted as microservices.
 
----
-
 ## Connectivity & Auth
 
-External traffic enters through a single **Cloudflare Tunnel** with strict SSL and no publicly exposed origin IPs or load balancers. **Google and Microsoft OAuth** provide authentication, with short-lived JWTs and domain allowlists.
+External traffic enters through a **single Cloudflare Tunnel** with **strict SSL** and **no publicly exposed origin IPs or load balancers**. **Google and Microsoft OAuth** provide authentication, with **short-lived JWTs** and **domain allowlists**.
 
 **DDoS mitigation and rate limiting:**
-- **Cloudflare edge:** DDoS mitigation before traffic reaches the cluster.
-- **Per-user:** 5 requests/minute at the frontend, keyed by JWT subject, to limit LLM spend.
-- **Per-IP:** 60 requests/minute on `/generate/stream` and 30/minute on `/presign` at the Retriever.
+- **Cloudflare edge:** DDoS mitigation **before traffic reaches the cluster**.
+- **Per-user:** **5 requests/minute** at the frontend, keyed by **JWT subject**, to limit LLM spend.
+- **Per-IP:** **60 requests/minute** on `/generate/stream` and **30/minute** on `/presign` at the Retriever.
 
 ---
 
 ## Observability
 
-Built-in, no external SaaS required:
+**Built-in, no external SaaS required:**
 
-- **Prometheus + Alertmanager** — 24 alert rules, Slack notifications with inhibition rules
-- **Grafana** — auto-discovered dashboards via ConfigMap sidecar
-- **Vector + ClickHouse** — structured JSON log aggregation with 30-day retention
+- **Prometheus + Alertmanager** — **24 alert rules**, Slack notifications with **inhibition rules**
+- **Grafana** — **auto-discovered dashboards** via ConfigMap sidecar
+- **Vector + ClickHouse** — structured JSON log aggregation with **30-day retention**
 
 ---
 
 ## Security
 
-Layered across the full stack:
+**Layered across the full stack:**
 
-- **Edge:** Cloudflare Tunnel with SSL strict and endpoint filtering
-- **Auth:** OIDC with PKCE and CSRF state protection, ES256 JWTs (15-min TTL), per-provider domain/org/tenant allowlists
-- **Network:** Kubernetes NetworkPolicies isolating namespaces by function
-- **IAM:** IRSA for least-privilege AWS access, GitHub Actions OIDC with per-repo roles
-- **Runtime:** Read-only root filesystems, non-root containers, no privileged pods
-- **CI/CD:** Pre-commit Gitleaks hook + CI-side scanning (Gitleaks, Trivy, OpenGrep) on every commit
-- **GitOps:** Argo CD reconciles cluster state from Git, self-heals drift, rollbacks via `git revert`
+- **Edge:** Cloudflare Tunnel with **strict SSL** and **endpoint filtering**
+- **Auth:** OIDC with **PKCE and CSRF state protection**, **ES256 JWTs (15-min TTL)**, per-provider **domain/org/tenant allowlists**
+- **Network:** Kubernetes **NetworkPolicies** isolating namespaces by function
+- **IAM:** **IRSA** for least-privilege AWS access, **GitHub Actions OIDC** with per-repo roles
+- **Runtime:** **Read-only root filesystems**, **non-root containers**, no privileged pods
+- **CI/CD:** Pre-commit **Gitleaks** hook + CI-side scanning (**Gitleaks, Trivy, OpenGrep**) on every commit
+- **GitOps:** **Argo CD** reconciles cluster state from Git, **self-heals drift**, rollbacks via `git revert`
 
 ---
 
 ## Offline Evaluation
 
-Automated evaluation against a 75-record golden dataset, tracked in MLflow.
+Offline evaluation against a 75-record golden dataset, tracked in MLflow.
 
 ```
 cat src/offline_eval/offline_eval_artifacts/summary.json
@@ -228,23 +233,17 @@ Each record defines:
 - `reference_answer` — a hand-written ground-truth answer
 - `expected_facts[]` — the atomic facts that must appear in a complete answer
 
-The 75-record evaluation provides an initial signal across four metrics but may miss rare failure modes. Expanding to 500+ records, including adversarial cases, is planned.
+The 75-record evaluation provides an initial signal across four metrics but may miss rare failure modes. 
 
-### Eval caveats
-
-- **Offline evaluation was run with `top_k=3`** to stay within Bedrock rate limits across the 75-record set. Production default is `top_k=5`, so recall is expected to be higher in operation. The next run will report both recall@3 and recall@5.
-- **LLM-as-judge has biases.** It correlates well with human judgment but is not a substitute for it. A human-labeled subset for calibration is on the roadmap.
-- **No online evaluation yet.** Feedback signals (thumbs, citation clicks) are not collected; offline metrics can drift from production behavior.
-  
 ---
 
 ## Limitations
 
-- **Not designed for real-time ingestion.** Documents are indexed through a scheduled batch pipeline, making RAG8s better suited to internal knowledge bases, technical documentation, policies, and runbooks that update periodically rather than continuously.
-- **AWS vendor lock-in** — The platform is tightly coupled to AWS services, including Amazon Bedrock for LLM inference, EKS for orchestration, S3 for document storage, and AWS IAM for identity and access management.
-- **Retrieval quality and evaluation improvements.** Further improvements will come from a representative evaluation dataset, systematic retrieval experiments, and iterative tuning of chunking strategies, embedding models, and retrieval parameters.
-- **No per-document access filtering.** Authenticated users can query the full corpus. Query-time group-based filtering is required for enterprise access control.
-- **No deletion reconciliation.** Deleting a source from S3 does not remove its Qdrant chunks. Soft tombstones with query-time filtering are planned.
+- **Not designed for real-time ingestion** — Documents are indexed through a **scheduled batch pipeline**, making RAG8s better suited to internal knowledge bases, technical documentation, policies, and runbooks that update **periodically rather than continuously**.
+- **AWS vendor lock-in** — The platform is tightly coupled to AWS services, including **Amazon Bedrock** for LLM inference, **EKS** for orchestration, **S3** for document storage, and **AWS IAM** for identity and access management.
+- **Retrieval quality on a heterogeneous corpus** — Documents are a **random collection with very different, unpredictable structure**, the main driver of the current **recall@5 of 0.72**: no single chunking, embedding, or retrieval configuration fits all of them. Gains will come from a **representative evaluation dataset**, systematic retrieval experiments, and **iterative tuning**.
+- **No per-document access filtering** — Authenticated users can query the **full corpus**. **Query-time group-based filtering** is required for enterprise access control.
+- **No deletion reconciliation** — Deleting a source from **S3** does not remove its **Qdrant** chunks. **Soft tombstones** with query-time filtering are planned.
 
 ---
 
